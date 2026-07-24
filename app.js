@@ -58,15 +58,31 @@
   }
   function gradient(g){if(!g?.colors)return '';const dirs={RightBottom:'135deg',LeftBottom:'45deg',RightTop:'225deg',LeftTop:'315deg',Right:'90deg',Bottom:'180deg'};return `linear-gradient(${dirs[g.direction]||'135deg'},${g.colors.map(x=>`${cssColor(x[0])} ${x[1]*100}%`).join(',')})`}
   function applyStyles(el,c,local){const s=c.styles||{}, st=el.style, bound=v=>evalBinding(v,local); if(s.width!=null)st.width=s.width+'px';if(s.height!=null)st.height=s.height+'px';if(s.padding!=null)st.padding=box(s.padding);if(s.margin!=null)st.margin=box(s.margin);if(s.borderRadius!=null)st.borderRadius=s.borderRadius+'px';if(s.clip)st.overflow='hidden';if(s.backgroundColor)st.backgroundColor=cssColor(bound(s.backgroundColor));if(s.linearGradient)st.backgroundImage=gradient(s.linearGradient);else if(s.backgroundImage){const bg=bound(s.backgroundImage);st.backgroundImage=`url("${previewAssetPath(bg)}")`;st.backgroundSize='cover';st.backgroundPosition='center'}if(s.fontSize!=null)st.fontSize=s.fontSize+'px';if(s.fontWeight!=null)st.fontWeight=s.fontWeight;if(s.fontColor)st.color=cssColor(bound(s.fontColor));if(s.textAlign)st.textAlign=s.textAlign;if(s.opacity!=null)st.opacity=s.opacity;if(s.borderWidth)st.border=`${s.borderWidth}px solid ${cssColor(bound(s.borderColor||'#000'))}`;if(s.shadow)st.boxShadow=`${s.shadow.offsetX||0}px ${s.shadow.offsetY||0}px ${s.shadow.radius||0}px ${cssColor(bound(s.shadow.color))}`;if(s.flexGrow!=null)st.flexGrow=s.flexGrow;if(s.flexShrink!=null)st.flexShrink=s.flexShrink;
-    if(c.component==='Row'||c.component==='Column'){st.display='flex';st.flexDirection=c.component==='Row'?'row':'column';st.gap=(c.itemMargin||0)+'px';st.justifyContent=mapAlign(s.justifyContent);st.alignItems=mapAlign(s.alignItems);if(c.wrap)st.flexWrap='wrap'}
+    if(c.component==='Row'||c.component==='Column'||c.component==='List'){
+      const isList=c.component==='List', direction=isList?(s.listDirection==='horizontal'?'row':'column'):(c.component==='Row'?'row':'column');
+      st.display='flex';st.flexDirection=direction;st.gap=((isList?c.space:c.itemMargin)||0)+'px';st.justifyContent=mapAlign(s.justifyContent);st.alignItems=mapAlign(s.alignItems);if(c.wrap)st.flexWrap='wrap';
+      if(isList)st.overflow='hidden';
+    }
     if(c.component==='Stack'){st.position='relative';st.display='grid';st.placeItems=stackAlign(s.alignContent);[...el.children].forEach(x=>{x.style.gridArea='1 / 1'})}
   }
   function mapAlign(v){return ({start:'flex-start',end:'flex-end',center:'center',spaceBetween:'space-between',spaceAround:'space-around',spaceEvenly:'space-evenly'}[v]||v||'flex-start')}
   function stackAlign(v){return ({topStart:'start',top:'start center',topEnd:'start end',start:'center start',center:'center',end:'center end',bottomStart:'end start',bottom:'end center',bottomEnd:'end end'}[v]||'center')}
   function makeNode(id,local){const c=state.map.get(id);if(!c){const x=document.createElement('div');x.textContent=`缺失: ${id}`;return x}const el=document.createElement('div');el.className='dsl-node';el.dataset.id=c.id;el.dataset.label=`${c.component} · ${c.id}`;el.draggable=c.id!==state.update.updateComponents.root;
     if(containerTypes.has(c.component)){let ids=Array.isArray(c.children)?c.children:[];ids.forEach(cid=>el.appendChild(makeNode(cid,local)))}
-    else if(c.component==='Text'){el.textContent=evalBinding(c.content,local)??'';el.style.whiteSpace='pre-wrap';el.style.display='flex';el.style.alignItems='center';if(c.styles?.textAlign==='center')el.style.justifyContent='center';if(c.styles?.textAlign==='end')el.style.justifyContent='flex-end'}
-    else if(c.component==='Button'){el.textContent=evalBinding(c.label,local)??'按钮';el.style.display='grid';el.style.placeItems='center'}
+    else if(c.component==='Text'){
+      const s=c.styles||{}, maxLines=Number(s.maxLines), overflow=s.textOverflow==='ellipsis'?'ellipsis':'clip';
+      el.textContent=evalBinding(c.content,local)??'';el.style.display='flex';el.style.alignItems='center';
+      if(maxLines===1){el.style.whiteSpace='nowrap';el.style.overflow='hidden';el.style.textOverflow=overflow}
+      else if(maxLines>1){el.style.overflow='hidden';el.style.display='-webkit-box';el.style.webkitBoxOrient='vertical';el.style.webkitLineClamp=String(maxLines)}
+      else el.style.whiteSpace='pre-wrap';
+      if(s.textAlign==='center')el.style.justifyContent='center';if(s.textAlign==='end')el.style.justifyContent='flex-end'
+    }
+    else if(c.component==='Button'){
+      const label=evalBinding(c.label,local)??'按钮';
+      el.textContent=label;el.style.display='grid';el.style.placeItems='center';el.style.whiteSpace='nowrap';
+      if(c.styles?.letterSpacing!=null)el.style.letterSpacing=c.styles.letterSpacing+'px';
+      else if(/[\u3400-\u9fff]/.test(label))el.style.letterSpacing='-1px';
+    }
     else if(c.component==='Image'){const img=document.createElement('img');const src=evalBinding(c.src,local),previewSrc=previewAssetPath(src);img.alt=c.id;img.style.width='100%';img.style.height='100%';img.style.objectFit=c.styles?.objectFit||'contain';const showPlaceholder=()=>{img.style.display='none';el.classList.add('image-placeholder');el.title=src||'';el.style.display='grid';el.style.placeItems='center';el.style.color='#8c94a5';el.style.background='repeating-linear-gradient(45deg,#eef0f4,#eef0f4 4px,#e5e8ee 4px,#e5e8ee 8px)';if(!el.querySelector('.asset-missing')){const mark=document.createElement('span');mark.className='asset-missing';mark.textContent='▧';el.appendChild(mark)}};if(previewSrc){img.src=previewSrc;img.onerror=showPlaceholder}else showPlaceholder();el.appendChild(img)}
     else if(c.component==='Progress'){const value=Number(evalBinding(c.value,local))||0,total=Number(evalBinding(c.total,local))||100,p=Math.max(0,Math.min(100,value/total*100));if(c.styles?.type==='ring'){el.style.borderRadius='50%';el.style.background=`conic-gradient(${cssColor(c.styles.color||'#5b5ce2')} ${p}%,${cssColor(c.styles.backgroundColor||'#2a000000')} 0)`;const hole=document.createElement('i');hole.style.cssText='width:72%;height:72%;border-radius:50%;background:inherit;filter:brightness(1.2)';el.style.display='grid';el.style.placeItems='center';el.appendChild(hole)}else{el.style.background=cssColor(c.styles?.backgroundColor||'#22000000');const fill=document.createElement('i');fill.style.cssText=`display:block;width:${p}%;height:100%;background:${cssColor(c.styles?.color||'#5b5ce2')};border-radius:inherit`;el.appendChild(fill)}}
     else if(c.component==='Divider'){el.style.background=cssColor(c.styles?.color||'#22000000')}
