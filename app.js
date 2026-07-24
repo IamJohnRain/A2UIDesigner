@@ -106,8 +106,38 @@
     palette.forEach(color=>{const button=document.createElement('button');button.type='button';button.className='color-swatch';button.style.backgroundColor=color;button.title=color;button.setAttribute('aria-label',`选择颜色 ${color}`);button.onclick=()=>{const current=textInput.value.trim();const next=/^#[0-9a-f]{8}$/i.test(current)?'#'+current.slice(1,3)+color.slice(1):color;textInput.value=next;picker.value=color;applyField(key,next,'text')};swatches.appendChild(button)});
     wrap.appendChild(swatches);return wrap;
   }
-  function applyField(key,val,type){const c=state.map.get(state.selectedId);if(!c)return;snapshot();let target=c;if(key.startsWith('styles.')){target=c.styles=c.styles||{};key=key.slice(7)}if(val==='')delete target[key];else target[key]=type==='number'?Number(val):type==='checkbox'?!!val:val;syncSource();renderAll();select(c.id)}
-  function buildInspector(c){$('#selectedType').textContent=c.component;$('#selectedId').textContent=c.id;$('#selectionHint').textContent='正在编辑组件';const content=$('#contentFields'),size=$('#sizeFields'),app=$('#appearanceFields'),text=$('#textFields'),layout=$('#layoutFields');[content,size,app,text,layout].forEach(x=>x.innerHTML='');const contentKey=c.component==='Text'?'content':c.component==='Button'?'label':c.component==='Image'?'src':null;if(contentKey)content.appendChild(field(contentKey==='src'?'图片路径':'显示内容',contentKey,c[contentKey],'text'));['width','height'].forEach(k=>size.appendChild(field(k==='width'?'宽度':'高度','styles.'+k,c.styles?.[k])));size.appendChild(field('内边距','styles.padding',typeof c.styles?.padding==='number'?c.styles.padding:'','number'));size.appendChild(field('元素间距','itemMargin',c.itemMargin));app.appendChild(colorField('背景颜色','styles.backgroundColor',c.styles?.backgroundColor));['borderRadius','opacity'].forEach(k=>app.appendChild(field({borderRadius:'圆角',opacity:'透明度'}[k],'styles.'+k,c.styles?.[k],'number')));const isText=['Text','Button'].includes(c.component);$('#textSection').hidden=!isText;if(isText){text.appendChild(field('字号','styles.fontSize',c.styles?.fontSize));text.appendChild(field('字重','styles.fontWeight',c.styles?.fontWeight,'text'));text.appendChild(field('文字颜色','styles.fontColor',c.styles?.fontColor,'text'));text.appendChild(field('对齐','styles.textAlign',c.styles?.textAlign,'text',['','start','center','end']))}const isContainer=containerTypes.has(c.component);$('#layoutSection').hidden=!isContainer;if(isContainer){layout.appendChild(field('主轴对齐','styles.justifyContent',c.styles?.justifyContent,'text',['','start','center','end','spaceBetween','spaceAround']));layout.appendChild(field('交叉轴对齐','styles.alignItems',c.styles?.alignItems,'text',['','start','center','end','stretch']))}$('#componentJson').value=JSON.stringify(c,null,2)}
+  function applyField(key,val,type){
+    const c=state.map.get(state.selectedId);if(!c)return;snapshot();
+    const parts=key.split('.');let target=c;
+    for(let i=0;i<parts.length-1;i++){const part=parts[i],next=parts[i+1];if(target[part]==null||typeof target[part]!=='object')target[part]=/^\d+$/.test(next)?[]:{};target=target[part]}
+    const last=parts[parts.length-1];if(val==='')delete target[last];else target[last]=type==='number'?Number(val):type==='checkbox'?!!val:val;
+    syncSource();renderAll();select(c.id)
+  }
+  function buildInspector(c){
+    $('#selectedType').textContent=c.component;$('#selectedId').textContent=c.id;$('#selectionHint').textContent='正在编辑组件';
+    const content=$('#contentFields'),size=$('#sizeFields'),app=$('#appearanceFields'),text=$('#textFields'),layout=$('#layoutFields'),s=c.styles||{};
+    [content,size,app,text,layout].forEach(x=>x.innerHTML='');
+    const contentKey=c.component==='Text'?'content':c.component==='Button'?'label':c.component==='Image'?'src':null;
+    if(contentKey)content.appendChild(field(contentKey==='src'?'图片路径':'显示内容',contentKey,c[contentKey],'text'));
+    ['width','height'].forEach(k=>size.appendChild(field(k==='width'?'宽度':'高度','styles.'+k,s[k])));
+    size.appendChild(field('内边距','styles.padding',typeof s.padding==='number'?s.padding:'','number'));size.appendChild(field('元素间距','itemMargin',c.itemMargin));
+    app.appendChild(colorField('背景颜色','styles.backgroundColor',s.backgroundColor));
+    app.appendChild(colorField('边框颜色','styles.borderColor',s.borderColor));
+    if(c.component==='Progress'||c.component==='Divider')app.appendChild(colorField(c.component==='Progress'?'进度颜色':'分割线颜色','styles.color',s.color));
+    if(c.component==='Checkbox'){
+      app.appendChild(colorField('选中颜色','styles.selectedColor',s.selectedColor));
+      app.appendChild(colorField('未选中颜色','styles.unSelectedColor',s.unSelectedColor));
+      app.appendChild(colorField('勾选标记颜色','styles.mark.strokeColor',s.mark?.strokeColor));
+    }
+    if(s.shadow)app.appendChild(colorField('阴影颜色','styles.shadow.color',s.shadow.color));
+    if(Array.isArray(s.linearGradient?.colors))s.linearGradient.colors.forEach((stop,index)=>app.appendChild(colorField(`渐变色 ${index+1}`,`styles.linearGradient.colors.${index}.0`,stop?.[0])));
+    ['borderRadius','opacity'].forEach(k=>app.appendChild(field({borderRadius:'圆角',opacity:'透明度'}[k],'styles.'+k,s[k],'number')));
+    const isText=['Text','Button'].includes(c.component);$('#textSection').hidden=!isText;
+    if(isText){text.appendChild(field('字号','styles.fontSize',s.fontSize));text.appendChild(field('字重','styles.fontWeight',s.fontWeight,'text'));text.appendChild(colorField('文字颜色','styles.fontColor',s.fontColor));text.appendChild(field('对齐','styles.textAlign',s.textAlign,'text',['','start','center','end']))}
+    const isContainer=containerTypes.has(c.component);$('#layoutSection').hidden=!isContainer;
+    if(isContainer){layout.appendChild(field('主轴对齐','styles.justifyContent',s.justifyContent,'text',['','start','center','end','spaceBetween','spaceAround']));layout.appendChild(field('交叉轴对齐','styles.alignItems',s.alignItems,'text',['','start','center','end','stretch']))}
+    $('#componentJson').value=JSON.stringify(c,null,2)
+  }
   function syncSource(){els.input.value=normalizeExportAssets(state.messages).map(x=>JSON.stringify(x)).join('\n')}
   function setStatus(t,cls){els.parse.textContent=t;els.parse.className='status '+cls;els.error.hidden=true}
   function fail(e){els.error.textContent=e.message||e;els.error.hidden=false;els.parse.textContent='解析失败';els.parse.className='status bad'}
