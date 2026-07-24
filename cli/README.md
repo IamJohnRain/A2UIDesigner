@@ -2,6 +2,8 @@
 
 使用与网页编辑器相同的 GenUI 渲染核心，将 `card.dsl.jsonl` 输出为 PNG。包本身无第三方依赖，需要 Node.js 22 或更高版本，以及本机安装的 Chrome、Edge 或 Chromium。
 
+PNG 使用与原生渲染结果一致的 `3.5x` 设备像素密度：`300x140` Surface 输出 `1050x490` PNG，`140x140` Surface 输出 `490x490` PNG。高分辨率由浏览器直接栅格化，不是对低分辨率截图进行拉伸。
+
 ```powershell
 node cli/render-card.js -i "D:\cases\card.dsl.jsonl"
 node cli/render-card.js -i "D:\cases\card.dsl.jsonl" -o "D:\renders"

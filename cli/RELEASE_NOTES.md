@@ -1,14 +1,16 @@
-# A2UI Card Renderer CLI v0.1.0
+# A2UI Card Renderer CLI v0.1.1
 
 独立的 Harmony Card DSL 命令行渲染工具，使用与 A2UIDesigner 网页编辑器相同的 GenUI 渲染核心。
 
 ## 下载选择
 
-- `a2ui-card-renderer-cli-v0.1.0.zip`：解压即用。Windows 可运行 `render-card.cmd`。
-- `a2ui-card-renderer-cli-0.1.0.tgz`：npm 安装包，可通过 `npm install -g` 全局安装。
+- `a2ui-card-renderer-cli-v0.1.1.zip`：解压即用。Windows 可运行 `render-card.cmd`。
+- `a2ui-card-renderer-cli-0.1.1.tgz`：npm 安装包，可通过 `npm install -g` 全局安装。
 - `SHA256SUMS.txt`：上述两个文件的 SHA-256 校验值。
 
 运行环境：Node.js 22 或更高版本，以及 Chrome、Edge 或 Chromium。浏览器不在标准安装位置时，通过 `A2UI_BROWSER_PATH` 指定。
+
+v0.1.1 将输出设备像素密度修正为与原生 PNG 一致的 `3.5x`。`300x140` Surface 现在输出 `1050x490`，`140x140` Surface 输出 `490x490`，文字和边缘均由浏览器以目标分辨率直接栅格化。
 
 ## ZIP 使用方式
 
@@ -26,7 +28,7 @@ node cli/render-card.js -i "D:\cases\card.dsl.jsonl"
 ## npm 安装方式
 
 ```powershell
-npm install -g .\a2ui-card-renderer-cli-0.1.0.tgz
+npm install -g .\a2ui-card-renderer-cli-0.1.1.tgz
 a2ui-render -i "D:\cases\card.dsl.jsonl" -o "D:\renders" -n "case-01.png"
 ```
 

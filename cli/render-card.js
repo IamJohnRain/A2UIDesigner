@@ -9,6 +9,7 @@ const { spawn } = require('node:child_process');
 
 const projectRoot = path.resolve(__dirname, '..');
 const defaultOutputName = 'card.dsl.png';
+const nativePixelScale = 3.5;
 
 function usage() {
   return [
@@ -184,7 +185,7 @@ async function renderWithBrowser(browserPath, pageUrl, dsl, outputPath) {
     if (rendered.exceptionDetails) throw new Error(rendered.exceptionDetails.exception?.description || '页面渲染失败');
     const size = rendered.result.value;
     await cdp.send('Emulation.setDeviceMetricsOverride', {
-      width: Math.ceil(size.width), height: Math.ceil(size.height), deviceScaleFactor: 1, mobile: false
+      width: Math.ceil(size.width), height: Math.ceil(size.height), deviceScaleFactor: nativePixelScale, mobile: false
     });
     const assets = await cdp.send('Runtime.evaluate', {
       expression: 'window.CardCliRenderer.waitForAssets()', awaitPromise: true, returnByValue: true
@@ -195,7 +196,11 @@ async function renderWithBrowser(browserPath, pageUrl, dsl, outputPath) {
       clip: { x: 0, y: 0, width: size.width, height: size.height, scale: 1 }
     });
     fs.writeFileSync(outputPath, Buffer.from(screenshot.data, 'base64'));
-    return size;
+    return {
+      ...size,
+      pixelWidth: Math.round(size.width * nativePixelScale),
+      pixelHeight: Math.round(size.height * nativePixelScale)
+    };
   } finally {
     if (cdp) cdp.close();
     if (browser.exitCode == null) {
@@ -245,7 +250,7 @@ async function main() {
   const { server, port } = await startServer(path.dirname(inputPath));
   try {
     const size = await renderWithBrowser(browserPath, `http://127.0.0.1:${port}/`, dsl, outputPath);
-    console.log(`已生成：${outputPath} (${size.width}x${size.height})`);
+    console.log(`已生成：${outputPath} (${size.pixelWidth}x${size.pixelHeight}, ${nativePixelScale}x)`);
   } finally {
     await new Promise(resolve => server.close(resolve));
   }
