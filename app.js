@@ -25,6 +25,28 @@
     const fileName=clean.split('/').pop();
     return clean.startsWith('resources/')?`references/media/${encodeURIComponent(fileName)}`:src;
   }
+  function protocolAssetPath(src){
+    if(typeof src!=='string'||!src||src.includes('{{'))return src;
+    const clean=src.replace(/\\/g,'/');
+    const marker='/references/media/';
+    const markerAt=clean.toLowerCase().indexOf(marker);
+    const relativeAt=clean.toLowerCase().indexOf('references/media/');
+    if(markerAt<0&&relativeAt<0)return src;
+    const fileName=decodeURIComponent(clean.split('/').pop().split(/[?#]/)[0]);
+    return `resources/base/media/${fileName}`;
+  }
+  function normalizeExportAssets(messages){
+    const copy=structuredClone(messages);
+    const visit=value=>{
+      if(!value||typeof value!=='object')return;
+      for(const [key,child] of Object.entries(value)){
+        if((key==='src'||key==='backgroundImage')&&typeof child==='string')value[key]=protocolAssetPath(child);
+        else visit(child);
+      }
+    };
+    copy.forEach(visit);
+    return copy;
+  }
   function box(v){if(typeof v==='number')return `${v}px`;if(v&&typeof v==='object')return `${v.top||0}px ${v.right||0}px ${v.bottom||0}px ${v.left||0}px`;return ''}
   function gradient(g){if(!g?.colors)return '';const dirs={RightBottom:'135deg',LeftBottom:'45deg',RightTop:'225deg',LeftTop:'315deg',Right:'90deg',Bottom:'180deg'};return `linear-gradient(${dirs[g.direction]||'135deg'},${g.colors.map(x=>`${cssColor(x[0])} ${x[1]*100}%`).join(',')})`}
   function applyStyles(el,c){const s=c.styles||{}, st=el.style; if(s.width!=null)st.width=s.width+'px';if(s.height!=null)st.height=s.height+'px';if(s.padding!=null)st.padding=box(s.padding);if(s.margin!=null)st.margin=box(s.margin);if(s.borderRadius!=null)st.borderRadius=s.borderRadius+'px';if(s.clip)st.overflow='hidden';if(s.backgroundColor)st.backgroundColor=cssColor(s.backgroundColor);if(s.linearGradient)st.backgroundImage=gradient(s.linearGradient);else if(s.backgroundImage){const bg=evalBinding(s.backgroundImage);st.backgroundImage=`url("${previewAssetPath(bg)}")`;st.backgroundSize='cover';st.backgroundPosition='center'}if(s.fontSize!=null)st.fontSize=s.fontSize+'px';if(s.fontWeight!=null)st.fontWeight=s.fontWeight;if(s.fontColor)st.color=cssColor(s.fontColor);if(s.textAlign)st.textAlign=s.textAlign;if(s.opacity!=null)st.opacity=s.opacity;if(s.borderWidth)st.border=`${s.borderWidth}px solid ${cssColor(s.borderColor||'#000')}`;if(s.shadow)st.boxShadow=`${s.shadow.offsetX||0}px ${s.shadow.offsetY||0}px ${s.shadow.radius||0}px ${cssColor(s.shadow.color)}`;if(s.flexGrow!=null)st.flexGrow=s.flexGrow;if(s.flexShrink!=null)st.flexShrink=s.flexShrink;
@@ -58,7 +80,7 @@
   function field(label,key,value,type='number',options){const wrap=document.createElement('label');wrap.className='field';wrap.innerHTML=`<span>${label}</span>`;let input;if(options){input=document.createElement('select');options.forEach(v=>input.add(new Option(v||'—',v)))}else{input=document.createElement('input');input.type=type;if(type==='number')input.step='1'}input.value=value??'';input.dataset.key=key;input.addEventListener('change',()=>applyField(key,input.value,type));wrap.appendChild(input);return wrap}
   function applyField(key,val,type){const c=state.map.get(state.selectedId);if(!c)return;snapshot();let target=c;if(key.startsWith('styles.')){target=c.styles=c.styles||{};key=key.slice(7)}if(val==='')delete target[key];else target[key]=type==='number'?Number(val):type==='checkbox'?!!val:val;syncSource();renderAll();select(c.id)}
   function buildInspector(c){$('#selectedType').textContent=c.component;$('#selectedId').textContent=c.id;$('#selectionHint').textContent='正在编辑组件';const content=$('#contentFields'),size=$('#sizeFields'),app=$('#appearanceFields'),text=$('#textFields'),layout=$('#layoutFields');[content,size,app,text,layout].forEach(x=>x.innerHTML='');const contentKey=c.component==='Text'?'content':c.component==='Button'?'label':c.component==='Image'?'src':null;if(contentKey)content.appendChild(field(contentKey==='src'?'图片路径':'显示内容',contentKey,c[contentKey],'text'));['width','height'].forEach(k=>size.appendChild(field(k==='width'?'宽度':'高度','styles.'+k,c.styles?.[k])));size.appendChild(field('内边距','styles.padding',typeof c.styles?.padding==='number'?c.styles.padding:'','number'));size.appendChild(field('元素间距','itemMargin',c.itemMargin));['backgroundColor','borderRadius','opacity'].forEach(k=>app.appendChild(field({backgroundColor:'背景颜色',borderRadius:'圆角',opacity:'透明度'}[k],'styles.'+k,c.styles?.[k],k==='backgroundColor'?'text':'number')));const isText=['Text','Button'].includes(c.component);$('#textSection').hidden=!isText;if(isText){text.appendChild(field('字号','styles.fontSize',c.styles?.fontSize));text.appendChild(field('字重','styles.fontWeight',c.styles?.fontWeight,'text'));text.appendChild(field('文字颜色','styles.fontColor',c.styles?.fontColor,'text'));text.appendChild(field('对齐','styles.textAlign',c.styles?.textAlign,'text',['','start','center','end']))}const isContainer=containerTypes.has(c.component);$('#layoutSection').hidden=!isContainer;if(isContainer){layout.appendChild(field('主轴对齐','styles.justifyContent',c.styles?.justifyContent,'text',['','start','center','end','spaceBetween','spaceAround']));layout.appendChild(field('交叉轴对齐','styles.alignItems',c.styles?.alignItems,'text',['','start','center','end','stretch']))}$('#componentJson').value=JSON.stringify(c,null,2)}
-  function syncSource(){els.input.value=state.messages.map(x=>JSON.stringify(x)).join('\n')}
+  function syncSource(){els.input.value=normalizeExportAssets(state.messages).map(x=>JSON.stringify(x)).join('\n')}
   function setStatus(t,cls){els.parse.textContent=t;els.parse.className='status '+cls;els.error.hidden=true}
   function fail(e){els.error.textContent=e.message||e;els.error.hidden=false;els.parse.textContent='解析失败';els.parse.className='status bad'}
   function renderInput(){try{loadParsed(parseJsonl(els.input.value));if(window.innerWidth<=760)requestAnimationFrame(()=>els.stage.scrollIntoView({behavior:'smooth',block:'center'}))}catch(e){fail(e)}}

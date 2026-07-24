@@ -13,4 +13,10 @@
 
 编辑器支持 `Text`、`Image`、`Divider`、`Progress`、`Button`、`Checkbox`、`Row`、`Column`、`List` 和 `Stack`，并会解析 `updateDataModel` 中的常用 `{{ ... }}` 数据绑定。
 
-图片协议中的 `resources/...` 属于 HarmonyOS 资源路径，普通浏览器无法直接读取，因此在编辑器里以占位图显示；路径会完整保留到导出的 DSL 中。
+图片协议中的 `resources/base/media/...` 会在网页预览时自动映射到仓库的 `references/media/...`。导出时会反向规范化为协议路径，不会把 GitHub Pages 的预览地址写入 DSL。
+
+## 在线访问
+
+GitHub Pages 启用后可通过以下地址使用：
+
+https://iamjohnrain.github.io/A2UIDesigner/
