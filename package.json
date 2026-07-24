@@ -10,7 +10,8 @@
   "files": [
     "cli/",
     "genui-renderer.js",
-    "references/media/"
+    "references/media/",
+    "render-card.cmd"
   ],
   "scripts": {
     "render": "node cli/render-card.js"

@@ -8,6 +8,12 @@ node cli/render-card.js -i "D:\cases\card.dsl.jsonl" -o "D:\renders"
 node cli/render-card.js -i "D:\cases\card.dsl.jsonl" -o "D:\renders" -n "case-01.png"
 ```
 
+Release ZIP 在 Windows 下也可以直接使用根目录启动器：
+
+```powershell
+render-card.cmd -i "D:\cases\card.dsl.jsonl" -o "D:\renders" -n "case-01.png"
+```
+
 也可以在仓库中执行一次 `npm link`，之后直接使用：
 
 ```powershell
