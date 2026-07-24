@@ -64,16 +64,18 @@
     else if(c.component==='Divider'){el.style.background=cssColor(c.styles?.color||'#22000000')}
     else if(c.component==='Checkbox'){
       const selected=Boolean(evalBinding(c.select,local)),s=c.styles||{},mark=s.mark||{};
+      const visualSize=Math.max(20,Math.min(Number(s.width)||20,Number(s.height)||20)),box=document.createElement('span');
       el.setAttribute('role','checkbox');el.setAttribute('aria-checked',String(selected));el.style.display='grid';el.style.placeItems='center';el.style.boxSizing='border-box';
-      el.style.borderRadius=s.shape==='circle'?'50%':`${Math.max(3,Math.round(Math.min(s.width||16,s.height||16)*.25))}px`;
+      box.className='checkbox-visual';box.style.width=visualSize+'px';box.style.height=visualSize+'px';box.style.display='grid';box.style.placeItems='center';box.style.boxSizing='border-box';box.style.borderRadius=s.shape==='circle'?'50%':`${Math.max(4,Math.round(visualSize*.25))}px`;
       if(selected){
-        el.style.backgroundColor=cssColor(s.selectedColor||'#ff0a59f7');el.style.border='none';
+        box.style.backgroundColor=cssColor(s.selectedColor||'#ff0a59f7');box.style.border='none';
         const svg=document.createElementNS('http://www.w3.org/2000/svg','svg'),path=document.createElementNS('http://www.w3.org/2000/svg','path');
         const size=Number(mark.size)||8;svg.setAttribute('width',size);svg.setAttribute('height',size);svg.setAttribute('viewBox','0 0 12 10');svg.setAttribute('aria-hidden','true');
-        path.setAttribute('d','M1 5 L4.3 8.3 L11 1.5');path.setAttribute('fill','none');path.setAttribute('stroke',cssColor(mark.strokeColor||'#ffffffff'));path.setAttribute('stroke-width',String(mark.strokeWidth||2));path.setAttribute('stroke-linecap','round');path.setAttribute('stroke-linejoin','round');svg.appendChild(path);el.appendChild(svg);
+        path.setAttribute('d','M1 5 L4.3 8.3 L11 1.5');path.setAttribute('fill','none');path.setAttribute('stroke',cssColor(mark.strokeColor||'#ffffffff'));path.setAttribute('stroke-width',String(mark.strokeWidth||2));path.setAttribute('stroke-linecap','round');path.setAttribute('stroke-linejoin','round');svg.appendChild(path);box.appendChild(svg);
       }else{
-        el.style.backgroundColor='transparent';el.style.border=`1px solid ${cssColor(s.unSelectedColor||'#66000000')}`;
+        box.style.backgroundColor='transparent';box.style.border=`1px solid ${cssColor(s.unSelectedColor||'#66000000')}`;
       }
+      el.appendChild(box);
     }
     applyStyles(el,c);bindNodeEvents(el,c);return el}
   function bindNodeEvents(el,c){el.addEventListener('click',e=>{e.stopPropagation();select(c.id)});el.addEventListener('dragstart',e=>{e.stopPropagation();e.dataTransfer.setData('text/plain',c.id);setTimeout(()=>el.style.opacity='.35')});el.addEventListener('dragend',()=>el.style.opacity='');el.addEventListener('dragover',e=>{e.preventDefault();e.stopPropagation();el.classList.add('drag-over')});el.addEventListener('dragleave',()=>el.classList.remove('drag-over'));el.addEventListener('drop',e=>{e.preventDefault();e.stopPropagation();el.classList.remove('drag-over');const moving=e.dataTransfer.getData('text/plain');containerTypes.has(c.component)?moveInto(moving,c.id):moveBefore(moving,c.id)})}
