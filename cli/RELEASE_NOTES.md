@@ -12,6 +12,8 @@
 
 完整包固定使用 Chrome for Testing 151.0.7922.47 和 Noto Sans CJK 2.004。CLI 优先使用 `A2UI_BROWSER_PATH`，其次使用包内运行时，最后回退到系统浏览器。
 
+由于官方便携 headless-shell 不包含可安装的 setuid sandbox，CLI 仅在调用包内运行时时添加 `--no-sandbox`。在共享主机上请只渲染可信 DSL 和资源；通过 `A2UI_BROWSER_PATH` 指定的浏览器以及系统浏览器不会被自动关闭沙箱。
+
 ## Linux 使用方式
 
 ```bash

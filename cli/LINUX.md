@@ -32,6 +32,8 @@ The browser and fonts do not need to be installed separately:
 
 The full package still requires Node.js 22+ and the base shared libraries listed in `runtime/chrome-headless-shell/deb.deps`. On Ubuntu/Debian, install any missing libraries with the distribution package manager. Alpine/musl is not supported by this glibc Linux x64 build.
 
+The official portable headless-shell archive does not include an installable setuid sandbox. The CLI therefore starts only the bundled runtime with `--no-sandbox`; a browser selected through `A2UI_BROWSER_PATH` or a normal system browser keeps its standard sandbox behavior. Render only trusted DSL and assets with the full portable package, especially on shared hosts.
+
 For a non-standard browser path or an intentional override:
 
 ```bash

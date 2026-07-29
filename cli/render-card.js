@@ -10,6 +10,7 @@ const { spawn } = require('node:child_process');
 const projectRoot = path.resolve(__dirname, '..');
 const defaultOutputName = 'card.dsl.png';
 const nativePixelScale = 3.5;
+const bundledLinuxBrowserPath = path.join(projectRoot, 'runtime', 'chrome-headless-shell', 'chrome-headless-shell');
 
 function debug(message) {
   if (process.env.A2UI_DEBUG) console.error(`[a2ui-render] ${message}`);
@@ -49,10 +50,9 @@ function parseArguments(argv) {
 
 function findBrowser() {
   const configured = process.env.A2UI_BROWSER_PATH;
-  const bundledLinuxBrowser = path.join(projectRoot, 'runtime', 'chrome-headless-shell', 'chrome-headless-shell');
   const candidates = [
     configured,
-    process.platform === 'linux' && bundledLinuxBrowser,
+    process.platform === 'linux' && bundledLinuxBrowserPath,
     process.platform === 'win32' && 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
     process.platform === 'win32' && 'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
     process.platform === 'win32' && 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
@@ -176,8 +176,10 @@ async function renderWithBrowser(browserPath, pageUrl, dsl, outputPath) {
     '--remote-debugging-port=0', `--user-data-dir=${tempDirectory}`, 'about:blank'
   ];
   if (process.platform === 'linux') browserArguments.splice(-1, 0, '--disable-dev-shm-usage');
-  if (process.platform === 'linux' && typeof process.getuid === 'function' && process.getuid() === 0) {
-    browserArguments.splice(-1, 0, '--no-sandbox');
+  const usesBundledLinuxBrowser = process.platform === 'linux'
+    && path.resolve(browserPath) === path.resolve(bundledLinuxBrowserPath);
+  if (usesBundledLinuxBrowser || (process.platform === 'linux' && typeof process.getuid === 'function' && process.getuid() === 0)) {
+    browserArguments.splice(-1, 0, '--no-sandbox', '--disable-setuid-sandbox');
   }
   const fontConfigFile = path.join(projectRoot, 'runtime', 'fontconfig.xml');
   const browserEnvironment = fs.existsSync(fontConfigFile)
