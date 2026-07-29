@@ -140,6 +140,18 @@ async function openDebugPage(port, targetUrl) {
   return response.json();
 }
 
+async function waitForRenderer(cdp) {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const ready = await cdp.send('Runtime.evaluate', {
+      expression: "typeof window.CardCliRenderer?.renderCard === 'function'",
+      returnByValue: true
+    });
+    if (!ready.exceptionDetails && ready.result.value === true) return;
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  throw new Error('等待页面渲染器就绪超时');
+}
+
 function connectCdp(webSocketUrl) {
   const socket = new WebSocket(webSocketUrl);
   let nextId = 1;
@@ -217,6 +229,8 @@ async function renderWithBrowser(browserPath, pageUrl, dsl, outputPath) {
     await cdp.send('Page.navigate', { url: pageUrl });
     await load;
     debug('renderer page loaded');
+    await waitForRenderer(cdp);
+    debug('renderer API ready');
     const expression = `window.CardCliRenderer.renderCard(${JSON.stringify(dsl)})`;
     const rendered = await cdp.send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
     if (rendered.exceptionDetails) throw new Error(rendered.exceptionDetails.exception?.description || '页面渲染失败');
