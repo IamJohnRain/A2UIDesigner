@@ -18,10 +18,19 @@ WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 mkdir -p "$DIST"
 
+verify_checksum() {
+  local destination=$1 expected=$2 actual
+  actual=$(sha256sum "$destination" | cut -d ' ' -f 1)
+  if [[ "$actual" != "$expected" ]]; then
+    printf 'SHA-256 mismatch for %s\nexpected: %s\nactual:   %s\n' "$destination" "$expected" "$actual" >&2
+    return 1
+  fi
+}
+
 download() {
   local url=$1 destination=$2 checksum=$3
   curl --fail --location --retry 3 --retry-delay 2 --output "$destination" "$url"
-  echo "$checksum  $destination" | sha256sum --check --status
+  verify_checksum "$destination" "$checksum"
 }
 
 copy_common() {
@@ -37,7 +46,7 @@ copy_archive_or_download() {
   local override=$1 url=$2 destination=$3 checksum=$4
   if [[ -n "$override" ]]; then
     cp "$override" "$destination"
-    echo "$checksum  $destination" | sha256sum --check --status
+    verify_checksum "$destination" "$checksum"
   else
     download "$url" "$destination" "$checksum"
   fi
