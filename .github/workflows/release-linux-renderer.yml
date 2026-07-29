@@ -14,6 +14,7 @@ permissions:
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -28,12 +29,13 @@ jobs:
           smoke-light/a2ui-card-renderer/render-card --help
       - name: Smoke test full package runtime
         run: |
+          set -x
           mkdir smoke-full
           tar -xzf dist-linux/a2ui-card-renderer-linux-x64-full-*.tar.gz -C smoke-full
-          smoke-full/a2ui-card-renderer/runtime/chrome-headless-shell/chrome-headless-shell --version
-          smoke-full/a2ui-card-renderer/render-card --help
+          timeout 15s smoke-full/a2ui-card-renderer/runtime/chrome-headless-shell/chrome-headless-shell --version
+          timeout 15s smoke-full/a2ui-card-renderer/render-card --help
           mkdir smoke-output
-          smoke-full/a2ui-card-renderer/render-card \
+          timeout 60s smoke-full/a2ui-card-renderer/render-card \
             -i "$GITHUB_WORKSPACE/references/datasets/Case-01-low-power-001/card.dsl.jsonl" \
             -o "$GITHUB_WORKSPACE/smoke-output"
           node -e "const b=require('fs').readFileSync('smoke-output/card.dsl.png');if(b.readUInt32BE(16)!==490||b.readUInt32BE(20)!==490)process.exit(1)"
