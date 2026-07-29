@@ -11,6 +11,10 @@ const projectRoot = path.resolve(__dirname, '..');
 const defaultOutputName = 'card.dsl.png';
 const nativePixelScale = 3.5;
 
+function debug(message) {
+  if (process.env.A2UI_DEBUG) console.error(`[a2ui-render] ${message}`);
+}
+
 function usage() {
   return [
     '用法：node cli/render-card.js -i <card.dsl.jsonl> [-o <输出目录>] [-n <输出文件名>]',
@@ -180,11 +184,15 @@ async function renderWithBrowser(browserPath, pageUrl, dsl, outputPath) {
     ? { ...process.env, FONTCONFIG_FILE: fontConfigFile, FONTCONFIG_PATH: path.dirname(fontConfigFile) }
     : process.env;
   const browser = spawn(browserPath, browserArguments, {
-    stdio: 'ignore', windowsHide: true, env: browserEnvironment
+    stdio: process.env.A2UI_DEBUG ? ['ignore', 'ignore', 'inherit'] : 'ignore',
+    windowsHide: true,
+    env: browserEnvironment
   });
+  debug(`browser started: ${browserPath}`);
   let cdp;
   try {
     const debugPort = await waitForDevTools(tempDirectory, browser);
+    debug(`DevTools ready on port ${debugPort}`);
     const page = await openDebugPage(debugPort, pageUrl);
     cdp = connectCdp(page.webSocketDebuggerUrl);
     await cdp.ready;
@@ -193,10 +201,12 @@ async function renderWithBrowser(browserPath, pageUrl, dsl, outputPath) {
     const load = cdp.once('Page.loadEventFired');
     await cdp.send('Page.navigate', { url: pageUrl });
     await load;
+    debug('renderer page loaded');
     const expression = `window.CardCliRenderer.renderCard(${JSON.stringify(dsl)})`;
     const rendered = await cdp.send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
     if (rendered.exceptionDetails) throw new Error(rendered.exceptionDetails.exception?.description || '页面渲染失败');
     const size = rendered.result.value;
+    debug(`card rendered at ${size.width}x${size.height} CSS pixels`);
     await cdp.send('Emulation.setDeviceMetricsOverride', {
       width: Math.ceil(size.width), height: Math.ceil(size.height), deviceScaleFactor: nativePixelScale, mobile: false
     });
@@ -204,11 +214,13 @@ async function renderWithBrowser(browserPath, pageUrl, dsl, outputPath) {
       expression: 'window.CardCliRenderer.waitForAssets()', awaitPromise: true, returnByValue: true
     });
     if (assets.exceptionDetails) throw new Error(assets.exceptionDetails.exception?.description || '等待资源失败');
+    debug('assets ready');
     const screenshot = await cdp.send('Page.captureScreenshot', {
       format: 'png', fromSurface: true, captureBeyondViewport: true,
       clip: { x: 0, y: 0, width: size.width, height: size.height, scale: 1 }
     });
     fs.writeFileSync(outputPath, Buffer.from(screenshot.data, 'base64'));
+    debug('screenshot written');
     return {
       ...size,
       pixelWidth: Math.round(size.width * nativePixelScale),
@@ -218,9 +230,14 @@ async function renderWithBrowser(browserPath, pageUrl, dsl, outputPath) {
     if (cdp) cdp.close();
     if (browser.exitCode == null) {
       const exited = new Promise(resolve => browser.once('exit', resolve));
-      browser.kill();
-      await exited;
+      browser.kill('SIGTERM');
+      await Promise.race([exited, new Promise(resolve => setTimeout(resolve, 2000))]);
+      if (browser.exitCode == null) {
+        browser.kill('SIGKILL');
+        await Promise.race([exited, new Promise(resolve => setTimeout(resolve, 2000))]);
+      }
     }
+    debug(`browser stopped with code ${browser.exitCode ?? 'unknown'}`);
     for (let attempt = 0; attempt < 20; attempt += 1) {
       try {
         fs.rmSync(tempDirectory, { recursive: true, force: true });
