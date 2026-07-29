@@ -1,6 +1,6 @@
 {
   "name": "a2ui-card-renderer-cli",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Dependency-free CLI renderer for Harmony Card DSL JSONL files",
   "license": "UNLICENSED",
   "type": "commonjs",

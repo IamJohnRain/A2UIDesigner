@@ -11,6 +11,7 @@ const projectRoot = path.resolve(__dirname, '..');
 const defaultOutputName = 'card.dsl.png';
 const nativePixelScale = 3.5;
 const bundledLinuxBrowserPath = path.join(projectRoot, 'runtime', 'chrome-headless-shell', 'chrome-headless-shell');
+const bundledLinuxArchitecturePath = path.join(projectRoot, 'runtime', 'ARCHITECTURE');
 
 function debug(message) {
   if (process.env.A2UI_DEBUG) console.error(`[a2ui-render] ${message}`);
@@ -50,9 +51,21 @@ function parseArguments(argv) {
 
 function findBrowser() {
   const configured = process.env.A2UI_BROWSER_PATH;
+  let bundledArchitecture = null;
+  if (fs.existsSync(bundledLinuxBrowserPath)) {
+    bundledArchitecture = fs.existsSync(bundledLinuxArchitecturePath)
+      ? fs.readFileSync(bundledLinuxArchitecturePath, 'utf8').trim()
+      : 'x64';
+  }
+  const hasCompatibleBundledBrowser = process.platform === 'linux'
+    && bundledArchitecture === process.arch;
+  debug(`platform: ${process.platform}/${process.arch}`);
+  if (bundledArchitecture && !hasCompatibleBundledBrowser) {
+    debug(`skipping bundled Linux browser for ${bundledArchitecture}`);
+  }
   const candidates = [
     configured,
-    process.platform === 'linux' && bundledLinuxBrowserPath,
+    hasCompatibleBundledBrowser && bundledLinuxBrowserPath,
     process.platform === 'win32' && 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
     process.platform === 'win32' && 'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
     process.platform === 'win32' && 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',

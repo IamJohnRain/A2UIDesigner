@@ -5,8 +5,11 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 DIST=${1:-"$ROOT/dist-linux"}
 VERSION=$(cd "$ROOT" && node -p "require('./package.json').version")
 CHROME_VERSION=151.0.7922.47
-CHROME_URL="https://storage.googleapis.com/chrome-for-testing-public/$CHROME_VERSION/linux64/chrome-headless-shell-linux64.zip"
-CHROME_SHA256=e60f546a64ecc6b5b5ddbde7b47f1304fc8fdba9ea65fd63c16bbc994787b3d5
+PLAYWRIGHT_REVISION=1235
+CHROME_X64_URL="https://storage.googleapis.com/chrome-for-testing-public/$CHROME_VERSION/linux64/chrome-headless-shell-linux64.zip"
+CHROME_X64_SHA256=e60f546a64ecc6b5b5ddbde7b47f1304fc8fdba9ea65fd63c16bbc994787b3d5
+CHROME_ARM64_URL="https://cdn.playwright.dev/dbazure/download/playwright/builds/chromium/$PLAYWRIGHT_REVISION/chromium-headless-shell-linux-arm64.zip"
+CHROME_ARM64_SHA256=5e6e189c5fccd6107676a7d5c8a07a9ef45ad33e1e1181f15a00ff8ab925a048
 FONT_VERSION=Sans2.004
 FONT_URL="https://github.com/notofonts/noto-cjk/releases/download/$FONT_VERSION/18_NotoSansSC.zip"
 FONT_SHA256=4d107c09ada479d3e48b6e78c83835773cbd9214bf6e12cdb7b60f8e068292ec
@@ -30,37 +33,56 @@ copy_common() {
   chmod +x "$target/render-card" "$target/cli/render-card.js"
 }
 
-LIGHT_ROOT="$WORK/light/a2ui-card-renderer"
-FULL_ROOT="$WORK/full/a2ui-card-renderer"
-copy_common "$LIGHT_ROOT"
-mkdir -p "$WORK/full"
-cp -R "$LIGHT_ROOT" "$FULL_ROOT"
+copy_archive_or_download() {
+  local override=$1 url=$2 destination=$3 checksum=$4
+  if [[ -n "$override" ]]; then
+    cp "$override" "$destination"
+    echo "$checksum  $destination" | sha256sum --check --status
+  else
+    download "$url" "$destination" "$checksum"
+  fi
+}
 
-CHROME_ZIP="$WORK/chrome-headless-shell-linux64.zip"
+CHROME_X64_ZIP="$WORK/chrome-headless-shell-linux64.zip"
+CHROME_ARM64_ZIP="$WORK/chromium-headless-shell-linux-arm64.zip"
 FONT_ZIP="$WORK/NotoSansSC.zip"
-if [[ -n "${A2UI_CHROME_ARCHIVE:-}" ]]; then
-  cp "$A2UI_CHROME_ARCHIVE" "$CHROME_ZIP"
-  echo "$CHROME_SHA256  $CHROME_ZIP" | sha256sum --check --status
-else
-  download "$CHROME_URL" "$CHROME_ZIP" "$CHROME_SHA256"
-fi
-if [[ -n "${A2UI_FONT_ARCHIVE:-}" ]]; then
-  cp "$A2UI_FONT_ARCHIVE" "$FONT_ZIP"
-  echo "$FONT_SHA256  $FONT_ZIP" | sha256sum --check --status
-else
-  download "$FONT_URL" "$FONT_ZIP" "$FONT_SHA256"
-fi
+copy_archive_or_download "${A2UI_CHROME_X64_ARCHIVE:-${A2UI_CHROME_ARCHIVE:-}}" "$CHROME_X64_URL" "$CHROME_X64_ZIP" "$CHROME_X64_SHA256"
+copy_archive_or_download "${A2UI_CHROME_ARM64_ARCHIVE:-}" "$CHROME_ARM64_URL" "$CHROME_ARM64_ZIP" "$CHROME_ARM64_SHA256"
+copy_archive_or_download "${A2UI_FONT_ARCHIVE:-}" "$FONT_URL" "$FONT_ZIP" "$FONT_SHA256"
 
-mkdir -p "$WORK/chrome" "$WORK/fonts" "$FULL_ROOT/runtime/chrome-headless-shell" "$FULL_ROOT/runtime/fonts"
-unzip -q "$CHROME_ZIP" -d "$WORK/chrome"
+mkdir -p "$WORK/chrome-x64" "$WORK/chrome-arm64" "$WORK/fonts"
+unzip -q "$CHROME_X64_ZIP" -d "$WORK/chrome-x64"
+unzip -q "$CHROME_ARM64_ZIP" -d "$WORK/chrome-arm64"
 unzip -q "$FONT_ZIP" -d "$WORK/fonts"
-cp -R "$WORK/chrome/chrome-headless-shell-linux64/." "$FULL_ROOT/runtime/chrome-headless-shell/"
-/usr/bin/find "$WORK/fonts" -type f \( -iname '*.ttf' -o -iname '*.otf' -o -iname '*.ttc' \) -exec cp '{}' "$FULL_ROOT/runtime/fonts/" \;
-/usr/bin/find "$WORK/fonts" -type f \( -iname 'LICENSE*' -o -iname 'OFL*' \) -exec cp '{}' "$FULL_ROOT/runtime/fonts/" \;
-test -n "$(/usr/bin/find "$FULL_ROOT/runtime/fonts" -type f \( -iname '*.ttf' -o -iname '*.otf' -o -iname '*.ttc' \) -print -quit)"
-chmod +x "$FULL_ROOT/runtime/chrome-headless-shell/chrome-headless-shell"
 
-cat > "$FULL_ROOT/runtime/fontconfig.xml" <<'EOF'
+create_package_roots() {
+  local architecture=$1 light_root=$2 full_root=$3
+  copy_common "$light_root"
+  mkdir -p "$(dirname "$full_root")"
+  cp -R "$light_root" "$full_root"
+  mkdir -p "$full_root/runtime/chrome-headless-shell" "$full_root/runtime/fonts"
+  printf '%s\n' "$architecture" > "$full_root/runtime/ARCHITECTURE"
+  /usr/bin/find "$WORK/fonts" -type f \( -iname '*.ttf' -o -iname '*.otf' -o -iname '*.ttc' \) -exec cp '{}' "$full_root/runtime/fonts/" \;
+  /usr/bin/find "$WORK/fonts" -type f \( -iname 'LICENSE*' -o -iname 'OFL*' \) -exec cp '{}' "$full_root/runtime/fonts/" \;
+  test -n "$(/usr/bin/find "$full_root/runtime/fonts" -type f \( -iname '*.ttf' -o -iname '*.otf' -o -iname '*.ttc' \) -print -quit)"
+}
+
+X64_LIGHT_ROOT="$WORK/x64-light/a2ui-card-renderer"
+X64_FULL_ROOT="$WORK/x64-full/a2ui-card-renderer"
+ARM64_LIGHT_ROOT="$WORK/arm64-light/a2ui-card-renderer"
+ARM64_FULL_ROOT="$WORK/arm64-full/a2ui-card-renderer"
+create_package_roots x64 "$X64_LIGHT_ROOT" "$X64_FULL_ROOT"
+create_package_roots arm64 "$ARM64_LIGHT_ROOT" "$ARM64_FULL_ROOT"
+
+cp -R "$WORK/chrome-x64/chrome-headless-shell-linux64/." "$X64_FULL_ROOT/runtime/chrome-headless-shell/"
+cp -R "$WORK/chrome-arm64/chrome-linux/." "$ARM64_FULL_ROOT/runtime/chrome-headless-shell/"
+mv "$ARM64_FULL_ROOT/runtime/chrome-headless-shell/headless_shell" "$ARM64_FULL_ROOT/runtime/chrome-headless-shell/chrome-headless-shell"
+chmod +x "$X64_FULL_ROOT/runtime/chrome-headless-shell/chrome-headless-shell"
+chmod +x "$ARM64_FULL_ROOT/runtime/chrome-headless-shell/chrome-headless-shell"
+
+write_runtime_metadata() {
+  local full_root=$1 source=$2
+  cat > "$full_root/runtime/fontconfig.xml" <<'EOF'
 <?xml version="1.0"?>
 <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
 <fontconfig>
@@ -72,15 +94,22 @@ cat > "$FULL_ROOT/runtime/fontconfig.xml" <<'EOF'
   </match>
 </fontconfig>
 EOF
-
-cat > "$FULL_ROOT/runtime/VERSIONS.txt" <<EOF
-chrome-headless-shell $CHROME_VERSION
+  cat > "$full_root/runtime/VERSIONS.txt" <<EOF
+chrome-headless-shell $CHROME_VERSION ($source)
 Noto Sans CJK $FONT_VERSION (NotoSansSC)
 EOF
+}
 
-LIGHT_ARCHIVE="$DIST/a2ui-card-renderer-linux-x64-light-v$VERSION.tar.gz"
-FULL_ARCHIVE="$DIST/a2ui-card-renderer-linux-x64-full-v$VERSION.tar.gz"
-tar -czf "$LIGHT_ARCHIVE" -C "$WORK/light" a2ui-card-renderer
-tar -czf "$FULL_ARCHIVE" -C "$WORK/full" a2ui-card-renderer
-(cd "$DIST" && sha256sum "$(basename "$LIGHT_ARCHIVE")" "$(basename "$FULL_ARCHIVE")" > SHA256SUMS-linux.txt)
-printf '%s\n' "$LIGHT_ARCHIVE" "$FULL_ARCHIVE" "$DIST/SHA256SUMS-linux.txt"
+write_runtime_metadata "$X64_FULL_ROOT" "Google Chrome for Testing"
+write_runtime_metadata "$ARM64_FULL_ROOT" "Microsoft Playwright revision $PLAYWRIGHT_REVISION, non-CfT ARM64 build"
+
+X64_LIGHT_ARCHIVE="$DIST/a2ui-card-renderer-linux-x64-light-v$VERSION.tar.gz"
+X64_FULL_ARCHIVE="$DIST/a2ui-card-renderer-linux-x64-full-v$VERSION.tar.gz"
+ARM64_LIGHT_ARCHIVE="$DIST/a2ui-card-renderer-linux-arm64-light-v$VERSION.tar.gz"
+ARM64_FULL_ARCHIVE="$DIST/a2ui-card-renderer-linux-arm64-full-v$VERSION.tar.gz"
+tar -czf "$X64_LIGHT_ARCHIVE" -C "$WORK/x64-light" a2ui-card-renderer
+tar -czf "$X64_FULL_ARCHIVE" -C "$WORK/x64-full" a2ui-card-renderer
+tar -czf "$ARM64_LIGHT_ARCHIVE" -C "$WORK/arm64-light" a2ui-card-renderer
+tar -czf "$ARM64_FULL_ARCHIVE" -C "$WORK/arm64-full" a2ui-card-renderer
+(cd "$DIST" && sha256sum a2ui-card-renderer-linux-*.tar.gz > SHA256SUMS-linux.txt)
+printf '%s\n' "$X64_LIGHT_ARCHIVE" "$X64_FULL_ARCHIVE" "$ARM64_LIGHT_ARCHIVE" "$ARM64_FULL_ARCHIVE" "$DIST/SHA256SUMS-linux.txt"

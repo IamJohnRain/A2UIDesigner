@@ -6,15 +6,15 @@ on:
       tag:
         description: Existing or new release tag
         required: true
-        default: v0.2.0
+        default: v0.3.0
 
 permissions:
   contents: write
 
 jobs:
-  build-and-release:
+  build:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -22,23 +22,77 @@ jobs:
           node-version: '22'
       - name: Build Linux packages
         run: ./tools/build-linux-packages.sh dist-linux
-      - name: Smoke test lightweight package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-renderer-packages
+          path: dist-linux/
+          if-no-files-found: error
+          retention-days: 3
+
+  smoke-x64:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-renderer-packages
+          path: dist-linux
+      - name: Smoke test Linux x64 packages
         run: |
-          mkdir smoke-light
+          mkdir smoke-light smoke-full smoke-output
           tar -xzf dist-linux/a2ui-card-renderer-linux-x64-light-*.tar.gz -C smoke-light
-          smoke-light/a2ui-card-renderer/render-card --help
-      - name: Smoke test full package runtime
-        run: |
-          set -x
-          mkdir smoke-full
           tar -xzf dist-linux/a2ui-card-renderer-linux-x64-full-*.tar.gz -C smoke-full
+          test "$(cat smoke-full/a2ui-card-renderer/runtime/ARCHITECTURE)" = x64
+          timeout 15s smoke-light/a2ui-card-renderer/render-card --help
           timeout 15s smoke-full/a2ui-card-renderer/runtime/chrome-headless-shell/chrome-headless-shell --version
-          timeout 15s smoke-full/a2ui-card-renderer/render-card --help
-          mkdir smoke-output
           A2UI_DEBUG=1 timeout 60s smoke-full/a2ui-card-renderer/render-card \
             -i "$GITHUB_WORKSPACE/references/datasets/Case-01-low-power-001/card.dsl.jsonl" \
             -o "$GITHUB_WORKSPACE/smoke-output"
           node -e "const b=require('fs').readFileSync('smoke-output/card.dsl.png');if(b.readUInt32BE(16)!==490||b.readUInt32BE(20)!==490)process.exit(1)"
+
+  smoke-arm64:
+    needs: build
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-renderer-packages
+          path: dist-linux
+      - name: Smoke test Linux ARM64 packages
+        run: |
+          test "$(node -p process.arch)" = arm64
+          mkdir smoke-light smoke-full smoke-output
+          tar -xzf dist-linux/a2ui-card-renderer-linux-arm64-light-*.tar.gz -C smoke-light
+          tar -xzf dist-linux/a2ui-card-renderer-linux-arm64-full-*.tar.gz -C smoke-full
+          test "$(cat smoke-full/a2ui-card-renderer/runtime/ARCHITECTURE)" = arm64
+          file smoke-full/a2ui-card-renderer/runtime/chrome-headless-shell/chrome-headless-shell | grep -q 'ARM aarch64'
+          timeout 15s smoke-light/a2ui-card-renderer/render-card --help
+          timeout 15s smoke-full/a2ui-card-renderer/runtime/chrome-headless-shell/chrome-headless-shell --version
+          A2UI_DEBUG=1 timeout 60s smoke-full/a2ui-card-renderer/render-card \
+            -i "$GITHUB_WORKSPACE/references/datasets/Case-01-low-power-001/card.dsl.jsonl" \
+            -o "$GITHUB_WORKSPACE/smoke-output"
+          node -e "const b=require('fs').readFileSync('smoke-output/card.dsl.png');if(b.readUInt32BE(16)!==490||b.readUInt32BE(20)!==490)process.exit(1)"
+
+  release:
+    needs: [smoke-x64, smoke-arm64]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-renderer-packages
+          path: dist-linux
       - name: Create or update release
         env:
           GH_TOKEN: ${{ github.token }}
