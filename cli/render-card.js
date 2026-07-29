@@ -45,8 +45,10 @@ function parseArguments(argv) {
 
 function findBrowser() {
   const configured = process.env.A2UI_BROWSER_PATH;
+  const bundledLinuxBrowser = path.join(projectRoot, 'runtime', 'chrome-headless-shell', 'chrome-headless-shell');
   const candidates = [
     configured,
+    process.platform === 'linux' && bundledLinuxBrowser,
     process.platform === 'win32' && 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
     process.platform === 'win32' && 'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
     process.platform === 'win32' && 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
@@ -165,10 +167,21 @@ function connectCdp(webSocketUrl) {
 
 async function renderWithBrowser(browserPath, pageUrl, dsl, outputPath) {
   const tempDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'a2ui-render-'));
-  const browser = spawn(browserPath, [
+  const browserArguments = [
     '--headless=new', '--disable-gpu', '--hide-scrollbars', '--no-first-run', '--no-default-browser-check',
     '--remote-debugging-port=0', `--user-data-dir=${tempDirectory}`, 'about:blank'
-  ], { stdio: 'ignore', windowsHide: true });
+  ];
+  if (process.platform === 'linux') browserArguments.splice(-1, 0, '--disable-dev-shm-usage');
+  if (process.platform === 'linux' && typeof process.getuid === 'function' && process.getuid() === 0) {
+    browserArguments.splice(-1, 0, '--no-sandbox');
+  }
+  const fontConfigFile = path.join(projectRoot, 'runtime', 'fontconfig.xml');
+  const browserEnvironment = fs.existsSync(fontConfigFile)
+    ? { ...process.env, FONTCONFIG_FILE: fontConfigFile, FONTCONFIG_PATH: path.dirname(fontConfigFile) }
+    : process.env;
+  const browser = spawn(browserPath, browserArguments, {
+    stdio: 'ignore', windowsHide: true, env: browserEnvironment
+  });
   let cdp;
   try {
     const debugPort = await waitForDevTools(tempDirectory, browser);

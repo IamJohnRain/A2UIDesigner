@@ -20,3 +20,18 @@
 GitHub Pages 启用后可通过以下地址使用：
 
 https://iamjohnrain.github.io/A2UIDesigner/
+
+## CLI 渲染器
+
+Release 提供 Linux x64 的两个版本：
+
+- 轻量版：使用系统已安装的 Chrome/Chromium。
+- 完整离线版：内置固定版本的 `chrome-headless-shell` 和 Noto Sans SC 字体，不要求系统预装浏览器或字体。
+
+两个版本均需要 Node.js 22+。解压后运行：
+
+```bash
+./render-card -i ./card.dsl.jsonl
+```
+
+完整参数、系统依赖和浏览器覆盖方式见 [`cli/LINUX.md`](cli/LINUX.md)。

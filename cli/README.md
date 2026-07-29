@@ -38,3 +38,5 @@ a2ui-render -i "D:\cases\card.dsl.jsonl" -o "D:\renders" -n "case-01.png"
 ```powershell
 $env:A2UI_BROWSER_PATH = "D:\Apps\Chrome\chrome.exe"
 ```
+
+Linux Release 同时提供轻量版和完整离线版。完整说明见 [LINUX.md](LINUX.md)。完整离线版会优先调用包内固定版本的 `chrome-headless-shell`，并通过独立 Fontconfig 加载包内 Noto Sans SC 字体。

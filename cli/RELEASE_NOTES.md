@@ -1,35 +1,30 @@
-# A2UI Card Renderer CLI v0.1.1
+# A2UI Card Renderer CLI v0.2.0
 
 独立的 Harmony Card DSL 命令行渲染工具，使用与 A2UIDesigner 网页编辑器相同的 GenUI 渲染核心。
 
-## 下载选择
+## Linux 下载选择
 
-- `a2ui-card-renderer-cli-v0.1.1.zip`：解压即用。Windows 可运行 `render-card.cmd`。
-- `a2ui-card-renderer-cli-0.1.1.tgz`：npm 安装包，可通过 `npm install -g` 全局安装。
-- `SHA256SUMS.txt`：上述两个文件的 SHA-256 校验值。
+- `a2ui-card-renderer-linux-x64-light-v0.2.0.tar.gz`：轻量版，使用系统 Chrome/Chromium。
+- `a2ui-card-renderer-linux-x64-full-v0.2.0.tar.gz`：完整离线版，内置固定版本的 chrome-headless-shell 和 Noto Sans SC 字体。
+- `SHA256SUMS-linux.txt`：两个 Linux 包的 SHA-256 校验值。
 
-运行环境：Node.js 22 或更高版本，以及 Chrome、Edge 或 Chromium。浏览器不在标准安装位置时，通过 `A2UI_BROWSER_PATH` 指定。
+两个版本均需要 Node.js 22 或更高版本。轻量版需要系统安装 Chrome/Chromium；完整离线版不需要系统浏览器和字体，但仍需要 glibc 及 chrome-headless-shell 的基础动态库。
 
-v0.1.1 将输出设备像素密度修正为与原生 PNG 一致的 `3.5x`。`300x140` Surface 现在输出 `1050x490`，`140x140` Surface 输出 `490x490`，文字和边缘均由浏览器以目标分辨率直接栅格化。
+完整包固定使用 Chrome for Testing 151.0.7922.47 和 Noto Sans CJK 2.004。CLI 优先使用 `A2UI_BROWSER_PATH`，其次使用包内运行时，最后回退到系统浏览器。
 
-## ZIP 使用方式
+## Linux 使用方式
 
-```powershell
-render-card.cmd -i "D:\cases\card.dsl.jsonl"
-render-card.cmd -i "D:\cases\card.dsl.jsonl" -o "D:\renders" -n "case-01.png"
+```bash
+tar -xzf a2ui-card-renderer-linux-x64-full-v0.2.0.tar.gz
+cd a2ui-card-renderer
+./render-card -i ./card.dsl.jsonl
+./render-card -i ./card.dsl.jsonl -o ./renders -n case-01.png
 ```
 
-也可以跨平台调用：
+也可以直接调用 Node.js 入口：
 
-```powershell
-node cli/render-card.js -i "D:\cases\card.dsl.jsonl"
-```
-
-## npm 安装方式
-
-```powershell
-npm install -g .\a2ui-card-renderer-cli-0.1.1.tgz
-a2ui-render -i "D:\cases\card.dsl.jsonl" -o "D:\renders" -n "case-01.png"
+```bash
+node cli/render-card.js -i ./card.dsl.jsonl
 ```
 
 ## 参数

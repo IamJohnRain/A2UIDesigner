@@ -340,7 +340,7 @@
   }
 
   function fitAdaptiveText(root) {
-    root.style.fontFamily = '"HarmonyOS Sans SC","HarmonyOS Sans","Microsoft YaHei",sans-serif';
+    root.style.fontFamily = '"HarmonyOS Sans SC","HarmonyOS Sans","Noto Sans CJK SC","Noto Sans SC","Microsoft YaHei",sans-serif';
     root.querySelectorAll('[data-genui-auto-fit="true"]').forEach(element => {
       const styles = element.__genuiComponent?.styles || {};
       const target = element.querySelector('.button-label') || element;

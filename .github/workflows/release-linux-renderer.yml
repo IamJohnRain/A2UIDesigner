@@ -1,0 +1,48 @@
+name: Release Linux renderer packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing or new release tag
+        required: true
+        default: v0.2.0
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build Linux packages
+        run: ./tools/build-linux-packages.sh dist-linux
+      - name: Smoke test lightweight package
+        run: |
+          mkdir smoke-light
+          tar -xzf dist-linux/a2ui-card-renderer-linux-x64-light-*.tar.gz -C smoke-light
+          smoke-light/a2ui-card-renderer/render-card --help
+      - name: Smoke test full package runtime
+        run: |
+          mkdir smoke-full
+          tar -xzf dist-linux/a2ui-card-renderer-linux-x64-full-*.tar.gz -C smoke-full
+          smoke-full/a2ui-card-renderer/runtime/chrome-headless-shell/chrome-headless-shell --version
+          smoke-full/a2ui-card-renderer/render-card --help
+          mkdir smoke-output
+          smoke-full/a2ui-card-renderer/render-card \
+            -i "$GITHUB_WORKSPACE/references/datasets/Case-01-low-power-001/card.dsl.jsonl" \
+            -o "$GITHUB_WORKSPACE/smoke-output"
+          node -e "const b=require('fs').readFileSync('smoke-output/card.dsl.png');if(b.readUInt32BE(16)!==490||b.readUInt32BE(20)!==490)process.exit(1)"
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "A2UI Card Renderer CLI $TAG" --notes-file cli/RELEASE_NOTES.md
+          fi
+          gh release upload "$TAG" dist-linux/* --clobber
