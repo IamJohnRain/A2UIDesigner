@@ -1,0 +1,21 @@
+window.MediaAssetCatalog=[
+  "air_fill.svg","air_open_fill.svg","airplane_departure.svg","airplane_fill_1.svg","alarm_fill_1.svg",
+  "background.png","backward_fill.svg","battery_leaf_fill.svg","bell_fill.svg","bell_slash_fill.svg",
+  "bolt_fill.svg","bus_fill.svg","calendar_fill.svg","call_button.svg","checkmark_calendar_fill.svg",
+  "clean_fill.svg","clock.svg","clock_fill.svg","cloudy.png","cloudy_turning_sunny.png","cold.svg",
+  "courier_box.png","drop_1.svg","earphone_case_16644.svg","externaldrive_fill.svg","face.svg",
+  "fast_forward.svg","figure_pool_swim.svg","figure_run.svg","flame_fill.svg","foreground.png",
+  "heart_fill.svg","heat_generation.svg","hourglass_fill.svg","house_fill.svg","icon_alarm_clock.png",
+  "icon_alarm_clock1.png","icon_allergy.png","icon_call.png","icon_car.png","icon_charge.png","icon_clear.png",
+  "icon_earphone.png","icon_electricity.png","icon_focus.png","icon_high_temperature.png","icon_id.png",
+  "icon_left.png","icon_like.png","icon_meeting.png","icon_music.png","icon_phone.png","icon_remind.png",
+  "icon_right.png","icon_run.png","icon_save_power.png","icon_schedule.png","icon_schedule2.png",
+  "icon_sleep.png","icon_tiktok.png","icon_time.png","icon_time1.png","icon_timing.png","icon_watermark.png",
+  "icon_weathe2.png","icon_weather1.png","id_fill.svg","kidswatch_fill.svg","l_circle_fill.svg",
+  "lamp_ceiling.svg","lamp_ceiling_light.svg","layered_image.json","local_fill.svg","location_north_up_right_fill.svg","malathon.png",
+  "moon_circle_fill.svg","moon_z_fill_1.svg","music_fill.svg","partly_cloudy.png","pause_fill.svg",
+  "person_3_fill.svg","phone_fill.svg","phone_fill_1.svg","play_fill.svg","qrcode.svg","r_circle_fill.svg",
+  "rain.png","snow.png","startIcon.png","stopwatch_fill.svg","sun_max.svg","sun_min.svg","sunny.png",
+  "thermometer_snowflake.svg","thermometer_sun_fill.svg","thunder.png","thunder_storm.svg",
+  "thunderstorm.png","tornado.png","tram_fill.svg","typhoon_fill.svg","weather_backgroud.png","z_alarm_fill.svg"
+];

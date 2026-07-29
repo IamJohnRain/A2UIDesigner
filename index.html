@@ -6,6 +6,7 @@
   <title>Harmony Card DSL Studio</title>
   <link rel="stylesheet" href="styles.css" />
   <link rel="stylesheet" href="color-picker.css" />
+  <link rel="stylesheet" href="add-ui.css?v=20260729-media-catalog" />
   <style>[hidden]{display:none!important}.button-link{display:inline-flex;align-items:center;text-decoration:none;border:1px solid var(--line);border-radius:8px;background:#fff;color:#30384a;padding:8px 12px}.button-link:hover{background:#f4f5fa}</style>
 </head>
 <body>
@@ -24,9 +25,12 @@
   <main class="workspace">
     <aside class="source-panel panel">
       <div class="panel-head"><div><h2>DSL 源码</h2><p>粘贴三行 JSONL，或打开本地文件</p></div><span id="parseState" class="status muted">等待输入</span></div>
-      <textarea id="dslInput" spellcheck="false" placeholder='{"version":"v0.9","createSurface":{...}}&#10;{"version":"v0.9","updateComponents":{...}}&#10;{"version":"v0.9","updateDataModel":{...}}'></textarea>
+      <div class="source-tabs" role="tablist" aria-label="编辑视图"><button class="source-tab active" data-source-tab="code" role="tab" aria-selected="true">源码</button><button class="source-tab" data-source-tab="tree" role="tab" aria-selected="false">布局</button></div>
+      <div id="sourceCodePanel" class="source-tab-panel"><textarea id="dslInput" spellcheck="false" placeholder='{"version":"v0.9","createSurface":{...}}&#10;{"version":"v0.9","updateComponents":{...}}&#10;{"version":"v0.9","updateDataModel":{...}}'></textarea>
       <div id="errorBox" class="error-box" hidden></div>
       <div class="source-actions"><button id="formatBtn" class="ghost">格式化</button><button id="renderBtn" class="primary grow">渲染卡片</button></div>
+      </div>
+      <div id="sourceTreePanel" class="source-tab-panel layout-tree-panel" hidden><p class="tree-help">点击节点即可在画布和属性栏中编辑；警告表示未挂载或无效引用。</p><div id="layoutTree" class="layout-tree" role="tree"></div></div>
     </aside>
 
     <section class="stage-panel panel">
@@ -56,7 +60,15 @@
     </aside>
   </main>
   <div id="toast" class="toast"></div>
+  <div id="assetDialog" class="modal-backdrop" hidden>
+    <section class="asset-dialog" role="dialog" aria-modal="true" aria-labelledby="assetDialogTitle">
+      <header><div><h2 id="assetDialogTitle">选择图片素材</h2><p>选择素材后再插入，避免创建不可见图片组件。</p></div><button id="closeAssetDialog" class="icon-btn" type="button" aria-label="关闭">×</button></header>
+      <div class="asset-body"><div id="assetGrid" class="asset-grid"></div><aside class="asset-preview"><div id="assetPreviewImage" class="asset-preview-image">请选择素材</div><strong id="assetPreviewName">未选择素材</strong><small id="assetPreviewMeta">图片将以 contain 方式插入</small></aside></div>
+      <footer><button id="cancelAssetDialog" class="secondary" type="button">取消</button><button id="insertAssetBtn" class="primary" type="button" disabled>插入图片</button></footer>
+    </section>
+  </div>
   <script src="genui-renderer.js?v=20260724-native-defaults"></script>
-  <script src="app.js?v=20260724-genui-renderer"></script>
+  <script src="references/media/assets.js?v=20260729-file-compatible"></script>
+  <script src="app.js?v=20260729-layout-tree-fix"></script>
 </body>
 </html>

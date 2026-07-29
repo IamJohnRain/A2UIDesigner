@@ -1,4 +1,15 @@
 (() => {
+    let assetCatalog=Array.isArray(window.MediaAssetCatalog)?window.MediaAssetCatalog:[];
+    const treeExpanded=new Set(); let pendingAssetSrc='';
+    function canContain(component){return !!component&&(containerTypes.has(component.component)||Array.isArray(component.children))}
+    function componentDefaults(type,src=''){const defs={Text:{content:'新文字',styles:{width:80,height:20,fontSize:14,fontColor:'#E5000000'}},Button:{label:'按钮',styles:{width:80,height:32,fontSize:14,fontColor:'#FFFFFFFF',backgroundColor:'#FF5B5CE2',borderRadius:16}},Image:{src,styles:{width:40,height:40,objectFit:'contain'}},Progress:{value:40,total:100,styles:{width:80,height:8,type:'linear',color:'#FF5B5CE2',backgroundColor:'#22000000',borderRadius:4}},Divider:{styles:{width:80,height:1,color:'#22000000'}},Row:{children:[],itemMargin:4,styles:{width:100,height:50,alignItems:'center'}},Column:{children:[],itemMargin:4,styles:{width:100,height:60}},Stack:{children:[],styles:{width:80,height:80,alignContent:'center'}}};return {id:uniqueId(type),component:type,...defs[type]}}
+    function updateAddControls(){const selected=state.map.get(state.selectedId),hint=document.querySelector('.add-section p'),canAddLeaf=canContain(selected),canAddContainer=!!selected&&(canContain(selected)||!!findParent(selected.id));document.querySelectorAll('[data-add]').forEach(button=>{button.disabled=containerTypes.has(button.dataset.add)?!canAddContainer:!canAddLeaf});if(!hint)return;hint.classList.toggle('add-error',!!selected&&!canContain(selected));hint.textContent=!state.update?'请先渲染一份 DSL。':!selected?'请选择组件后再添加元素。':canContain(selected)?`将在 ${selected.component} · ${selected.id} 内部添加子组件。`:`${selected.component} 不能包含子组件；可添加容器来包裹它。`}
+    function addComponentSafely(type,src=''){if(!state.update)return toast('请先渲染一份 DSL');const selected=state.map.get(state.selectedId),isLayout=containerTypes.has(type);if(!selected)return toast('请先选择组件');if(!isLayout&&!canContain(selected))return toast('当前组件不能包含子组件');const component=componentDefaults(type,src);if(isLayout&&!canContain(selected)){const parent=findParent(selected.id);if(!parent)return toast('根组件不能被包裹');mutate(()=>{const index=parent.children.indexOf(selected.id);component.children=[selected.id];parent.children.splice(index,1,component.id);state.components.push(component)});select(component.id);toast(`已用 ${type} 包裹 ${selected.component} · ${selected.id}`);return}mutate(()=>{selected.children=Array.isArray(selected.children)?selected.children:[];selected.children.push(component.id);state.components.push(component)});select(component.id);toast(`已在 ${selected.component} · ${selected.id} 内添加 ${type}`)}
+    function renderLayoutTree(){const root=$('#layoutTree');if(!root)return;root.innerHTML='';if(!state.update){root.innerHTML='<div class="tree-empty">渲染 DSL 后显示组件布局。</div>';return}const rootId=state.update.updateComponents.root,seen=new Set(),icons={Text:'T',Button:'B',Image:'▧',Progress:'%',Divider:'—',Row:'↔',Column:'↕',Stack:'▣',List:'☷'};const addRow=(id,depth,orphan=false)=>{const c=state.map.get(id),row=document.createElement('button');row.type='button';row.className='tree-row'+(id===state.selectedId?' active':'')+(orphan?' tree-orphan':'');row.style.paddingLeft=(6+depth*14)+'px';if(!c){row.innerHTML=`<span class="tree-expander"></span><span class="tree-icon">!</span><span class="tree-label">缺失组件</span><span class="tree-id">${id}</span><span class="tree-warning">⚠</span>`;root.appendChild(row);return}const children=Array.isArray(c.children)?c.children:[],expandable=children.length>0,expanded=treeExpanded.has(id)||id===rootId;row.innerHTML=`<span class="tree-expander">${expandable?(expanded?'⌄':'›'):''}</span><span class="tree-icon">${icons[c.component]||'□'}</span><span class="tree-label">${c.component}</span><span class="tree-id">${c.id}</span>${orphan?'<span class="tree-warning" title="未挂载组件">⚠</span>':''}`;row.onclick=e=>{if(expandable&&e.target.classList.contains('tree-expander')){treeExpanded.has(id)?treeExpanded.delete(id):treeExpanded.add(id);renderLayoutTree();return}select(id);requestAnimationFrame(()=>document.querySelector(`.dsl-node[data-id="${CSS.escape(id)}"]`)?.scrollIntoView({block:'center',inline:'center',behavior:'smooth'}))};root.appendChild(row);seen.add(id);if(expanded)children.forEach(child=>addRow(child,depth+1,orphan))};addRow(rootId,0);state.components.filter(c=>!seen.has(c.id)).forEach(c=>addRow(c.id,0,true))}
+    async function loadAssetCatalog(){if(!assetCatalog.length)throw Error('素材清单加载失败');return assetCatalog}
+    function assetPreview(name){if(name==='layered_image.json')return '<span class="layered-asset"><img src="references/media/background.png" alt=""><img src="references/media/foreground.png" alt=""></span>';const src=`references/media/${encodeURIComponent(name)}`;return `<img src="${src}" alt="${name}">`}
+    async function showAssetDialog(){if(!canContain(state.map.get(state.selectedId)))return toast('请先选择容器，再添加图片');pendingAssetSrc='';const dialog=$('#assetDialog'),grid=$('#assetGrid');grid.innerHTML='<div class="tree-empty">正在加载素材…</div>';dialog.hidden=false;$('#assetPreviewImage').textContent='请选择素材';$('#assetPreviewName').textContent='未选择素材';$('#insertAssetBtn').disabled=true;try{await loadAssetCatalog()}catch(error){grid.innerHTML='<div class="tree-empty">素材加载失败，请刷新后重试。</div>';return}grid.innerHTML='';assetCatalog.forEach(name=>{const button=document.createElement('button');button.type='button';button.className='asset-item';button.innerHTML=`<span class="asset-thumb">${assetPreview(name)}</span><span>${name}</span>`;button.onclick=()=>{pendingAssetSrc=`resources/base/media/${name}`;grid.querySelectorAll('.asset-item').forEach(x=>x.classList.remove('selected'));button.classList.add('selected');$('#assetPreviewImage').innerHTML=assetPreview(name);$('#assetPreviewName').textContent=name;$('#insertAssetBtn').disabled=false};grid.appendChild(button)})}
+    function closeAssetDialog(){$('#assetDialog').hidden=true;pendingAssetSrc=''}
   const $ = s => document.querySelector(s);
   const renderer = window.GenUIRenderer;
   const state = { messages: [], create: null, update: null, dataMsg: null, components: [], map: new Map(), selectedId: null, scale: 2, history: [], future: [], fileName: 'card.dsl.jsonl' };
@@ -128,4 +139,53 @@
   els.stage.addEventListener('click',e=>{if(e.target===els.stage||e.target===$('#canvasWrap'))deselect()});
   $('#undoBtn').onclick=()=>{if(!state.history.length)return;state.future.push(JSON.stringify(state.messages));restore(state.history.pop())};$('#redoBtn').onclick=()=>{if(!state.future.length)return;state.history.push(JSON.stringify(state.messages));restore(state.future.pop())};
   document.addEventListener('keydown',e=>{if(['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName))return;if(e.key==='Delete')removeSelected();if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s'){e.preventDefault();save()}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='z'){e.preventDefault();e.shiftKey?$('#redoBtn').click():$('#undoBtn').click()}});
+  function renderLayoutTreeFixed(){
+    const root=$('#layoutTree');
+    if(!root)return;
+    root.innerHTML='';
+    if(!state.update){root.innerHTML='<div class="tree-empty">渲染 DSL 后显示组件布局。</div>';return}
+    const rootId=state.update.updateComponents.root;
+    const reachable=new Set(),visiting=new Set(),cycleIds=new Set();
+    const walkReferences=id=>{
+      if(visiting.has(id)){cycleIds.add(id);return}
+      if(reachable.has(id))return;
+      reachable.add(id);
+      const component=state.map.get(id);
+      if(!component)return;
+      visiting.add(id);
+      (Array.isArray(component.children)?component.children:[]).forEach(walkReferences);
+      visiting.delete(id);
+    };
+    walkReferences(rootId);
+    const icons={Text:'T',Button:'B',Image:'▧',Progress:'%',Divider:'—',Row:'↔',Column:'↕',Stack:'▣',List:'☷'};
+    const rendered=new Set();
+    const addRow=(id,depth,orphan=false,path=new Set())=>{
+      const component=state.map.get(id),row=document.createElement('button');
+      row.type='button';row.className='tree-row'+(id===state.selectedId?' active':'')+(orphan?' tree-orphan':'');row.style.paddingLeft=(6+depth*14)+'px';
+      if(!component){row.innerHTML=`<span class="tree-expander"></span><span class="tree-icon">!</span><span class="tree-label">缺失组件</span><span class="tree-id">${id}</span><span class="tree-warning" title="引用的组件不存在">⚠</span>`;root.appendChild(row);return}
+      const children=Array.isArray(component.children)?component.children:[],expandable=children.length>0,expanded=treeExpanded.has(id)||id===rootId,isCycle=path.has(id)||cycleIds.has(id);
+      row.innerHTML=`<span class="tree-expander">${expandable&&!isCycle?(expanded?'⌄':'›'):''}</span><span class="tree-icon">${icons[component.component]||'□'}</span><span class="tree-label">${component.component}</span><span class="tree-id">${component.id}</span>${orphan?'<span class="tree-warning" title="未挂载组件">⚠</span>':isCycle?'<span class="tree-warning" title="循环引用">↻</span>':''}`;
+      row.onclick=e=>{if(expandable&&!isCycle&&e.target.classList.contains('tree-expander')){treeExpanded.has(id)?treeExpanded.delete(id):treeExpanded.add(id);renderLayoutTreeFixed();return}select(id);requestAnimationFrame(()=>document.querySelector(`.dsl-node[data-id="${CSS.escape(id)}"]`)?.scrollIntoView({block:'center',inline:'center',behavior:'smooth'}))};
+      root.appendChild(row);rendered.add(id);
+      if(expanded&&!isCycle){const nextPath=new Set(path);nextPath.add(id);children.forEach(child=>addRow(child,depth+1,orphan,nextPath))}
+    };
+    addRow(rootId,0);
+    const unreachable=state.components.filter(component=>!reachable.has(component.id));
+    const unreachableIds=new Set(unreachable.map(component=>component.id));
+    const referencedByUnreachable=new Set();
+    unreachable.forEach(component=>(Array.isArray(component.children)?component.children:[]).forEach(id=>{if(unreachableIds.has(id))referencedByUnreachable.add(id)}));
+    let orphanRoots=unreachable.filter(component=>!referencedByUnreachable.has(component.id));
+    if(!orphanRoots.length&&unreachable.length)orphanRoots=[unreachable[0]];
+    orphanRoots.forEach(component=>addRow(component.id,0,true));
+    unreachable.filter(component=>!rendered.has(component.id)&&!referencedByUnreachable.has(component.id)).forEach(component=>addRow(component.id,0,true));
+  }
+  renderLayoutTree=renderLayoutTreeFixed;
+  const baseRenderAll=renderAll,baseSelect=select,baseDeselect=deselect;
+  renderAll=function(){baseRenderAll();renderLayoutTree();updateAddControls()};
+  select=function(id,rerender=true){baseSelect(id,rerender);renderLayoutTree();updateAddControls()};
+  deselect=function(){baseDeselect();renderLayoutTree();updateAddControls()};
+  document.querySelectorAll('[data-add]').forEach(button=>button.onclick=()=>{const type=button.dataset.add;if(type==='Image')showAssetDialog();else addComponentSafely(type)});
+  document.querySelectorAll('[data-source-tab]').forEach(tab=>tab.onclick=()=>{const tree=tab.dataset.sourceTab==='tree';$('#sourceCodePanel').hidden=tree;$('#sourceTreePanel').hidden=!tree;document.querySelectorAll('[data-source-tab]').forEach(x=>{const active=x===tab;x.classList.toggle('active',active);x.setAttribute('aria-selected',String(active))});if(tree)renderLayoutTree()});
+  $('#closeAssetDialog').onclick=closeAssetDialog;$('#cancelAssetDialog').onclick=closeAssetDialog;$('#assetDialog').onclick=e=>{if(e.target===$('#assetDialog'))closeAssetDialog()};$('#insertAssetBtn').onclick=()=>{if(!pendingAssetSrc)return;const src=pendingAssetSrc;closeAssetDialog();addComponentSafely('Image',src)};
+  updateAddControls();renderLayoutTree();
 })();
