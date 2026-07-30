@@ -198,6 +198,12 @@
         const scrollBar = resolved(styles.scrollBar, context) || defaults.List.scrollBar;
         style.overflowX = direction === 'horizontal' ? (scrollBar === 'off' ? 'hidden' : 'auto') : 'hidden';
         style.overflowY = direction === 'vertical' ? (scrollBar === 'off' ? 'hidden' : 'auto') : 'hidden';
+        // Chromium's overlay scrollbar is absent in headless screenshots. ArkUI
+        // still paints an indicator for an overflowing List, so finalize() adds
+        // a non-scrolling visual indicator after layout is known.
+        element.dataset.genuiListScrollBar = scrollBar;
+        element.dataset.genuiListDirection = direction;
+        style.position = 'relative';
         if (scrollBar === 'off') style.scrollbarWidth = 'none';
       }
     } else if (component.component === 'Stack') {
@@ -411,6 +417,8 @@
       text.style.overflow = 'hidden';
       text.style.textOverflow = 'ellipsis';
       text.style.whiteSpace = 'nowrap';
+      text.dataset.genuiCheckboxLabel = 'true';
+      text.dataset.genuiCheckboxText = label;
       element.appendChild(text);
     }
   }
@@ -466,6 +474,45 @@
         visible = candidate;
       }
       element.textContent = visible;
+    });
+    root.querySelectorAll('[data-genui-checkbox-label="true"]').forEach(element => {
+      const original = element.dataset.genuiCheckboxText || '';
+      const available = Math.max(0, element.clientWidth - 4);
+      if (!original || available <= 0) return;
+      const widthOf = text => {
+        element.textContent = text;
+        const range = document.createRange();
+        range.selectNodeContents(element);
+        const width = range.getBoundingClientRect().width;
+        range.detach();
+        return width;
+      };
+      if (widthOf(original) <= available) {
+        element.textContent = original;
+        return;
+      }
+      const ellipsis = '...';
+      let visible = '';
+      for (const segment of [...original]) {
+        if (widthOf(visible + segment + ellipsis) > available) break;
+        visible += segment;
+      }
+      element.textContent = visible + ellipsis;
+    });
+    root.querySelectorAll('[data-genui-list-scroll-bar]').forEach(list => {
+      list.querySelector('.genui-list-scroll-indicator')?.remove();
+      const mode = list.dataset.genuiListScrollBar;
+      const vertical = list.dataset.genuiListDirection !== 'horizontal';
+      const viewport = vertical ? list.clientHeight : list.clientWidth;
+      const content = vertical ? list.scrollHeight : list.scrollWidth;
+      if (mode === 'off' || viewport <= 0 || (mode === 'auto' && content <= viewport)) return;
+      const indicator = document.createElement('span');
+      const length = Math.min(viewport, Math.max(48, viewport * viewport / Math.max(content, 1)));
+      indicator.className = 'genui-list-scroll-indicator';
+      indicator.style.cssText = `position:absolute;display:block;pointer-events:none;background:${cssColor('#FF0C0C0C')};z-index:1;${vertical
+        ? `top:0;right:4px;width:4px;height:${length}px;border-radius:2px`
+        : `left:0;bottom:4px;height:4px;width:${length}px;border-radius:2px`}`;
+      list.appendChild(indicator);
     });
     root.querySelectorAll('.genui-progress-track').forEach(track => {
       const host = track.parentElement;
