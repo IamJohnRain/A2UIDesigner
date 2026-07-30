@@ -12,7 +12,7 @@
   ];
   const fontStyle = document.createElement('style');
   fontStyle.dataset.genuiEmbeddedFonts = 'HarmonyOS Sans SC';
-  fontStyle.textContent = embeddedFontFaces.map(([name, weight]) => `@font-face{font-family:"${embeddedFontFamily}";src:url("references/fonts/HarmonyOS_Sans_SC_${name}.ttf") format("truetype");font-style:normal;font-weight:${weight};font-display:block}`).join('');
+  fontStyle.textContent = `${embeddedFontFaces.map(([name, weight]) => `@font-face{font-family:"${embeddedFontFamily}";src:url("references/fonts/HarmonyOS_Sans_SC_${name}.ttf") format("truetype");font-style:normal;font-weight:${weight};font-display:block}`).join('')}[data-genui-list-scroll-bar]{scrollbar-width:none;-ms-overflow-style:none}[data-genui-list-scroll-bar]::-webkit-scrollbar{display:none;width:0;height:0}`;
   document.head.appendChild(fontStyle);
 
   // Versioned compatibility profile shared by the Designer and the CLI.
