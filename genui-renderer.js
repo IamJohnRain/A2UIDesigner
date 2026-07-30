@@ -459,7 +459,13 @@
         if (!textNode) return 0;
         const range = document.createRange();
         range.selectNodeContents(textNode);
-        const width = range.getBoundingClientRect().width;
+        // Range bounds include the Designer canvas transform (for example its
+        // 200% zoom), while clientWidth remains in layout pixels. Convert the
+        // visual measurement back to layout pixels before comparing them.
+        const elementWidth = element.getBoundingClientRect().width;
+        const scaleX = element.clientWidth > 0 && elementWidth > 0
+          ? elementWidth / element.clientWidth : 1;
+        const width = range.getBoundingClientRect().width / scaleX;
         range.detach();
         return width;
       };
@@ -483,7 +489,10 @@
         element.textContent = text;
         const range = document.createRange();
         range.selectNodeContents(element);
-        const width = range.getBoundingClientRect().width;
+        const elementWidth = element.getBoundingClientRect().width;
+        const scaleX = element.clientWidth > 0 && elementWidth > 0
+          ? elementWidth / element.clientWidth : 1;
+        const width = range.getBoundingClientRect().width / scaleX;
         range.detach();
         return width;
       };
