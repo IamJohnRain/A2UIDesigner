@@ -1,5 +1,10 @@
 (() => {
-  const defaults = Object.freeze({
+  // Versioned compatibility profile shared by the Designer and the CLI.
+  // Values in this object mirror references/genui and its ArkUI defaults.
+  const compatibilityProfile = Object.freeze({
+    id: 'genui-arkui-2026-07',
+    apiVersion: 12,
+    theme: 'light',
     Button: Object.freeze({
       padding: Object.freeze({ top: 8, right: 12, bottom: 8, left: 12 }),
       fontSize: 16,
@@ -25,9 +30,17 @@
     Column: Object.freeze({ itemMargin: 8, alignItems: 'start', justifyContent: 'start' }),
     List: Object.freeze({ space: 0, listDirection: 'vertical', scrollBar: 'auto' }),
     Image: Object.freeze({ aspectRatio: 1, objectFit: 'cover' }),
-    Divider: Object.freeze({ strokeWidth: 1, vertical: false, color: '#33000000' }),
-    Progress: Object.freeze({ value: 0, total: 100, type: 'linear', color: '#FF0A59F7' })
+    Divider: Object.freeze({ strokeWidth: 1, vertical: false, color: '#33000000', lineCap: 'butt' }),
+    Progress: Object.freeze({
+      value: 0,
+      total: 100,
+      type: 'linear',
+      color: '#FF0A59F7',
+      trackColor: '#19000000',
+      linearStrokeWidth: 4
+    })
   });
+  const defaults = compatibilityProfile;
 
   function cssColor(value) {
     if (!value) return '';
@@ -100,6 +113,8 @@
   function applyCommonStyles(element, component, context) {
     const styles = component.styles || {};
     const style = element.style;
+    // ArkUI nodes do not shrink unless flexShrink is explicitly applied.
+    style.flexShrink = '0';
     applyComponentDefaults(element, component);
     if (styles.width != null) style.width = `${styles.width}px`;
     if (styles.height != null) style.height = `${styles.height}px`;
@@ -126,6 +141,10 @@
       style.boxShadow = `${shadow.offsetX || 0}px ${shadow.offsetY || 0}px ${shadow.radius || 0}px ${cssColor(resolved(shadow.color || '#FF000000', context))}`;
     }
     if (styles.flexGrow != null) style.flexGrow = styles.flexGrow;
+    if (Number(styles.layoutWeight) > 0) {
+      style.flexGrow = String(styles.layoutWeight);
+      style.flexBasis = '0px';
+    }
     if (styles.flexShrink != null) style.flexShrink = styles.flexShrink;
   }
 
@@ -192,17 +211,17 @@
 
   function configureButton(element, component, context) {
     const label = resolved(component.label ?? component.text, context) ?? '';
-    const content = document.createElement('span');
     const text = document.createElement('span');
-    content.className = 'genui-button-content';
-    content.style.cssText = 'display:flex;align-items:center;justify-content:center;width:100%;height:100%;min-width:0;overflow:hidden';
     text.className = 'button-label';
     text.textContent = label;
     text.style.whiteSpace = 'nowrap';
-    content.appendChild(text);
-    element.style.display = 'block';
+    text.style.flex = 'none';
+    element.style.display = 'flex';
+    element.style.alignItems = 'center';
+    element.style.justifyContent = 'center';
+    element.style.minWidth = '0';
     element.style.overflow = 'hidden';
-    element.appendChild(content);
+    element.appendChild(text);
     if (component.styles?.minFontSize || component.styles?.maxFontSize) element.dataset.genuiAutoFit = 'true';
   }
 
@@ -243,21 +262,50 @@
     const percent = safeValue / safeTotal * 100;
     const type = String(styles.type || defaults.Progress.type).toLowerCase();
     const color = cssColor(resolved(styles.color, context) || defaults.Progress.color);
-    const track = cssColor(resolved(styles.backgroundColor, context) || '#19000000');
-    if (type === 'ring' || type === 'scalering' || type === 'eclipse') {
+    const track = cssColor(resolved(styles.backgroundColor, context) || defaults.Progress.trackColor);
+    if (type === 'ring' || type === 'scalering') {
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      const background = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      const foreground = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      svg.classList.add('genui-progress-ring');
+      svg.dataset.ratio = String(safeValue / safeTotal);
+      svg.dataset.progressType = type;
+      svg.setAttribute('viewBox', '0 0 100 100');
+      svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+      svg.style.cssText = 'display:block;width:100%;height:100%;overflow:visible';
+      [background, foreground].forEach(circle => {
+        circle.setAttribute('cx', '50');
+        circle.setAttribute('cy', '50');
+        circle.setAttribute('r', '46');
+        circle.setAttribute('fill', 'none');
+        circle.setAttribute('stroke-width', '8');
+      });
+      background.setAttribute('stroke', track);
+      foreground.setAttribute('stroke', color);
+      foreground.setAttribute('stroke-linecap', 'round');
+      foreground.setAttribute('pathLength', '100');
+      foreground.setAttribute('stroke-dasharray', `${percent} 100`);
+      foreground.setAttribute('transform', 'rotate(-90 50 50)');
+      svg.append(background, foreground);
+      element.style.background = 'transparent';
+      element.appendChild(svg);
+    } else if (type === 'eclipse') {
       element.style.borderRadius = '50%';
       element.style.background = `conic-gradient(${color} ${percent}%,${track} 0)`;
-      if (type !== 'eclipse') {
-        element.style.webkitMask = 'radial-gradient(circle,transparent 57%,#000 59%)';
-        element.style.mask = 'radial-gradient(circle,transparent 57%,#000 59%)';
-      }
     } else {
-      if (type === 'capsule') element.style.borderRadius = '999px';
-      element.style.background = track;
-      element.style.overflow = 'hidden';
+      const primitive = document.createElement('span');
       const fill = document.createElement('i');
-      fill.style.cssText = `display:block;width:${percent}%;height:100%;background:${color};border-radius:inherit`;
-      element.appendChild(fill);
+      primitive.className = 'genui-progress-track';
+      primitive.dataset.ratio = String(safeValue / safeTotal);
+      primitive.dataset.progressType = type;
+      primitive.style.cssText = 'position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);overflow:hidden';
+      primitive.style.background = track;
+      fill.style.cssText = `display:block;height:100%;background:${color}`;
+      primitive.appendChild(fill);
+      element.style.position = 'relative';
+      element.style.overflow = 'hidden';
+      element.style.background = 'transparent';
+      element.appendChild(primitive);
     }
   }
 
@@ -265,9 +313,18 @@
     const styles = component.styles || {};
     const vertical = styles.vertical ?? defaults.Divider.vertical;
     const strokeWidth = styles.strokeWidth ?? defaults.Divider.strokeWidth;
-    element.style.background = cssColor(resolved(styles.color, context) || defaults.Divider.color);
+    const primitive = document.createElement('span');
+    primitive.className = 'genui-divider-stroke';
+    primitive.dataset.vertical = String(vertical);
+    primitive.dataset.strokeWidth = String(Math.max(0, Number(strokeWidth) || defaults.Divider.strokeWidth));
+    primitive.dataset.lineCap = String(styles.lineCap || defaults.Divider.lineCap).toLowerCase();
+    primitive.style.cssText = 'position:absolute;display:block';
+    primitive.style.background = cssColor(resolved(styles.color, context) || defaults.Divider.color);
+    element.style.position = 'relative';
+    element.style.background = 'transparent';
     if (vertical && styles.width == null) element.style.width = `${strokeWidth}px`;
     if (!vertical && styles.height == null) element.style.height = `${strokeWidth}px`;
+    element.appendChild(primitive);
   }
 
   function configureCheckbox(element, component, context) {
@@ -297,12 +354,13 @@
       svg.setAttribute('height', Number(mark.size) || preset.markSize);
       svg.setAttribute('viewBox', '0 0 20 20');
       svg.setAttribute('aria-hidden', 'true');
-      path.setAttribute('d', 'M4 10 L8.2 14.2 L16 5.8');
+      path.setAttribute('d', 'M5 9.8 L8.8 13.6 L15.2 6.6');
       path.setAttribute('fill', 'none');
       path.setAttribute('stroke', cssColor(resolved(mark.strokeColor, context) || preset.markColor));
       path.setAttribute('stroke-width', String(Number(mark.strokeWidth) || preset.markStrokeWidth));
       path.setAttribute('stroke-linecap', 'round');
       path.setAttribute('stroke-linejoin', 'round');
+      path.style.filter = 'drop-shadow(0 0 0.5px rgba(0,0,0,.25))';
       svg.appendChild(path);
       control.appendChild(svg);
     } else {
@@ -353,6 +411,43 @@
         if (element.scrollWidth <= element.clientWidth && element.scrollHeight <= element.clientHeight) break;
       }
     });
+    root.querySelectorAll('.genui-progress-track').forEach(track => {
+      const host = track.parentElement;
+      const type = track.dataset.progressType;
+      const thickness = type === 'capsule'
+        ? host.clientHeight
+        : Math.min(defaults.Progress.linearStrokeWidth, host.clientHeight);
+      const radius = thickness / 2;
+      const ratio = Math.max(0, Math.min(1, Number(track.dataset.ratio) || 0));
+      track.style.height = `${thickness}px`;
+      track.style.borderRadius = `${radius}px`;
+      const fill = track.firstElementChild;
+      fill.style.borderRadius = `${radius}px`;
+      // ArkUI measures rounded linear progress along the centre line.
+      fill.style.width = `${ratio <= 0 ? 0 : Math.min(host.clientWidth,
+        2 * radius + Math.max(0, host.clientWidth - 2 * radius) * ratio)}px`;
+    });
+    root.querySelectorAll('.genui-divider-stroke').forEach(stroke => {
+      const host = stroke.parentElement;
+      const vertical = stroke.dataset.vertical === 'true';
+      const crossSize = vertical ? host.clientWidth : host.clientHeight;
+      const thickness = Math.min(crossSize, Math.max(0, Number(stroke.dataset.strokeWidth) || 0));
+      const round = stroke.dataset.lineCap === 'round';
+      stroke.style.borderRadius = round ? `${thickness / 2}px` : '0';
+      if (vertical) {
+        stroke.style.width = `${thickness}px`;
+        stroke.style.height = '100%';
+        stroke.style.left = '50%';
+        stroke.style.top = '0';
+        stroke.style.transform = 'translateX(-50%)';
+      } else {
+        stroke.style.width = '100%';
+        stroke.style.height = `${thickness}px`;
+        stroke.style.left = '0';
+        stroke.style.top = '50%';
+        stroke.style.transform = 'translateY(-50%)';
+      }
+    });
   }
 
   function apply(element, component, context) {
@@ -361,5 +456,12 @@
     configureContainer(element, component, context);
   }
 
-  window.GenUIRenderer = Object.freeze({ defaults, cssColor, apply, renderLeaf, finalize: fitAdaptiveText });
+  window.GenUIRenderer = Object.freeze({
+    compatibilityProfile,
+    defaults,
+    cssColor,
+    apply,
+    renderLeaf,
+    finalize: fitAdaptiveText
+  });
 })();
