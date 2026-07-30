@@ -71,6 +71,8 @@
 
   async function waitForAssets() {
     if (document.fonts?.ready) await document.fonts.ready;
+    const root = document.querySelector('#cardCanvas')?.firstElementChild;
+    if (root) renderer.finalize(root);
     await Promise.all([...document.images].map(image => image.complete
       ? Promise.resolve()
       : new Promise(resolve => {

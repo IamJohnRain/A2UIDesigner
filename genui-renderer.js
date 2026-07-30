@@ -422,24 +422,31 @@
         if (element.scrollWidth <= element.clientWidth && element.scrollHeight <= element.clientHeight) break;
       }
     });
-    const measureCanvas = document.createElement('canvas');
-    const measureContext = measureCanvas.getContext('2d');
     root.querySelectorAll('[data-genui-glyph-clip="true"]').forEach(element => {
       const original = element.dataset.genuiTextContent || '';
       const available = element.clientWidth;
-      if (!original || available <= 0 || !measureContext) return;
-      const computed = getComputedStyle(element);
-      measureContext.font = computed.font;
-      const letterSpacing = Number.parseFloat(computed.letterSpacing) || 0;
+      if (!original || available <= 0) return;
       const segments = typeof Intl.Segmenter === 'function'
         ? [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(original)].map(item => item.segment)
         : [...original];
-      const widthOf = text => measureContext.measureText(text).width + Math.max(0, segments.length - 1) * letterSpacing;
-      if (widthOf(original) <= available) return;
+      const widthOf = text => {
+        element.textContent = text;
+        const textNode = element.firstChild;
+        if (!textNode) return 0;
+        const range = document.createRange();
+        range.selectNodeContents(textNode);
+        const width = range.getBoundingClientRect().width;
+        range.detach();
+        return width;
+      };
+      if (widthOf(original) <= available) {
+        element.textContent = original;
+        return;
+      }
       let visible = '';
       for (const segment of segments) {
         const candidate = visible + segment;
-        if (measureContext.measureText(candidate).width + Math.max(0, [...candidate].length - 1) * letterSpacing > available) break;
+        if (widthOf(candidate) > available) break;
         visible = candidate;
       }
       element.textContent = visible;
