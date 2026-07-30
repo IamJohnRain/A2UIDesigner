@@ -28,7 +28,7 @@
   function reindex(){state.map=new Map(state.components.map(c=>[c.id,c]))}
   function dataRoot(){return state.dataMsg?.updateDataModel?.value||{}}
   function getPath(path, local){const root=path.startsWith('/')?dataRoot():local||dataRoot();const parts=path.replace(/^\//,'').split('/').filter(Boolean).map(x=>x.replace(/~1/g,'/').replace(/~0/g,'~'));return parts.reduce((v,k)=>v==null?'':v[k],root)}
-  function evalBinding(value,local){if(typeof value!=='string'||!/^\{\{[\s\S]*\}\}$/.test(value.trim()))return value;let exp=value.trim().slice(2,-2).trim();exp=exp.replace(/\$\{([^}]+)\}/g,(_,p)=>JSON.stringify(getPath(p,local)));try{return Function(`"use strict";return (${exp})`)()}catch{return value}}
+  function evalBinding(value,local){return renderer.evaluateBinding(value,getPath,local)}
   function previewAssetPath(src){
     if(typeof src!=='string'||!src)return '';
     if(src.startsWith('data:')||src.startsWith('blob:')||/^(https?:)?\/\//i.test(src))return src;

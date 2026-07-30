@@ -33,11 +33,7 @@
     }
 
     function evalBinding(value, local) {
-      if (typeof value !== 'string' || !/^\{\{[\s\S]*\}\}$/.test(value.trim())) return value;
-      let expression = value.trim().slice(2, -2).trim();
-      expression = expression.replace(/\$\{([^}]+)\}/g, (_, path) => JSON.stringify(getPath(path, local)));
-      try { return Function(`"use strict";return (${expression})`)(); }
-      catch { return value; }
+      return renderer.evaluateBinding(value, getPath, local);
     }
 
     function previewAssetPath(source) {

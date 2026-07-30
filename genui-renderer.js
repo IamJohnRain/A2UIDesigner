@@ -89,6 +89,15 @@
     return context.evalBinding(value, context.local);
   }
 
+  function evaluateBinding(value, getPath, local) {
+    if (typeof value !== 'string' || !/^\{\{[\s\S]*\}\}$/.test(value.trim())) return value;
+    let expression = value.trim().slice(2, -2).trim();
+    expression = expression.replace(/\$\{([^}]+)\}/g, (_, path) => JSON.stringify(getPath(path, local)));
+    const size = input => Array.isArray(input) ? input.length : 0;
+    try { return Function('size', `"use strict";return (${expression})`)(size); }
+    catch { return value; }
+  }
+
   function applyComponentDefaults(element, component) {
     const style = element.style;
     if (component.component === 'Button') {
@@ -188,12 +197,14 @@
     const maxLines = Number.isFinite(Number(styles.maxLines)) ? Math.max(0, Number(styles.maxLines)) : defaults.Text.maxLines;
     const overflow = styles.textOverflow === 'ellipsis' ? 'ellipsis' : 'clip';
     element.textContent = resolved(component.content, context) ?? '';
+    element.dataset.genuiTextContent = element.textContent;
     element.style.display = 'flex';
     element.style.alignItems = 'center';
     if (maxLines === 1) {
       element.style.whiteSpace = 'nowrap';
       element.style.overflow = 'hidden';
       element.style.textOverflow = overflow;
+      if (overflow === 'clip') element.dataset.genuiGlyphClip = 'true';
     } else if (maxLines < defaults.Text.maxLines) {
       element.style.overflow = 'hidden';
       element.style.display = '-webkit-box';
@@ -411,6 +422,28 @@
         if (element.scrollWidth <= element.clientWidth && element.scrollHeight <= element.clientHeight) break;
       }
     });
+    const measureCanvas = document.createElement('canvas');
+    const measureContext = measureCanvas.getContext('2d');
+    root.querySelectorAll('[data-genui-glyph-clip="true"]').forEach(element => {
+      const original = element.dataset.genuiTextContent || '';
+      const available = element.clientWidth;
+      if (!original || available <= 0 || !measureContext) return;
+      const computed = getComputedStyle(element);
+      measureContext.font = computed.font;
+      const letterSpacing = Number.parseFloat(computed.letterSpacing) || 0;
+      const segments = typeof Intl.Segmenter === 'function'
+        ? [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(original)].map(item => item.segment)
+        : [...original];
+      const widthOf = text => measureContext.measureText(text).width + Math.max(0, segments.length - 1) * letterSpacing;
+      if (widthOf(original) <= available) return;
+      let visible = '';
+      for (const segment of segments) {
+        const candidate = visible + segment;
+        if (measureContext.measureText(candidate).width + Math.max(0, [...candidate].length - 1) * letterSpacing > available) break;
+        visible = candidate;
+      }
+      element.textContent = visible;
+    });
     root.querySelectorAll('.genui-progress-track').forEach(track => {
       const host = track.parentElement;
       const type = track.dataset.progressType;
@@ -460,6 +493,7 @@
     compatibilityProfile,
     defaults,
     cssColor,
+    evaluateBinding,
     apply,
     renderLeaf,
     finalize: fitAdaptiveText
