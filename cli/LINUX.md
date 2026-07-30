@@ -6,10 +6,10 @@ Release 同时提供 Linux x64 和 ARM64（AArch64）版本。所有包都需要
 
 | 架构 | 轻量版 | 完整离线版 |
 |---|---|---|
-| x64 | `a2ui-card-renderer-linux-x64-light-v0.3.1.tar.gz` | `a2ui-card-renderer-linux-x64-full-v0.3.1.tar.gz` |
-| ARM64 | `a2ui-card-renderer-linux-arm64-light-v0.3.1.tar.gz` | `a2ui-card-renderer-linux-arm64-full-v0.3.1.tar.gz` |
+| x64 | `a2ui-card-renderer-linux-x64-light-v0.3.2.tar.gz` | `a2ui-card-renderer-linux-x64-full-v0.3.2.tar.gz` |
+| ARM64 | `a2ui-card-renderer-linux-arm64-light-v0.3.2.tar.gz` | `a2ui-card-renderer-linux-arm64-full-v0.3.2.tar.gz` |
 
-轻量版使用系统 Chrome/Chromium。完整离线版内置与 CPU 架构匹配的 headless shell、Noto Sans SC 字体和私有 Fontconfig 配置，不需要另外安装浏览器或字体。
+轻量版使用系统 Chrome/Chromium。所有版本都内置未修改的 HarmonyOS Sans SC 字体；完整离线版另外内置与 CPU 架构匹配的 headless shell、Noto Sans SC fallback 字体和私有 Fontconfig 配置，不需要另外安装浏览器或字体。
 
 ## 浏览器来源
 
@@ -22,7 +22,7 @@ Release 同时提供 Linux x64 和 ARM64（AArch64）版本。所有包都需要
 ## 使用
 
 ```bash
-tar -xzf a2ui-card-renderer-linux-arm64-full-v0.3.1.tar.gz
+tar -xzf a2ui-card-renderer-linux-arm64-full-v0.3.2.tar.gz
 cd a2ui-card-renderer
 ./render-card -i ./card.dsl.jsonl
 ./render-card -i ./card.dsl.jsonl -o ./renders -n case-01.png

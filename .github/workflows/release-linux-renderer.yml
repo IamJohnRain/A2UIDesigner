@@ -6,7 +6,7 @@ on:
       tag:
         description: Existing or new release tag
         required: true
-        default: v0.3.1
+        default: v0.3.2
 
 permissions:
   contents: write
@@ -48,6 +48,8 @@ jobs:
           tar -xzf dist-linux/a2ui-card-renderer-linux-x64-light-*.tar.gz -C smoke-light
           tar -xzf dist-linux/a2ui-card-renderer-linux-x64-full-*.tar.gz -C smoke-full
           test "$(cat smoke-full/a2ui-card-renderer/runtime/ARCHITECTURE)" = x64
+          test "$(find smoke-light/a2ui-card-renderer/references/fonts -name 'HarmonyOS_Sans_SC_*.ttf' | wc -l)" = 6
+          test -f smoke-light/a2ui-card-renderer/references/fonts/LICENSE-HarmonyOS-Sans.txt
           timeout 15s smoke-light/a2ui-card-renderer/render-card --help
           timeout 15s smoke-full/a2ui-card-renderer/runtime/chrome-headless-shell/chrome-headless-shell --version
           A2UI_DEBUG=1 timeout 60s smoke-full/a2ui-card-renderer/render-card \
@@ -75,6 +77,8 @@ jobs:
           tar -xzf dist-linux/a2ui-card-renderer-linux-arm64-light-*.tar.gz -C smoke-light
           tar -xzf dist-linux/a2ui-card-renderer-linux-arm64-full-*.tar.gz -C smoke-full
           test "$(cat smoke-full/a2ui-card-renderer/runtime/ARCHITECTURE)" = arm64
+          test "$(find smoke-light/a2ui-card-renderer/references/fonts -name 'HarmonyOS_Sans_SC_*.ttf' | wc -l)" = 6
+          test -f smoke-light/a2ui-card-renderer/references/fonts/LICENSE-HarmonyOS-Sans.txt
           file smoke-full/a2ui-card-renderer/runtime/chrome-headless-shell/chrome-headless-shell | grep -q 'ARM aarch64'
           timeout 15s smoke-light/a2ui-card-renderer/render-card --help
           timeout 15s smoke-full/a2ui-card-renderer/runtime/chrome-headless-shell/chrome-headless-shell --version

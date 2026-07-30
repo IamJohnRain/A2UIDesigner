@@ -55,6 +55,10 @@
 
 ## 回归矩阵
 
+### 字体基线
+
+Designer 和 CLI 使用 `references/fonts/` 中未修改的 HarmonyOS Sans SC TTF。任何打包方式都必须保留六个字重及 `LICENSE-HarmonyOS-Sans.txt`，不得对子集化、转换格式或修改字体。渲染截图前必须等待 `document.fonts.ready`；Noto Sans SC 和系统字体只作为缺字 fallback。
+
 每次改变共享渲染器至少检查：
 
 - 140×140 与 300×140 卡片；

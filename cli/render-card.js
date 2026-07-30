@@ -81,7 +81,8 @@ function findBrowser() {
 
 function contentType(filePath) {
   return ({ '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.png': 'image/png',
-    '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.svg': 'image/svg+xml' }[path.extname(filePath).toLowerCase()]
+    '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.svg': 'image/svg+xml',
+    '.ttf': 'font/ttf' }[path.extname(filePath).toLowerCase()]
     || 'application/octet-stream');
 }
 
@@ -105,9 +106,12 @@ function startServer(inputDirectory) {
   ]);
   const server = http.createServer((request, response) => {
     const url = new URL(request.url, 'http://127.0.0.1');
+    const fontName = url.pathname.startsWith('/references/fonts/') ? path.basename(url.pathname) : '';
     const filePath = url.pathname === '/asset'
       ? resolveAsset(url.searchParams.get('source'), inputDirectory)
-      : routes.get(url.pathname);
+      : fontName
+        ? path.join(projectRoot, 'references', 'fonts', fontName)
+        : routes.get(url.pathname);
     if (!filePath || !fs.existsSync(filePath)) {
       response.writeHead(404).end('Not found');
       return;

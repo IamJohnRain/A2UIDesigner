@@ -1,4 +1,20 @@
 (() => {
+  const embeddedFontFamily = 'A2UI HarmonyOS Sans SC';
+  const embeddedFontFaces = [
+    ['Thin', 100],
+    ['Light', 300],
+    ['Regular', 400],
+    ['Medium', 500],
+    ['Medium', 600],
+    ['Bold', 700],
+    ['Black', 800],
+    ['Black', 900]
+  ];
+  const fontStyle = document.createElement('style');
+  fontStyle.dataset.genuiEmbeddedFonts = 'HarmonyOS Sans SC';
+  fontStyle.textContent = embeddedFontFaces.map(([name, weight]) => `@font-face{font-family:"${embeddedFontFamily}";src:url("references/fonts/HarmonyOS_Sans_SC_${name}.ttf") format("truetype");font-style:normal;font-weight:${weight};font-display:block}`).join('');
+  document.head.appendChild(fontStyle);
+
   // Versioned compatibility profile shared by the Designer and the CLI.
   // Values in this object mirror references/genui and its ArkUI defaults.
   const compatibilityProfile = Object.freeze({
@@ -409,7 +425,7 @@
   }
 
   function fitAdaptiveText(root) {
-    root.style.fontFamily = '"HarmonyOS Sans SC","HarmonyOS Sans","Noto Sans CJK SC","Noto Sans SC","Microsoft YaHei",sans-serif';
+    root.style.fontFamily = `"${embeddedFontFamily}","HarmonyOS Sans SC","HarmonyOS Sans","Noto Sans CJK SC","Noto Sans SC","Microsoft YaHei",sans-serif`;
     root.querySelectorAll('[data-genui-auto-fit="true"]').forEach(element => {
       const styles = element.__genuiComponent?.styles || {};
       const target = element.querySelector('.button-label') || element;
@@ -498,6 +514,7 @@
 
   window.GenUIRenderer = Object.freeze({
     compatibilityProfile,
+    embeddedFontFamily,
     defaults,
     cssColor,
     evaluateBinding,

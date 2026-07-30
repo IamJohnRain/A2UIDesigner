@@ -1,5 +1,7 @@
 # Card DSL Studio
 
+> 本软件内置并使用 HarmonyOS Sans SC 字体。字体版权归 Huawei Device Co., Ltd. 所有，随软件打包使用和再分发遵循 `references/fonts/LICENSE-HarmonyOS-Sans.txt`；字体不得作为独立字体产品分发，也未对字体文件进行修改。
+
 一个无需服务端、无需安装依赖的 Harmony Card DSL 可视化编辑器。
 
 ## 使用

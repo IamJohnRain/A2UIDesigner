@@ -38,7 +38,7 @@ copy_common() {
   mkdir -p "$target/cli" "$target/references"
   cp "$ROOT/genui-renderer.js" "$ROOT/package.json" "$ROOT/README.md" "$ROOT/render-card" "$ROOT/render-card.cmd" "$target/"
   cp -R "$ROOT/cli/." "$target/cli/"
-  cp -R "$ROOT/references/media" "$target/references/"
+  cp -R "$ROOT/references/media" "$ROOT/references/fonts" "$target/references/"
   chmod +x "$target/render-card" "$target/cli/render-card.js"
 }
 
