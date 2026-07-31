@@ -109,8 +109,12 @@
     if (typeof value !== 'string' || !/^\{\{[\s\S]*\}\}$/.test(value.trim())) return value;
     let expression = value.trim().slice(2, -2).trim();
     expression = expression.replace(/\$\{([^}]+)\}/g, (_, path) => JSON.stringify(getPath(path, local)));
+    // GenUI rewrites JSON-pointer placeholders to this absolute data-model
+    // variable, and also accepts the variable directly in DSL expressions.
+    // Keep it independent of template-local variables, as native does.
     const size = input => Array.isArray(input) ? input.length : 0;
-    try { return Function('size', `"use strict";return (${expression})`)(size); }
+    const dataModel = getPath('/', local) ?? {};
+    try { return Function('size', '$__dataModel', `"use strict";return (${expression})`)(size, dataModel); }
     catch { return value; }
   }
 
