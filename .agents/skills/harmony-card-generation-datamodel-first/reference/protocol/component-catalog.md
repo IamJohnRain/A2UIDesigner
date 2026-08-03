@@ -25,7 +25,7 @@
 | --- | --- | --- |
 | 容器结构 | `children`、`itemMargin`、`wrap`、`space` | `justifyContent`、`alignItems`、`alignContent`、`listDirection`、`scrollBar` |
 | `Text` | `content` | `fontSize`、`fontWeight`、`fontColor`、`maxLines`、`textAlign`、`textOverflow` |
-| `Image` | `src` | `width`、`height`、`objectFit`、`aspectRatio` |
+| `Image` | `src` | `width`、`height`、`objectFit`、`aspectRatio`、静态 `fillColor` |
 | `Progress` | `value`、`total` | `type`、`color`、`width`、`height` |
 | `Button` | `label`、`enabled`、`onClick` | `fontSize`、`fontWeight`、`fontColor`、`backgroundColor`、`borderRadius` |
 | `Checkbox` | `label`、`value`、`group`、`select`、`onClick` | `selectedColor`、`unSelectedColor`、`shape`、`mark` |
@@ -33,7 +33,7 @@
 
 - 普通 `children` 只写组件 id 字符串数组；模板循环对象只给 `Row`、`Column`、`List.children`，形态固定为 `{ "componentId": "...", "path": "/items" }`；`Stack.children` 不使用模板循环。
 - 展示值只用字面量或完整 `{{ ... }}` 表达式；不要用 `{"path":"/..."}` 或 `formatString` 做组件值绑定。
-- 图片和背景图只用用户提供或素材库声明的本地/资源路径；没有真实资源时省略 `Image`，改用合法颜色、`Progress` 或 `Divider`。
+- 图片和背景图只用素材库声明的本地 SVG；没有真实 SVG 时省略 `Image`，改用 `Progress` 或 `Divider`。
 
 ## 组件速查表
 
@@ -43,7 +43,7 @@
 - `Row`：横向容器；必需 `children`；`children` 为字符串数组或模板循环对象；`itemMargin` 数字 vp；`wrap` 取 `noWrap|wrap`；`styles.justifyContent` 取 `start|center|end|spaceAround|spaceBetween|spaceEvenly`；`styles.alignItems` 取 `top|center|bottom`。
 - `Stack`：层叠容器，用于光晕、图片背景、叠加内容和进度环；必需 `children`；`children` 为字符串数组；`styles.alignContent` 取 `topStart|top|topEnd|start|center|end|bottomStart|bottom|bottomEnd`。
 - `Text`：文本展示；必需 `content`；`fontSize` 数字 fp；`fontWeight` 数字 `100..900`；`fontColor` 取 `#RRGGBB` 或 `#AARRGGBB`；`maxLines`、`minFontSize`、`maxFontSize` 为数字；`textOverflow` 取 `none|clip|ellipsis|marquee`；`textAlign` 取 `start|center|end|justify`；`wordBreak` 取 `normal|breakAll|breakWord|hyphenation`；`decoration` 为文本装饰对象。
-- `Image`：图片展示；必需 `src`；`objectFit` 取 `fill|contain|cover|auto|none|scaleDown|topStart|top|topEnd|start|center|end|bottomStart|bottom|bottomEnd|matrix`；`aspectRatio` 为数字。
+- `Image`：SVG 展示；必需 `src`；`objectFit` 取 `fill|contain|cover|auto|none|scaleDown|topStart|top|topEnd|start|center|end|bottomStart|bottom|bottomEnd|matrix`；`aspectRatio` 为数字；`fillColor` 为静态 `#RRGGBB` 或 `#AARRGGBB`，用于给 SVG 应用主题色，不接受表达式或路径绑定。
 - `Divider`：分隔线；无额外必需字段；属性位于 `styles`：`strokeWidth` 为数字或带单位字符串，`vertical` 为 boolean，`color` 为颜色字符串。
 - `Progress`：进度条或进度环；必需 `total`；`value` 为数字或完整表达式；`total` 同规则且必选；`styles.type` 取 `linear|ring|eclipse|scaleRing|capsule`；`styles.color` 为颜色字符串或完整表达式。
 - `Button`：语义按钮；必需 `label`；使用 `label` 和 `onClick`，不用 `Button.action`；`label` 为字符串或完整表达式；`enabled` 为 boolean 或完整表达式；`onClick` 为 EventHandler 数组；`styles.fontWeight` 为数字或 `normal|regular|medium|bold|bolder`。
@@ -82,7 +82,7 @@
 ## 特殊规则
 
 - `children`：普通组件树只写组件 id 字符串数组；模板循环对象只用于 `Row`、`Column`、`List` 的 `children`，对象只能包含 `componentId` 和 `path`；`Stack.children` 只用字符串数组。
-- `Image.src` 和 `styles.backgroundImage` 只使用用户提供或素材库声明的本地/资源路径；不支持网络 URL、内联/base64 SVG、未声明 SVG 或占位图；没有真实资源时省略 `Image`。
+- `Image.src` 和 `styles.backgroundImage` 只使用素材库声明的本地 SVG；不支持 PNG、网络 URL、内联/base64 SVG、未声明 SVG 或占位图；没有真实资源时省略 `Image`。SVG 颜色由编译器按主题写入静态 `styles.fillColor`。
 - `backgroundColor`、`linearGradient`、`backgroundImage` 等卡片背景字段写在 root 组件或 root 下真实背景组件，不写进 `createSurface.styles`。
 - `Button`：CTA 文本是受保护内容，避免窄固定宽度和省略；可点击按钮必须有已声明的 `onClick` EventHandler，动作能力不明时删除点击行为。
 - `Checkbox`：如需点击行为，必须使用已声明 event capability；不要虚构 `toggleTodo` 一类切换函数。

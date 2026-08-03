@@ -31,6 +31,7 @@ class AssetValidator(BaseValidator):
                 if (
                     isinstance(resolved, str)
                     and resolved in getattr(rules, "dark_monochrome_asset_paths", set())
+                    and not self._has_static_fill_color(component)
                     and self._has_dark_background(component_id, context, rules, parent_by_child)
                 ):
                     reporter.add(
@@ -42,7 +43,7 @@ class AssetValidator(BaseValidator):
                         json_pointer=f"/updateComponents/componentsById/{component_id}/src",
                         actual=resolved,
                         message="黑色或黑白实心 SVG 置于深色/暗色渐变背景上，真实渲染中容易看不清。",
-                        fix_hint="为图标增加不透明浅色底板、改用可读 PNG/浅色素材，或删除该弱图标并把空间让给主文字/CTA。",
+                        fix_hint="为 Image.styles.fillColor 指定可读的主题 hex，或删除该弱图标并把空间让给主文字/CTA。",
                     )
             styles = component.get("styles", {})
             if isinstance(styles, dict) and "backgroundImage" in styles:
@@ -95,6 +96,20 @@ class AssetValidator(BaseValidator):
                     fix_hint="使用素材库声明的本地 resources/base/media/*.svg。",
                 )
                 return
+        if not path.lower().endswith(".svg"):
+            reporter.add(
+                "error",
+                "ASSET_FORMAT_NOT_SVG",
+                "hard",
+                "genui",
+                line=2,
+                json_pointer=pointer,
+                actual=path,
+                expected="resources/base/media/*.svg",
+                message="Form 卡片素材只允许本地 SVG。",
+                fix_hint="从素材库选择语义匹配的 SVG，并通过 Image.styles.fillColor 应用主题色。",
+            )
+            return
         if path not in rules.asset_allowlist:
             reporter.add(
                 "error",
@@ -105,6 +120,13 @@ class AssetValidator(BaseValidator):
                 json_pointer=pointer,
                 actual=path,
             )
+
+    def _has_static_fill_color(self, component: dict[str, Any]) -> bool:
+        styles = component.get("styles", {})
+        if not isinstance(styles, dict):
+            return False
+        value = styles.get("fillColor")
+        return isinstance(value, str) and HEX_RE.fullmatch(value) is not None
 
     def _resolve_asset_path(self, value: Any, context) -> str | None:
         if isinstance(value, str) and is_wrapped_expression(value):

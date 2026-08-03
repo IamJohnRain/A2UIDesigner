@@ -18,5 +18,9 @@
   "ASSET_PATH_NOT_DECLARED": {
     "message": "资源路径未在素材库 allowlist 中声明。",
     "fixHint": "使用 reference/design/asset-library.md 中声明的 resources/base/media/*.svg，或删除 Image。"
+  },
+  "ASSET_FORMAT_NOT_SVG": {
+    "message": "Form 卡片素材只允许本地 SVG。",
+    "fixHint": "选择素材库声明的 SVG，并通过 Image.styles.fillColor 应用主题色。"
   }
 }

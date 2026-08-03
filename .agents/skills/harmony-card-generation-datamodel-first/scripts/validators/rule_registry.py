@@ -53,7 +53,7 @@ class RuleRegistry:
         asset_doc = self.skill_dir / "reference" / "design" / "asset-library.md"
         if asset_doc.exists():
             text = asset_doc.read_text(encoding="utf-8")
-            result.update(re.findall(r"`(resources/base/media/[^`]+\.(?:svg|png))`", text, re.I))
+            result.update(re.findall(r"`(resources/base/media/[^`]+\.svg)`", text, re.I))
         return result
 
     def _dark_monochrome_asset_paths(self) -> set[str]:

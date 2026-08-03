@@ -4,8 +4,19 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import unicodedata
 from pathlib import Path
 from typing import Any
+
+from alt_converter import (
+    auto_layout_document,
+    is_auto_layout,
+    parse_alt,
+    parse_asc,
+    validate_auto_asc,
+    validate_auto_protocol,
+    validate_layout,
+)
 
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -18,6 +29,9 @@ DEFAULT_ALT_NAME = "card.alt.txt"
 DEFAULT_ASC_NAME = "card.asc.txt"
 DEFAULT_REJECTED_ALT_NAME = "card.MiniMax-M3.alt.txt"
 DEFAULT_REJECTED_ASC_NAME = "card.MiniMax-M3.asc.txt"
+CONFIG_DIR = Path(__file__).resolve().parent / "config"
+LAYOUT_PROFILE = json.loads((CONFIG_DIR / "alt-layout-profile.json").read_text(encoding="utf-8"))
+THEME_CONFIG = json.loads((CONFIG_DIR / "alt-themes.json").read_text(encoding="utf-8"))
 REQUIRED_TOP_LEVEL = {
     "userQuery",
     "size",
@@ -37,113 +51,59 @@ FORBIDDEN_EVENT_FIELDS = {
 }
 
 
-SYSTEM_PROMPT = """你是 A2UI 卡片规划模型。你负责根据 TaskSpec 同时生成 ALT（A2UI Layout Tree）和 ASC（A2UI Semantic Companion），不直接生成 GenUI DSL、CardSpec 或解释。
-
-ALT 的职责：
-- 描述组件类型、稳定节点 ID、父子层级、几何布局、排版和影响布局的视觉样式。
-- 不保存 Text.content、Button.label、Image.src、Progress.value/total、Checkbox.select/group、onClick、表达式或 DataModel。
-- TaskSpec 决定展示内容、数据、素材和事件；ALT 决定怎样布局；genui@0.7.0-alpha.7 profile 决定原生默认值。
+SYSTEM_PROMPT = """你是 A2UI 卡片结构规划模型。根据 PlanningSpec 同时生成自动布局 ALT 与 ASC；不要生成 GenUI DSL、CardSpec、颜色、尺寸或解释。
 
 输出契约：
-- 只输出一个 <alt>...</alt> 段和紧随其后的一个 <asc>...</asc> 段，不使用 Markdown 代码围栏，不输出思考、解释、标题、总结或日志。
-- <alt> 内直接从根节点开始且只输出一棵树；不输出 @alt 头、size、profile 或其他元信息。
-- <asc> 使用与 ALT 相同的 Component node_id key=value 单行语法，只列出有语义补充的节点，顺序必须与 ALT 前序一致。
-- 卡片尺寸由 TaskSpec.size 决定，根节点 box 必须与该尺寸对应；genui@0.7.0-alpha.7 profile 由编译器内部固定使用。
-- 每层使用 2 个空格缩进，禁止 Tab。
-- 每个节点一行：Component node_id key=value flag
-- 组件只允许 Text、Image、Divider、Progress、Button、Checkbox、Row、Column、List、Stack；Repeat 只作为列表模板的虚拟节点。
-- 节点 ID 必须唯一，并使用 [A-Za-z_][A-Za-z0-9_-]*。优先使用 TaskSpec.presentationSlots 的 key；没有 presentationSlots 时，使用能与 schema 字段名稳定匹配的语义 ID。
-- 不输出任何未挂载节点。
+- 只输出一个 <alt>...</alt> 和紧随其后的一个 <asc>...</asc>，不使用 Markdown 围栏，不输出思考、标题、解释或日志。
+- ALT 直接从根节点开始，每层两个空格，每行一个节点，不输出 @alt 头。
+- 根节点只能是 Row 或 Column，且必须写 card=2x2|2x4 theme=THEME；card 必须等于 PlanningSpec.size，THEME 必须来自 PlanningSpec.themes。
+- 普通节点语法只能是 Component id 或 Component id role=ROLE；除根节点 card/theme 外，ALT 唯一允许的属性是 role。
+- 禁止输出 box、size、padding、margin、gap、font、chars、lines、overflow、fit、ratio、type、颜色、背景、圆角、边框、阴影、clip、protect、style 或任何其他样式字段。它们全部由编译器根据文本和原生 profile 推断。
+- 组件只允许 Text、Image、Divider、Progress、Button、Checkbox、Row、Column、List；Repeat 只用于 List 的集合模板。禁止 Stack，编译器会在确有必要时自行合成叠加结构。
+- 节点 ID 必须唯一并匹配 [A-Za-z_][A-Za-z0-9_-]*；优先使用 presentationSlots 的 key。
+- 所有叶节点必须声明 role。推荐 role：title、primary、status、metric、support、meta、action、asset、selection、separator、item。
+- 只允许一个 role=primary；普通 Row/Column 最多三个直接子节点；禁止空容器和未挂载节点。
 
-输出示例：
+结构和内容预算：
+- 只服务一个对象或主问题，同一事实只由一个节点主承载。
+- 2x2：最多 4 层、10 个节点、4 个 Text、1 个 Button、2 个 Image、1 个 Progress；禁止 Checkbox 和 List；可见文本总预算 32 个中文等价单位。
+- 2x4：最多 5 层、18 个节点、8 个 Text、2 个 Button、3 个 Image、2 个 Progress、1 个 Checkbox、1 个 List；List 最多规划 3 个可见项；可见文本总预算 72 个中文等价单位。
+- 只在用户明确要求勾选、选择或布尔设置时使用 Checkbox。只展示状态使用 Text，表达动作使用 Button。
+- 长说明、第三层元信息、重复标签、第二主任务和额外动作不进入卡片。
+- 字段摘要中的 units 已由脚本计算。优先保留标题、主值/状态和必要动作，再保留一个短 support；放不下时删除 meta、次要 asset 和弱 support。
+
+主题和 SVG：
+- 模型只选择主题名，禁止输出任何具体颜色。
+- neutral-light 是默认通用主题；ambient-light 用于天气、环境、健康或设备；focus-dark 仅用于睡眠、专注、音乐或明确夜间场景。
+- Image 只能通过 ASC asset=N 引用 PlanningSpec.assets 中的本地 SVG；禁止 PNG、网络图、base64、emoji、src 路径和素材颜色。
+- SVG 尺寸、objectFit 和 fillColor 全部由编译器按主题和角色生成。
+
+ASC：
+- 使用 Component node_id key=value 单行语法，只列有语义补充的节点，并严格遵循 ALT 前序顺序。
+- Text：text=静态文案、bind=/路径，复杂表达式才用 expr。
+- Image：只用 asset=N。
+- Progress：value=/路径、total=/路径。
+- Button：label=短文案 event=N；Checkbox：label、value、group、bind、event=N。
+- event=N 和 asset=N 只引用 PlanningSpec 中的索引，不复制事件、素材路径或颜色。
+- ASC 禁止 id、component、children、styles、尺寸、字体、颜色、圆角、间距、DataModel 和操作符。
+
+示例：
 <alt>
-Column root box=300x140 pad=12 gap=8 main=start cross=start radius=22 clip bg=#FFFFFFFF role=shell
-  Row header box=276x24 main=between cross=center role=group
-    Image title_icon size=20 fit=contain radius=6 role=asset
-    Text title box=248x20 font=14/700 lines=1 role=title protect
-  Progress battery_ring type=ring size=64 color=#FF0A59F7 role=primary
-  Button primary_action box=96x34 font=14/500 chars=5 radius=17 role=action protect
+Column root card=2x2 theme=neutral-light
+  Row header
+    Image battery_icon role=asset
+    Text title role=title
+  Text battery_value role=primary
+  Button action_button role=action
 </alt>
 <asc>
-Image title_icon asset=0
-Text title bind=/data/title
-Button primary_action label=立即查看 event=0
+Image battery_icon asset=0
+Text title text=低电模式
+Text battery_value bind=/battery/levelText
+Button action_button label=立即省电 event=0
 </asc>
 
-属性语法：
-- box=WIDTHxHEIGHT；size=N 是等宽高简写。
-- pad/margin 使用 A、V/H 或 T/R/B/L。
-- gap 是 Row/Column itemMargin 或 List space。
-- main=start|center|end|between|around|evenly。
-- cross：Row 使用 top|center|bottom；Column 使用 start|center|end。
-- align 是 Stack 的 topStart|top|topEnd|start|center|end|bottomStart|bottom|bottomEnd。
-- grow/shrink 表示 layoutWeight/flexShrink。
-- Text：font=SIZE/WEIGHT、lines、overflow、text。
-- Button：必须声明 font=SIZE/WEIGHT 和 chars=N；chars 是按全宽字符保守计算的最大可见字符数。
-- Image：size 或 box、fit、ratio。
-- Progress：type、size/box、color。
-- Divider：axis=h|v、len、stroke、color，不使用 box 表达线条几何。
-- Checkbox：box、shape、selected、unselected、mark=size/strokeWidth/strokeColor。
-- appearance：radius、bg、fg、gradient、border、shadow、clip。
-- role 推荐 shell/group/item/collection/title/primary/support/meta/status/metric/action/asset/selection/separator/background/overlay。
-- protect 标记必须完整显示的标题、日期、时间、状态、CTA、主指标、价格/数量和用户明确要求字段。
-
-画布和 root：
-- 2x2：逻辑画布 140x140，root box=140x140、pad=12、radius=18、clip，内容区约 116x116。
-- 2x4：逻辑画布 300x140，root box=300x140、pad=12、radius=22、clip，内容区约 276x116。
-- root 必须是 Row、Column 或 Stack，并且必须有静态 bg 或 gradient。
-- 背景层可以贴边，但可读内容必须留在安全区内。
-
-原生尺寸能力：
-- Row/Column/Stack 是自由容器；关键容器必须有明确可推导宽高。
-- List 必须有明确视口，重复项必须有稳定高度；Repeat.visible 表示可见项数量，不保存集合路径。
-- Text 的 box 只约束文本区域，不会缩放字体。
-- Image 默认 aspectRatio=1、objectFit=cover；承担布局职责时必须声明 size，或声明完整 box 和 fit/ratio。
-- Button 默认 padding=8vp/12vp、fontSize=16fp、fontWeight=500。Button 必须显式声明 font 和 chars；chars=floor((width-24)/fontSize)，实际标签字符数不得超过 chars。主 CTA 高度通常不小于 32vp。
-- ring/eclipse/scaleRing Progress 必须正方形，优先使用 size=N。
-- Divider 的长度和厚度必须通过 axis/len/stroke 表达。
-- Checkbox 是外层 Row + 固定 20x20 控件 + 内部单行省略 Text。固有外层高度 48vp；控件 margin=2vp；标签前固定占用约 36vp。box 不能缩放内部控件，height 不得小于 48，width 不得小于 36。Checkbox 禁止 font、lines、overflow；mark.size 不得大于 20。
-- 默认不要使用 Checkbox。2x2 禁止使用 Checkbox；2x4 默认最多一个。只有用户明确要求勾选、选择或布尔设置状态时才可使用；只展示状态时使用 Text/Row，表达动作时使用 Button。无法证明 48vp 高度和标签宽度预算成立时删除 Checkbox，不得缩小它。
-
-布局质量：
-- Row 横向预算：子项 width、左右 margin、父 padding 和 gap 总和不得超过父宽。
-- Column 纵向预算：子项 height、上下 margin、父 padding 和 gap 总和不得超过父高。
-- 使用 main=between|around|evenly 时禁止再写固定 gap。
-- 普通流中禁止重叠；Stack 只用于背景、进度环、角标或明确叠加，不得遮挡 protect 节点。
-- 固定间距只使用 2/4/6/8/10/12/14/16，优先 4/8/12/16；组间距大于组内距。
-- 字号只使用 10/12/14/16/18/20/32/40，同一卡片控制在 3 档以内。
-- 中文文本宽度约为 fontSize * 字符数；英文和数字约为 0.6 * fontSize * 字符数；垂直高度按 fontSize + 2~4 预算。
-- protect Text 不使用 clip、ellipsis 或 marquee。
-- 2x2 非模板默认最多 3 个主区域和 1 个动作；2x4 最多 4 个主区域和 2 个动作，但仍只服务一个主对象。
-- 同一事实只由一个组件主承载；不通过增加同义标签、重复值或装饰组件填空。
-- 连续超过 18vp 的空白必须服务媒体、进度、场景背景或热区。
-- 布局放不下时依次：缩短弱文本、删除可选内容、降低到批准字号、拆行或改 Column、简化视觉、必要时才使用 2x4。不得靠裁剪或覆盖解决。
-
-颜色与表面：
-- ALT 只使用静态 #RRGGBB 或 #AARRGGBB，不输出颜色 token 名或动态颜色表达式。
-- 常用颜色：主文字 #E5000000、次文字 #99000000、弱文字 #66000000、反白 #FFFFFFFF、主背景 #FFFFFFFF、次背景 #FFF1F3F5、弱背板 #0C000000、分隔线 #33000000、品牌色 #FF0A59F7、确认色 #FF64BB5C、警示色 #FFE84026、提醒色 #FFED6F21。
-- 状态色只能服务真实状态；同一卡片只保留一个主场景色族。
-- gradient 必须是单行紧凑 JSON，例如 gradient={\"direction\":\"RightBottom\",\"colors\":[[\"#FF0A59F7\",0],[\"#FF64BB5C\",1]]}。
-
-TaskSpec 使用边界：
-- userQuery 用于判断唯一服务对象、主问题、必需字段和动作存在性。
-- dataModelSchema 用于判断字段类型、样例长度和布局容量，不要把所有 schema 字段都塞进卡片。
-- eventCandidates 只说明潜在动作能力；ALT 只布局 action 节点，不输出 call、args 或 onClick。
-- assetCandidates 只说明可用素材语义；ALT 只布局 Image 节点，不输出 src。
-- presentationSlots 若存在，其 key 必须直接作为对应 ALT 节点 ID；source、eventCandidate、assetCandidate 等内容仍不得写进 ALT。
-
-ASC 规则：
-- ASC 是 ALT 的语义伴随信息，不是残差或补丁；不得输出版本、profile、origin、操作符或路径操作。
-- ASC 节点必须映射到同类型、同 ID 的 ALT 节点；无补充信息的节点不输出。
-- Text 使用 text=静态文案、bind=/数据路径，复杂表达式才使用 expr=完整表达式。
-- Image 优先使用 asset=N 引用 assetCandidates；必要时使用 src、bind 或 expr。
-- Progress 使用 value=/路径、total=/路径。
-- Button 使用 label 和 event=N；Checkbox 使用 label、value、group、bind、event=N。
-- event=N 引用 eventCandidates，禁止重复输出完整事件；asset=N 引用 assetCandidates，禁止重复资源路径。
-- ASC 禁止 id、component、children、styles、尺寸、颜色、字体、圆角、间距和任何 DataModel 内容。
-- DataModel 完全由 TaskSpec.dataModelSchema 的 sampleValue 递归生成。
-
-下面给出 TaskSpec。只返回符合上述规则的 ALT+ASC 双段内容：
+PlanningSpec：
 {{TASK_SPEC_JSON}}
 """
 
@@ -248,6 +208,8 @@ def validate_asset_candidates(value: Any, data_model_schema: dict[str, Any]) -> 
         src = asset.get("src")
         if not isinstance(src, str) or not src.strip():
             raise ValueError(f"{location}.src must be a non-empty string")
+        if not src.lower().endswith(".svg"):
+            raise ValueError(f"{location}.src must reference a local .svg asset")
         description = asset.get("description")
         if not isinstance(description, str) or not description.strip():
             raise ValueError(f"{location}.description must be a non-empty string")
@@ -300,8 +262,90 @@ def read_pointer(root: Any, pointer: str) -> Any:
     return current
 
 
+def equivalent_text_units(value: str) -> float:
+    units = 0.0
+    for character in value:
+        if character.isspace():
+            units += 0.35
+        elif unicodedata.east_asian_width(character) in {"W", "F"}:
+            units += 1.0
+        elif character.isupper():
+            units += 0.68
+        elif character.islower():
+            units += 0.56
+        elif character.isdigit():
+            units += 0.62
+        else:
+            units += 0.45
+    return round(units, 1)
+
+
+def schema_field_summaries(schema: Any, pointer: str = "") -> list[dict[str, Any]]:
+    fields: list[dict[str, Any]] = []
+    if not isinstance(schema, dict):
+        return fields
+    properties = schema.get("properties")
+    if isinstance(properties, dict):
+        for key, child in properties.items():
+            escaped = str(key).replace("~", "~0").replace("/", "~1")
+            fields.extend(schema_field_summaries(child, pointer + "/" + escaped))
+        return fields
+    if schema.get("type") == "array" and isinstance(schema.get("items"), dict):
+        entry: dict[str, Any] = {"path": pointer, "type": "array"}
+        sample = schema.get("sampleValue")
+        if isinstance(sample, list):
+            entry["sampleCount"] = len(sample)
+        fields.append(entry)
+        fields.extend(schema_field_summaries(schema["items"], pointer + "/0"))
+        return fields
+    sample = schema.get("sampleValue")
+    if sample is None and pointer == "":
+        for key, child in schema.items():
+            if key in {"type", "description"}:
+                continue
+            escaped = str(key).replace("~", "~0").replace("/", "~1")
+            fields.extend(schema_field_summaries(child, pointer + "/" + escaped))
+        return fields
+    entry = {"path": pointer or "/", "type": schema.get("type", type(sample).__name__)}
+    if sample is not None:
+        entry["sample"] = sample
+        if isinstance(sample, str):
+            entry["units"] = equivalent_text_units(sample)
+    if isinstance(schema.get("maxLength"), int):
+        entry["maxLength"] = schema["maxLength"]
+    fields.append(entry)
+    return fields
+
+
+def planning_task_spec(spec: dict[str, Any]) -> dict[str, Any]:
+    events = []
+    for index, candidate in enumerate(spec.get("eventCandidates", [])):
+        if not isinstance(candidate, dict):
+            continue
+        event: dict[str, Any] = {"index": index, "call": candidate.get("call")}
+        if isinstance(candidate.get("args"), dict) and candidate["args"]:
+            event["args"] = candidate["args"]
+        events.append(event)
+    assets = [
+        {"index": index, "description": candidate.get("description"), "format": "svg"}
+        for index, candidate in enumerate(spec.get("assetCandidates", []))
+        if isinstance(candidate, dict)
+    ]
+    size = str(spec["size"])
+    return {
+        "userQuery": spec["userQuery"],
+        "size": size,
+        "themes": list(THEME_CONFIG.get("themes", {}).keys()),
+        "limits": LAYOUT_PROFILE.get("limits", {}).get(size, {}),
+        "fields": schema_field_summaries(spec["dataModelSchema"]),
+        "events": events,
+        "assets": assets,
+        **({"presentationSlots": spec["presentationSlots"]} if "presentationSlots" in spec else {}),
+    }
+
+
 def canonical_task_spec_json(spec: dict[str, Any]) -> str:
-    return json.dumps(spec, ensure_ascii=False, indent=2)
+    return json.dumps(planning_task_spec(spec), ensure_ascii=False, indent=2)
 
 
 def read_user_query(path: Path | None, spec: dict[str, Any]) -> str:
@@ -313,7 +357,7 @@ def read_user_query(path: Path | None, spec: dict[str, Any]) -> str:
     return text or str(spec["userQuery"]).strip()
 
 
-def read_alt(path: Path) -> str:
+def read_alt(path: Path, spec: dict[str, Any]):
     if not path.is_file():
         raise ValueError(f"ALT answer file does not exist: {path}")
     text = path.read_text(encoding="utf-8-sig").strip()
@@ -327,17 +371,30 @@ def read_alt(path: Path) -> str:
     first_tokens = first_line.split()
     if len(first_tokens) < 2:
         raise ValueError("ALT answer must start with a root component and node ID")
-    return text
+    document = parse_alt(path)
+    if not is_auto_layout(document):
+        raise ValueError("ALT answer must use the automatic-layout protocol with root card/theme")
+    issues = validate_auto_protocol(document, str(spec["size"]))
+    errors = [issue for issue in issues if issue.severity == "error"]
+    if errors:
+        detail = "; ".join(f"{issue.node_id}: {issue.message}" for issue in errors)
+        raise ValueError(f"invalid automatic-layout ALT: {detail}")
+    return text, document
 
 
-def read_asc(path: Path) -> str:
+def read_asc(path: Path, document, spec: dict[str, Any]) -> str:
     if not path.is_file():
         raise ValueError(f"ASC answer file does not exist: {path}")
     text = path.read_text(encoding="utf-8-sig").strip()
-    for line_number, line in enumerate(text.splitlines(), 1):
-        tokens = line.split()
-        if len(tokens) < 3 or any(token.startswith(("styles=", "style=")) for token in tokens[2:]):
-            raise ValueError(f"invalid ASC answer line {line_number}")
+    parsed = parse_asc(path, document)
+    validate_auto_asc(document, spec, parsed)
+
+    compiled, issues = auto_layout_document(document, spec, parsed)
+    issues += validate_layout(compiled, str(spec["size"]))
+    errors = [issue for issue in issues if issue.severity == "error"]
+    if errors:
+        detail = "; ".join(f"{issue.node_id}: {issue.message}" for issue in errors)
+        raise ValueError(f"ALT+ASC assistant answer is not auto-layout feasible: {detail}")
     return text
 
 
@@ -364,7 +421,7 @@ def build_request(
         },
         {
             "role": "assistant",
-            "content": "<think>\n\n</think>\n\n" + format_assistant_answer(alt_answer, asc_answer),
+            "content": format_assistant_answer(alt_answer, asc_answer),
         },
     ]
     request: dict[str, Any] = {"messages": messages}
@@ -432,9 +489,9 @@ def main() -> int:
         spec = load_task_spec(args.input_path)
         user_query = read_user_query(args.query, spec)
         alt_path = args.alt or args.input_path.parent / DEFAULT_ALT_NAME
-        alt_answer = read_alt(alt_path)
+        alt_answer, alt_document = read_alt(alt_path, spec)
         asc_path = args.asc or args.input_path.parent / DEFAULT_ASC_NAME
-        asc_answer = read_asc(asc_path)
+        asc_answer = read_asc(asc_path, alt_document, spec)
 
         rejected_response: str | None = None
         output_path = args.output
@@ -447,12 +504,9 @@ def main() -> int:
                     file=sys.stderr,
                 )
                 return 0
-            rejected_alt = read_alt(rejected_path)
-            rejected_asc = read_asc(rejected_asc_path)
-            rejected_response = (
-                "<think>\n\n</think>\n\n"
-                + format_assistant_answer(rejected_alt, rejected_asc)
-            )
+            rejected_alt, rejected_document = read_alt(rejected_path, spec)
+            rejected_asc = read_asc(rejected_asc_path, rejected_document, spec)
+            rejected_response = format_assistant_answer(rejected_alt, rejected_asc)
             if output_path is None:
                 output_path = args.input_path.parent / "task.request.hfrl.json"
 

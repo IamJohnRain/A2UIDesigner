@@ -263,14 +263,34 @@
   }
 
   function configureImage(element, component, context) {
-    const image = document.createElement('img');
     const source = resolved(component.src, context);
     const previewSource = context.previewAssetPath(source);
-    image.alt = component.id;
+    const objectFit = component.styles?.objectFit || defaults.Image.objectFit;
+    const fillColor = resolved(component.styles?.fillColor, context);
+    const useSvgFill = typeof fillColor === 'string' && /\.svg(?:$|[?#])/i.test(String(source || ''));
+    const image = document.createElement(useSvgFill ? 'span' : 'img');
     image.style.width = '100%';
     image.style.height = '100%';
     image.style.display = 'block';
-    image.style.objectFit = ({ scaleDown: 'scale-down' }[component.styles?.objectFit] || component.styles?.objectFit || defaults.Image.objectFit);
+    if (useSvgFill) {
+      const maskSize = objectFit === 'fill' ? '100% 100%'
+        : objectFit === 'cover' ? 'cover'
+          : objectFit === 'none' ? 'auto' : 'contain';
+      image.setAttribute('role', 'img');
+      image.setAttribute('aria-label', component.id);
+      image.style.backgroundColor = cssColor(fillColor);
+      image.style.maskImage = `url("${previewSource}")`;
+      image.style.webkitMaskImage = `url("${previewSource}")`;
+      image.style.maskRepeat = 'no-repeat';
+      image.style.webkitMaskRepeat = 'no-repeat';
+      image.style.maskPosition = 'center';
+      image.style.webkitMaskPosition = 'center';
+      image.style.maskSize = maskSize;
+      image.style.webkitMaskSize = maskSize;
+    } else {
+      image.alt = component.id;
+      image.style.objectFit = ({ scaleDown: 'scale-down' }[objectFit] || objectFit);
+    }
     const showPlaceholder = () => {
       image.style.display = 'none';
       element.classList.add('image-placeholder');
@@ -286,7 +306,14 @@
         element.appendChild(mark);
       }
     };
-    if (previewSource) { image.src = previewSource; image.onerror = showPlaceholder; } else showPlaceholder();
+    if (previewSource && useSvgFill) {
+      const probe = new Image();
+      probe.onerror = showPlaceholder;
+      probe.src = previewSource;
+    } else if (previewSource) {
+      image.src = previewSource;
+      image.onerror = showPlaceholder;
+    } else showPlaceholder();
     element.appendChild(image);
   }
 

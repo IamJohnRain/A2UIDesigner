@@ -667,6 +667,11 @@ int32_t ArkUINodeApiAdapter::SetNodeImageAlt(ArkUI_NodeHandle nodeHandle, const 
     return SetStringAttribute(nodeHandle, NODE_IMAGE_ALT, value);
 }
 
+int32_t ArkUINodeApiAdapter::SetNodeImageFillColor(ArkUI_NodeHandle nodeHandle, uint32_t value)
+{
+    return SetUint32Attribute(nodeHandle, NODE_IMAGE_FILL_COLOR, value);
+}
+
 int32_t ArkUINodeApiAdapter::SetNodeImageObjectFit(ArkUI_NodeHandle nodeHandle, A2UIObjectFit value)
 {
     return SetInt32Attribute(
@@ -1465,6 +1470,11 @@ int32_t ArkUINodeApiAdapter::ResetNodeId(ArkUI_NodeHandle nodeHandle)
 int32_t ArkUINodeApiAdapter::ResetNodeImageAlt(ArkUI_NodeHandle nodeHandle)
 {
     return ResetAttributeInternal(nodeHandle, NODE_IMAGE_ALT);
+}
+
+int32_t ArkUINodeApiAdapter::ResetNodeImageFillColor(ArkUI_NodeHandle nodeHandle)
+{
+    return ResetAttributeInternal(nodeHandle, NODE_IMAGE_FILL_COLOR);
 }
 
 int32_t ArkUINodeApiAdapter::ResetNodeImageObjectFit(ArkUI_NodeHandle nodeHandle)

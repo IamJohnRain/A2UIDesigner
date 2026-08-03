@@ -322,6 +322,11 @@ function createExtendedImageSchema(): string {
       "type": "object",
       "properties": {
         "aspectRatio": { "$ref": "#/$defs/DynamicNumber" },
+        "fillColor": {
+          "type": "string",
+          "pattern": "^#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$",
+          "description": "Static SVG fill color in #RRGGBB or #AARRGGBB format."
+        },
         "objectFit": {
           "oneOf": [
             { "$ref": "#/$defs/ObjectFitLiteral" },

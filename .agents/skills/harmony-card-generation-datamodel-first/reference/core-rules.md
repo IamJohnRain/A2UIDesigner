@@ -15,7 +15,7 @@
 - 输出契约：必须是两个代码块，`genui` 为三行 JSONL，`cardspec` 为 JSON；`version`、`catalogId`、CardSpec 尺寸、surface/root 卡片比例虚拟像素和 root 圆角一致。`createSurface.width/height` 与 root `styles.width/height` 必须写 CardSpec 对应数值，不写 `"matchParent"`。
 - Surface/root：`createSurface` 只声明 surface、catalog 和外围尺寸，默认不写 `styles`；只有宿主明确要求外层形状/裁切时才写 `createSurface.styles`，且仅限 `borderRadius`、`clip`；`updateComponents.root` 引用已存在组件；root 承载 `width`、`height`、`padding`、`borderRadius`、`clip` 和至少一种明确的表面背景（优先 `backgroundColor` 或 `linearGradient`，也可由 root 下的真实背景组件承载），否则可能渲染默认白底。
 - 消息闭环：三行 JSONL 的 `surfaceId` 必须一致；新卡片默认 `updateDataModel.path: "/"`，`value` 初始化所有 UI 表达式引用的根结构和加载态。
-- 协议范围：只使用 Form 允许组件；`children` 只引用组件 id；模板循环只用 `{ "componentId": "...", "path": "..." }`；不用禁用组件、网络图、内联/base64 SVG、emoji、未声明 SVG 或未声明事件能力。
+- 协议范围：只使用 Form 允许组件；`children` 只引用组件 id；模板循环只用 `{ "componentId": "...", "path": "..." }`；素材只用素材库声明的本地 SVG，不用 PNG、网络图、内联/base64 SVG、emoji、未声明 SVG 或未声明事件能力。
 - 绑定/DataModel：动态展示值、样式动态值和事件参数只用完整 `{{ ... }}` 表达式；所有可见表达式引用都能在 `updateDataModel.value`、`writeResultTo + outputSchema` 或模板当前项中推导；数据能力运行时字段至少初始化到可推导根结构。`updateDataModel.path`、`writeResultTo`、模板 `children.path` 仍是协议结构 JSON Pointer。
 - 布局可渲染：Row/Column 宽高预算成立且包含子项 `margin`；关键父容器和关键子项不依赖默认伸缩；Row 内 `Text + Button` 并排时，父 Row、Text、Button 都有明确宽高预算。
 
@@ -33,7 +33,7 @@
 - `children` 只能是组件 ID 数组；模板循环只允许 `{ "componentId": "...", "path": "..." }`。
 - 动态值只用完整 `{{ ... }}` 表达式；单值、拼接、条件、数值和列表项字段都走表达式。不要用 `{"path":"/..."}` 或 `formatString` 做组件值绑定；复杂格式化可先写入 `updateDataModel` 预计算字段，再用表达式读取。
 - 点击只写 DSL `onClick`，且 `call` 必须来自已声明 event capability；CardSpec 不写点击行为。
-- `Image.src` / `backgroundImage` 只使用用户提供或素材库声明的本地/资源路径；禁用网络 URL、内联/base64 SVG、emoji、占位图和未声明 SVG。
+- `Image.src` / `backgroundImage` 只使用素材库声明的本地 SVG；禁用 PNG、网络 URL、内联/base64 SVG、emoji、占位图和未声明 SVG。`Image.styles.fillColor` 只接受静态 `#RRGGBB` 或 `#AARRGGBB`，由主题映射决定，不使用动态绑定。
 
 ## L1 数值布局
 
@@ -75,7 +75,7 @@
 - 动作能力不明却保留可点击视觉；应删除 `onClick` 并把动作区降级为非误导支撑信息。
 - 颜色无法说明 token、已声明素材语义或合规场景拓展来源，或 DSL 直接输出 token/拓展色名而不是 hex。
 - 状态色服务装饰而非真实状态；渐变 stop 含无场景依据的手调色、机械插值色或无来源 alpha。
-- 黑色或黑白实心 SVG 直接放在深色 root、暗色渐变、暗色背板或高饱和色面上，导致真实渲染中图标不可读；应加不透明浅色图标底板、改用可读 PNG/浅色素材，或删除弱图标。
+- 黑色或黑白实心 SVG 放在深色 root、暗色渐变、暗色背板或高饱和色面上时，必须通过静态 `Image.styles.fillColor` 应用对比度足够的主题图标色；无法保证可读时删除弱图标。
 - 连续无意义空白超过 `18vp`，且不服务主视觉、媒体、进度或底部动作锚定。
 - 文本、按钮、背板虽然通过宽高估算，但视觉上贴顶、悬浮、基线不齐或靠近圆角裁剪风险区。
 - 修复已有 DSL 时仍保留 `{"path":...}` 或 `formatString` 值绑定，或没有把它改写为完整表达式。

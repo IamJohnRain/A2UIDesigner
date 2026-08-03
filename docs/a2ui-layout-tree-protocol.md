@@ -1,366 +1,285 @@
-# ALT（A2UI Layout Tree）协议
+# ALT（A2UI Layout Tree）自动布局协议
 
-## 1. 目标
+## 1. 定位
 
-ALT 是面向 A2UI Form 卡片的紧凑布局树协议。它用于：
+ALT 是 A2UI Form 卡片的紧凑结构意图协议。它面向“小模型输入 TaskSpec、输出布局树”的训练与推理场景，只表达：
 
-- 作为小模型从 TaskSpec 生成布局的训练目标；
-- 将 A2UI GenUI DSL 中的可达组件图抽取为规范化布局树，并将节点语义抽离为 ASC；
-- 将 ALT、ASC 与 TaskSpec 合并，恢复规范化的三行 GenUI JSONL；
-- 在生成 DSL 前完成尺寸预算、组件能力和遮挡风险校验。
+- 组件类型；
+- 稳定节点 ID；
+- 父子层级；
+- 节点在信息层级中的角色；
+- 卡片规格与主题选择。
 
-ALT 只描述组件类型、稳定节点 ID、父子层级、几何布局、排版和影响布局的视觉样式。ALT 不保存可见文案、DataModel 表达式、事件处理器、素材路径或运行时状态。业务语义由 TaskSpec 提供，原生默认行为由版本化 GenUI profile 提供。
+模型不负责具体宽高、字号、字重、间距、圆角、颜色或溢出策略。`scripts/alt_converter.py` 根据 TaskSpec 样例文本、ALT 整体结构、GenUI 原生组件能力和版本化配置，确定性生成这些值。
 
-ALT 保持纯布局；独立的 ASC（A2UI Semantic Companion，A2UI 语义伴随信息）按节点补充内容、绑定、素材和事件。ASC 不是残差或补丁，不比较基础 DSL，也不保存操作符、样式或 DataModel。
+ALT 的首要目标是降低布局自由度，避免文字溢出、组件重叠、不可读配色和不可控 Checkbox。它不再承担旧 DSL 的无损回转。DSL 转 ALT 后再编译得到的是满足当前自动布局规则的新 DSL，而不是原 DSL 的样式副本。
 
-## 2. 文件与编码
+## 2. 文件职责
 
-- 默认文件名：`card.alt.txt`
-- 默认语义伴随文件名：`card.asc.txt`
-- 编码：UTF-8
-- 换行：LF 或 CRLF 均可，规范化输出使用 LF
-- 缩进：每层 2 个空格，禁止 Tab
-- 一个非空行只能声明一个节点
-- 规范化文件不输出注释和空属性
+每个 Case 默认使用：
 
-## 3. 文件结构
+| 文件 | 职责 |
+| --- | --- |
+| `task.taskSpec.json` | 业务需求、DataModel schema、事件候选和 SVG 素材候选 |
+| `card.alt.txt` | 组件结构、层级、角色、卡片规格和主题 |
+| `card.asc.txt` | 按 ALT 节点补充文案、绑定、素材索引和事件索引 |
+| `card.dsl.jsonl` | 编译后的三行 GenUI JSONL |
+| `card.layout-report.txt` | 自动布局协议、容量和静态布局检查报告（JSON） |
 
-ALT 文件只包含一棵组件树，并直接从根节点开始：
+ASC（A2UI Semantic Companion）不是补丁或残差。它只补充无法放进纯布局树的节点语义，不保存 DataModel、组件样式或完整事件/素材对象。
+
+所有文本文件使用 UTF-8。ALT 与 ASC 规范化输出使用 LF；解析器同时接受 LF 和 CRLF。
+
+## 3. 最小示例
+
+`card.alt.txt`：
 
 ```text
-Column root box=300x140 pad=12 gap=8 main=start cross=start radius=22 clip bg=#FFFFFFFF role=shell
-  Row header box=276x24 main=between cross=center role=group
-    Image title_icon size=20 fit=contain radius=6 role=asset
-    Text title box=248x20 font=14/700 lines=1 role=title protect
-  Progress battery_ring type=ring size=64 color=#FF0A59F7 role=primary
-  Button primary_action box=96x34 font=14/500 chars=5 radius=17 role=action protect
+Column root card=2x2 theme=neutral-light
+  Row header
+    Image battery_icon role=asset
+    Text title role=title
+  Text battery_value role=primary
+  Button action_button role=action
 ```
 
-ALT v0.1 的解析器和转换器内部固定使用 `genui@0.7.0-alpha.7` 能力 profile，这些元信息不写入训练文本。`t2d` 以 TaskSpec 的 `size` 为唯一尺寸来源，`d2t` 以 DSL 的 `createSurface` 尺寸为来源。`2x2` 的逻辑画布为 `140x140vp`，root 圆角为 `18vp`；`2x4` 的逻辑画布为 `300x140vp`，root 圆角为 `22vp`。root 默认安全区为 `12vp`。
+`card.asc.txt`：
 
-## 4. 语法
+```text
+Image battery_icon asset=0
+Text title text=低电模式
+Text battery_value bind=/battery/levelText
+Button action_button label=立即省电 event=0
+```
 
-简化语法如下：
+编译器会补齐 root 画布、安全区与背景，测量文案，为每个节点分配宽高和间距，并从主题产生文本色、按钮色、进度色与 SVG `styles.fillColor`。
+
+## 4. ALT 语法
 
 ```text
 document  ::= node newline*
 node      ::= indent component id (space property)*
-property  ::= flag | key "=" value
+property  ::= "card=" card | "theme=" theme | "role=" role
 indent    ::= ("  ")*
 component ::= "Text" | "Image" | "Divider" | "Progress" | "Button"
-            | "Checkbox" | "Row" | "Column" | "List" | "Stack" | "Repeat"
+            | "Checkbox" | "Row" | "Column" | "List" | "Repeat"
 id        ::= [A-Za-z_][A-Za-z0-9_-]*
-flag      ::= "clip" | "protect"
+card      ::= "2x2" | "2x4"
+theme     ::= "neutral-light" | "ambient-light" | "focus-dark"
 ```
 
-属性值中不包含空格时不加引号。对象或数组使用单行紧凑 JSON，例如：
+规则：
+
+- 文件直接从唯一根节点开始，不使用协议头、版本头或注释；
+- 每层固定缩进两个空格，禁止 Tab 和跨层跳级；
+- 节点 ID 全树唯一；
+- root 只能是 `Row` 或 `Column`，且必须同时声明 `card` 和 `theme`；
+- `card`、`theme` 只能出现在 root；
+- 叶子节点必须声明 `role`；容器可省略 `role`；
+- 自动 ALT 禁止 `Stack`。叠加属于编译器保留能力；
+- 除 `card`、`theme`、`role` 外，不允许模型写任何属性。
+
+以下写法非法：
 
 ```text
-gradient={"direction":"RightBottom","colors":[["#FF317AF7",0],["#FF64BB5C",1]]}
+Column root card=2x2 theme=neutral-light pad=12 bg=#FFFFFFFF
+  Text title role=title font=16/700 box=116x20
 ```
 
-节点属性规范顺序为：
+`pad`、`bg`、`font` 和 `box` 都属于编译器推断结果。
 
-1. 几何：`box`、`size`、`pad`、`margin`
-2. 布局流：`gap`、`main`、`cross`、`align`、`wrap`、`grow`、`shrink`
-3. 组件特有排版或媒体属性
-4. 外观：背景、前景、边框、圆角、阴影和裁剪
-5. 语义：`role`、`protect`
+## 5. 角色
 
-解析器可以接受不同顺序，但规范化序列化必须使用固定顺序。
+推荐角色：
 
-## 5. 通用属性
+```text
+shell group collection item title primary status metric support meta action asset selection separator
+```
 
-| ALT 属性 | DSL 来源/目标 | 说明 |
+角色用于排版和主题映射，不写入 DSL：
+
+| role | 典型用途 | 编译影响 |
 | --- | --- | --- |
-| `box=WxH` | `styles.width/height` | 节点的外层布局占位；`auto` 表示不输出该轴尺寸 |
-| `size=N` | 相同 width/height | 正方形 Image 或环形 Progress 的简写 |
-| `pad=A` | `styles.padding` | 四边相同 |
-| `pad=V/H` | `styles.padding` | 垂直/水平 |
-| `pad=T/R/B/L` | `styles.padding` | 上/右/下/左 |
-| `margin=...` | `styles.margin` | 与 padding 相同的简写规则 |
-| `gap=N` | `itemMargin` 或 List `space` | 相邻子节点间距 |
-| `main=...` | `styles.justifyContent` | `start/center/end/between/around/evenly` |
-| `cross=...` | `styles.alignItems` | Row 用 `top/center/bottom`，Column 用 `start/center/end` |
-| `align=...` | `styles.alignContent` | Stack 九宫格对齐 |
-| `wrap` | `wrap` | `noWrap` 或 `wrap` |
-| `grow=N` | `styles.layoutWeight` | 剩余空间权重 |
-| `shrink=N` | `styles.flexShrink` | 收缩权重 |
-| `radius=N` | `styles.borderRadius` | 圆角 |
-| `bg=COLOR` | `styles.backgroundColor` | 静态背景色 |
-| `fg=COLOR` | `styles.fontColor` | 静态前景色 |
-| `gradient=JSON` | `styles.linearGradient` | 静态线性渐变 |
-| `border=W/COLOR` | `styles.borderWidth/borderColor` | 边框宽度和颜色 |
-| `shadow=JSON` | `styles.shadow` | 静态阴影 |
-| `clip` | `styles.clip: true` | 裁切子内容 |
-| `role=...` | ALT 元数据 | 不写入 DSL，用于训练和校验 |
-| `protect` | ALT 元数据 | 受保护文本或动作不得截断、遮挡 |
+| `title` | 卡片标题、对象名 | 中等字重，必要时最多两行 |
+| `primary` | 唯一主值或主状态 | 最大视觉层级；全卡最多一个 |
+| `status` / `metric` | 状态或次级指标 | 中等字号与字重 |
+| `support` / `meta` | 支撑信息 | 较小字号，空间不足时优先收敛 |
+| `action` | CTA | 按按钮原生内边距和文案测量固有尺寸 |
+| `asset` | 语义 SVG | 按层级推断正方形尺寸和主题 `fillColor` |
+| `selection` | Checkbox | 使用固定内部控件预算 |
+| `separator` | Divider | 根据父布局方向推断轴向 |
 
-当 `main=between/around/evenly` 时，不得同时声明固定 `gap`。GenUI 对应的 `spaceBetween/spaceAround/spaceEvenly` 会使 Row/Column 的固定 `itemMargin` 失去实际布局作用。
+同一卡片只服务一个对象或主问题，同一事实只由一个节点主承载。
 
-## 6. 组件属性与尺寸能力
+## 6. 初始主题
 
-尺寸能力由 profile 决定，不需要模型在每个节点重复输出 `sizeMode`。
+ALT 只选择主题名，不包含具体配色。初始主题为：
 
-| 组件 | 尺寸模式 | ALT 约束 |
-| --- | --- | --- |
-| Row/Column/Stack | `free-box` | 关键容器必须有可推导宽高 |
-| List | `viewport-box` | List 需要明确视口，重复项需要稳定高度 |
-| Text | `content-box` | box 约束文本区域，不缩放字体 |
-| Image | `ratio-box` | 使用 `size=N`，或同时给出 box 与 fit/ratio |
-| Button | `intrinsic-min` | box 不得小于字体和默认 padding 推导的固有尺寸 |
-| Progress | `type-dependent` | ring 类必须正方形；linear/capsule 使用普通 box |
-| Divider | `axis-dependent` | 使用 axis/len/stroke，不使用普通 box 表达线条几何 |
-| Checkbox | `fixed-inner-composite` | 外层占位与内部固定控件必须分别理解 |
-
-### 6.1 Text
-
-```text
-Text title box=116x20 font=14/700 lines=1 overflow=none text=start fg=#E5000000 role=title protect
-```
-
-| 属性 | 含义 |
+| 主题 | 使用场景 |
 | --- | --- |
-| `font=SIZE/WEIGHT` | 字号与字重；也允许只写字号 |
-| `lines=N` | 最大行数 |
-| `overflow=none/clip/ellipsis/marquee` | 溢出策略 |
-| `text=start/center/end/justify` | 文本对齐 |
+| `neutral-light` | 默认通用浅色卡片 |
+| `ambient-light` | 天气、环境、健康和设备状态等轻氛围场景 |
+| `focus-dark` | 睡眠、专注、音乐或明确夜间场景 |
 
-`protect` Text 不得使用 `clip`、`ellipsis` 或 `marquee` 隐藏内容。
+主题的具体 token 映射保存在 `scripts/config/alt-themes.json`。新增主题时扩展配置和协议 allowlist，不修改训练样本中的颜色。
 
-### 6.2 Image
+主题负责生成：
 
-```text
-Image icon size=48 fit=contain role=asset
-Image cover box=120x72 fit=cover ratio=1.667 role=asset
-```
+- root 与分组表面色；
+- 主、次、弱文字色；
+- Button 背景与文字色；
+- Progress、Checkbox 和 Divider 颜色；
+- SVG 的 `Image.styles.fillColor`。
 
-Image profile 默认 `aspectRatio=1`、`objectFit=cover`。承担布局职责的 Image 必须有明确尺寸。`size=N` 表示相同的 width 和 height。
+编译器输出 DSL hex，不把主题名写入 DSL。
 
-### 6.3 Button
+## 7. SVG 素材
 
-```text
-Button primary_action box=96x34 font=14/500 chars=5 radius=17 bg=#19000000 role=action protect
-```
+自动 ALT 只允许本地 SVG：
 
-GenUI profile 默认使用 `padding: 8vp 12vp`、`fontSize: 16fp`、`fontWeight: 500`。Button 必须显式声明 `font=SIZE/WEIGHT` 和 `chars=N`。`chars` 是按全宽字符保守计算的最大可见字符数：`floor((width - 24) / fontSize)`。实际标签长度不得超过 `chars`；主 CTA 高度不得低于 `max(32, fontSize + 16)`。ALT 不保存按钮标签和 `onClick`，这些语义进入 ASC。
+- ALT 只声明 `Image ... role=asset`，不写路径、尺寸和颜色；
+- ASC 只用 `asset=N` 引用 TaskSpec `assetCandidates`；
+- 被引用候选的 `src` 必须以 `.svg` 结尾；
+- 禁止 PNG、网络 URL、data URL、base64、emoji 和模型直接输出 `src`；
+- 编译器固定生成 `objectFit: "contain"`，并按角色推断宽高；
+- 编译器从主题生成静态 `styles.fillColor`，模型禁止指定素材颜色。
 
-### 6.4 Progress
+GenUI Image 新增的 `styles.fillColor` 只接受静态 `#RRGGBB` 或 `#AARRGGBB`。它不改变 Image 原有 `aspectRatio=1`、`objectFit=cover` 等默认参数；自动编译器只在生成的 DSL 中显式覆盖需要的值。
 
-```text
-Progress battery type=ring size=64 color=#FF0A59F7 role=primary
-Progress usage type=linear box=180x8 color=#FF0A59F7 role=metric
-```
+## 8. 自动布局推断
 
-| 属性 | 含义 |
+推断配置位于 `scripts/config/alt-layout-profile.json`，当前 profile 对齐 `genui@0.7.0-alpha.7`。
+
+### 8.1 画布和安全区
+
+| card | 画布 | root padding | root radius |
+| --- | --- | --- | --- |
+| `2x2` | `140 x 140vp` | `12vp` | `18vp` |
+| `2x4` | `300 x 140vp` | `12vp` | `22vp` |
+
+root 固定裁切，背景由主题提供。Row 横向分配空间，Column 纵向分配空间；所有子项、gap 和 root padding 都进入预算。
+
+### 8.2 文本
+
+编译器用 Unicode East Asian Width 和保守的英文、数字、空格权重计算“中文等价单位”，再结合角色选择字号、字重和最大行数。标题、主值、状态和 CTA 是受保护文本，不通过裁剪、省略或覆盖解决溢出。
+
+动态绑定优先使用 TaskSpec `sampleValue` 测量。复杂表达式无法静态求值时使用语义回退并在布局报告中给出 warning。
+
+### 8.3 Button
+
+GenUI Button 核心默认参数保持不变：
+
+- 默认垂直内边距 `8vp`；
+- 默认水平内边距 `12vp`；
+- 默认字号 `16fp`；
+- 默认字重 `500`。
+
+自动布局器会根据动作角色、整体密度和实际标签选择允许的字号/字重，然后按“测量文本宽度 + 原生水平内边距 + 安全余量”推断按钮宽度。高度至少覆盖文字行高与原生垂直内边距，主 CTA 不低于 profile 最小高度。任何无法容纳完整标签的按钮都会使自动编译失败，不输出明知会遮挡文字的 DSL。
+
+### 8.4 Checkbox
+
+Checkbox 不能通过 DSL 可靠缩放内部控件。profile 按以下固定能力预算：
+
+- 外层固有高度 `48vp`；
+- 内部控件 `20 x 20vp`；
+- 控件 margin `2vp`；
+- 标签前固定 gap `12vp`；
+- 内部标签字号约 `16fp`，单行。
+
+因此：
+
+- `2x2` 禁止 Checkbox；
+- `2x4` 最多一个；
+- 只有明确的勾选、选择或布尔设置才使用；
+- 只展示状态使用 Text，表达动作使用 Button；
+- 无法满足 `48vp` 高度和完整标签宽度时编译失败，不缩小内部控件。
+
+### 8.5 其他组件
+
+- Image：按 `role` 推断 `18-56vp` 正方形尺寸；
+- Progress：主进度使用 ring，支撑进度使用 linear，并推断宽高；
+- Divider：Row 子项推断为竖线，其余推断为横线；
+- List：仅 `2x4` 可用，最多一个，最多规划三个可见项；
+- Repeat：只用于 List/Row/Column 的单一重复模板，集合路径进入 ASC/TaskSpec，不进入 ALT。
+
+## 9. 结构与内容容量
+
+| 约束 | `2x2` | `2x4` |
+| --- | ---: | ---: |
+| 最大层级 | 4 | 5 |
+| 最大节点数 | 10 | 18 |
+| Text | 4 | 8 |
+| Button | 1 | 2 |
+| Image | 2 | 3 |
+| Progress | 1 | 2 |
+| Checkbox | 0 | 1 |
+| List | 0 | 1 |
+| 可见文本预算 | 32 单位 | 72 单位 |
+
+普通 Row/Column 最多三个直接子节点，禁止空容器和未挂载节点。放不下时应在模型输出阶段依次删除 meta、次要 asset、弱 support、第二动作和重复事实，而不是输出更多样式参数。
+
+## 10. ASC 语法
+
+ASC 每行使用 `Component node_id key=value`，只输出存在语义补充的节点，并严格遵循 ALT 前序顺序。
+
+| 组件 | 允许字段 |
 | --- | --- |
-| `type` | `linear/ring/eclipse/scaleRing/capsule` |
-| `color` | 静态进度色 |
-
-`ring`、`eclipse`、`scaleRing` 必须使用相同 width/height，规范化输出优先使用 `size=N`。
-
-### 6.5 Divider
-
-```text
-Divider separator axis=h len=276 stroke=1px color=#33000000 role=separator
-Divider separator axis=v len=72 stroke=1px color=#33000000 role=separator
-```
-
-`axis=h` 时 `len` 映射到 width，`stroke` 决定厚度；`axis=v` 时 `len` 映射到 height。若 DSL 显式提供厚度轴尺寸，该尺寸优先于 `strokeWidth`。
-
-### 6.6 Checkbox
-
-Checkbox 是复合组件：外层为 Row，内部包含固定 Checkbox 和内部 Text。`genui@0.7.0-alpha.7` profile 固定：
-
-```text
-intrinsicHeight=48
-controlSize=20x20
-controlMargin=2
-labelGap=12
-labelLines=1
-labelOverflow=ellipsis
-labelGrow=1
-```
-
-ALT 示例：
-
-```text
-Checkbox accept_terms box=132x48 shape=rounded_square selected=#FF64BB5C unselected=#33000000 mark=10/2/#FFFFFFFF role=selection protect
-```
+| Text | `text`、`bind`、`expr` |
+| Image | `asset` |
+| Progress | `value`、`total` |
+| Button | `label`、`event` |
+| Checkbox | `label`、`value`、`group`、`bind`、`select`、`event` |
 
 约束：
 
-- `box` 表示外层布局占位，不能用来缩放内部 `20x20vp` 控件；
-- 默认按 `48vp` 高度参与父 Column/Row 预算；小于 48 时报告裁切风险；
-- 标签前固定横向开销约为 `20 + 2 + 2 + 12 = 36vp`；
-- `protect` 标签估算宽度必须小于等于 `checkboxWidth - 36 - horizontalPadding`；
-- Checkbox 不接受 ALT `font`、`lines`、`overflow`，因为这些属性不能可靠控制内部 Text；
-- `mark` 格式为 `size/strokeWidth/strokeColor`，它只控制勾形；`mark.size > 20` 报告裁切风险。
+- `bind`、`value`、`total` 使用 JSON Pointer；复杂绑定才用完整 `expr`；
+- `asset=N` 和 `event=N` 只引用 TaskSpec 候选索引；
+- ASC 不复制素材路径、完整事件、DataModel、样式、尺寸或颜色；
+- ASC 节点必须与 ALT 中同 ID 节点的组件类型一致；
+- 无补充信息的容器不写入 ASC。
 
-模型生成规则比转换规则更严格：`2x2` 默认禁止 Checkbox，`2x4` 默认最多一个；只有用户明确要求勾选、选择或布尔设置时才使用。只展示状态时优先使用 Text/Row，表达动作时优先使用 Button。DSL 转换时仍可忠实抽取和恢复既有 Checkbox。
+DataModel 始终由 TaskSpec `dataModelSchema.sampleValue` 递归生成。
 
-### 6.7 Repeat
+## 11. 编译与失败边界
 
-`Repeat` 是 ALT 虚拟节点，不写入 GenUI components。它表达重复项模板的结构和可见数量，不保存集合路径：
+`TaskSpec + ALT + ASC -> DSL` 流程：
 
-```text
-List schedule_list box=276x72 gap=6 direction=vertical role=collection
-  Repeat schedule_items visible=3 role=collection
-    Row schedule_item box=276x20 gap=6 cross=center role=item
-      Text item_time box=44x18 font=12/500 lines=1 role=meta protect
-      Text item_title box=226x18 font=12/400 lines=1 role=primary protect
-```
+1. 校验 ALT 语法、主题、卡片规格、层级和组件数量；
+2. 校验 ASC 节点映射及 SVG/事件索引；
+3. 从 TaskSpec 生成 sample DataModel 并解析可测量文案；
+4. 按 profile 测量叶子组件固有尺寸；
+5. 自顶向下分配 Row/Column 空间；
+6. 应用主题，生成具体样式与 SVG `fillColor`；
+7. 执行静态布局检查并写布局报告；
+8. 只有不存在 hard error 时才覆盖目标 DSL。
 
-| 属性 | 含义 |
-| --- | --- |
-| `visible=N` | 用于高度或宽度预算的可见重复项数量 |
+自动 ALT 可以被拒绝。以下情况属于 hard error：
 
-集合来源必须由 TaskSpec `presentationSlots` 提供。没有集合槽位时，`ALT + TaskSpec -> DSL` 只能进行降级推断。
+- 超出节点、层级、组件或文本容量；
+- TaskSpec 卡片规格与 ALT `card` 不一致；
+- Image 未解析到本地 SVG；
+- Button、Checkbox 或受保护文本无法完整显示；
+- Row/Column 最小尺寸超过可用空间；
+- 违反 Checkbox、List、Stack 等组件边界。
 
-## 7. role 与 protect
+编译器不会通过裁剪、遮挡、缩小 Checkbox 内部控件或修改 GenUI 核心默认参数来强行生成。
 
-`role` 只用于布局训练和验证，不导出到 GenUI DSL。推荐值：
+## 12. 兼容与非等价声明
 
-```text
-shell group item collection title primary support meta status metric action asset selection separator background overlay
-```
+转换器仍能读取旧几何 ALT，便于现有数据迁移；`d2t --legacy_alt` 也可临时输出旧格式。但该格式仅作为兼容入口，不是新的训练协议。
 
-以下节点默认属于受保护内容：标题、日期、时间、状态、CTA、主指标、倒计时、价格/数量，以及用户明确要求显示的字段。规范化抽取器可以依据稳定 ID 和组件类型补充 `role`、`protect`。
+默认 `d2t` 会：
 
-## 8. TaskSpec 展示槽位
+- 保留可达组件树、稳定 ID 和角色；
+- 抽取内容/绑定/事件/素材为 ASC；
+- 丢弃旧 DSL 的具体尺寸、字号、间距、颜色和其他可推断样式；
+- 根据旧 root 背景近似选择三个初始主题之一。
 
-ALT 不保存内容、绑定、事件和素材。TaskSpec 继续保持现有格式；若已有可选 `presentationSlots`，基础编译器优先使用它，否则使用稳定 ID、schema、事件和素材候选进行确定性降级：
-
-```json
-{
-  "presentationSlots": {
-    "title": {
-      "kind": "text",
-      "source": "/data/calendar/title"
-    },
-    "schedule_list": {
-      "kind": "collection",
-      "source": "/data/calendar/items"
-    },
-    "item_time": {
-      "kind": "text",
-      "source": "dtStart"
-    },
-    "schedule_icon": {
-      "kind": "image",
-      "assetCandidate": 0
-    },
-    "primary_action": {
-      "kind": "action",
-      "label": "立即查看",
-      "eventCandidate": 0
-    }
-  }
-}
-```
-
-ALT 节点 ID 与 `presentationSlots` key 相同。槽位属于 TaskSpec，不属于 ALT。
-
-未提供 `presentationSlots` 时，转换器按以下顺序降级：
-
-1. 用稳定节点 ID 与 schema 字段名匹配；
-2. 用节点 role 与字段类型匹配；
-3. Image 按 ID、素材文件名和 description 匹配 assetCandidates；
-4. Button 使用第一个可用事件候选，并生成最短非误导标签；
-5. 无法匹配的 Text 使用由节点 ID 生成的静态短标签。
-
-所有降级必须输出控制台警告。节点的确定语义由 ASC 补充，因此不需要修改 TaskSpec。
-
-### 8.1 ASC 语义伴随信息
-
-`card.asc.txt` 使用与 ALT 相同的单行语法，只输出存在语义信息的节点，并严格遵循 ALT 前序顺序：
-
-```text
-Image battery_icon asset=0
-Text title_text text=当前电量
-Text primary_value bind=/battery/levelText
-Progress battery_progress value=/battery/levelValue total=/battery/levelTotal
-Button primary_action label=立即查看 event=0
-```
-
-每行仍为 `Component node_id key=value`。component 与 node_id 必须映射到同类型、同 ID 的 ALT 节点。无语义补充的容器不输出，因此 ASC 不是另一棵重复布局树。
-
-- Text：`text`、`bind`，复杂表达式使用 `expr`；
-- Image：优先用 `asset=N` 引用 `assetCandidates`，必要时使用 `src`、`bind` 或 `expr`；
-- Progress：`value`、`total`；
-- Button：`label`、`event=N`；
-- Checkbox：`label`、`value`、`group`、`bind`、`event=N`；
-- `event=N` 引用 `eventCandidates`，不得重复完整事件；
-- ASC 禁止 `id`、`component`、`children`、`styles`、布局/视觉字段和 DataModel。
-
-ASC 文件不携带版本、profile、origin 或其他元信息。协议版本和 GenUI profile 属于转换器实现契约，而不是训练内容。
-
-## 9. DSL 到 ALT 与 ASC
-
-抽取流程：
-
-1. 解析三行 GenUI JSONL；
-2. 校验 `createSurface`、`updateComponents` 和 `updateDataModel`；
-3. 从 `updateComponents.root` 开始遍历组件引用图；
-4. 只输出从 root 可达的组件；
-5. 检测缺失引用、环、多父节点和重复 ID；
-6. 去除 content、label、src、value、total、select、group、enabled、onClick 和 DataModel，使 ALT 保持纯布局；
-7. 将 DSL 字段归一化为 ALT 属性；
-8. 从每个可达组件抽取非布局语义，压缩为 ASC 节点属性；
-9. 按固定属性顺序输出 ALT 和 ASC 文本。
-
-未挂载组件不属于规范化 DSL；抽取时发现未挂载组件必须报错，不进入 ALT 或 ASC。
-
-## 10. ALT、ASC 与 TaskSpec 到 DSL
-
-编译流程：
-
-1. 解析 ALT 为规范 AST；
-2. 加载 TaskSpec，并生成 sample DataModel；
-3. 应用转换器内部固定的 GenUI profile；
-4. 检查 root、画布、安全区、Row/Column 预算和组件尺寸能力并输出诊断；
-5. 通过 `presentationSlots` 或降级匹配补充内容、绑定、素材和事件；
-6. 将 `Repeat` 编译为 `{ "componentId": "...", "path": "..." }`；
-7. 按节点 ID 将 ASC 语义合并到 ALT 组件；
-8. 从 TaskSpec `sampleValue` 递归生成 DataModel，输出规范化的三行 JSONL。
-
-编译器只输出 ALT 显式声明的样式覆盖。profile 默认值用于预算和验证，不应为了“看起来完整”而重复写回 DSL。
-
-## 11. 布局验证
-
-至少执行以下检查：
-
-- root 尺寸、padding、圆角、clip 和背景；
-- Row 横向预算与 Column 纵向预算；
-- 子项 margin、父 padding 和 gap 全部计入预算；
-- 普通流中禁止重叠，Stack 中叠加不得遮挡 protect 节点；
-- Text 字号、行数和宽度能够容纳受保护内容；
-- Button 按原生 padding/font 计算固有最小尺寸；
-- Button 必须声明 `font` 和 `chars`，实际标签不得超过容量；
-- Checkbox 按固定内部控件和 48vp 固有高度计算；
-- Divider 按方向区分长度和厚度；
-- 环形 Progress 等宽高；
-- Image 的尺寸、ratio 和 fit 不冲突；
-- `main=between/around/evenly` 与固定 gap 不同时存在；
-- 没有无语义的连续 `>18vp` 空洞。
-
-警告和错误属于转换日志或独立诊断结果，不写入 ALT 训练正文。
-
-## 12. 可逆性约定
-
-- `TaskSpec + ALT + ASC -> DSL` 的“完全还原”正式定义为规范化 DSL 等价；
-- 样式、内容、绑定、素材、事件、DataModel、组件类型、节点 ID 和挂载层级必须语义一致；
-- 组件数组按 ALT 前序规范化，不保留无效未挂载组件；
-- padding 数组/对象等同义 JSON 表达统一为转换器规定的规范形式；
-- JSON 对象键顺序、空白和换行不属于等价性要求；
-- TaskSpec 无法推导被引用字段的 DataModel 初值时必须报错，不能放入 ASC 兜底；
-- 不支持的组件、未知样式或无法证明成立的布局必须报错，不得伪造近似组件。
+所以默认 `DSL -> ALT/ASC -> DSL` 只要求结构和业务语义可迁移，不要求旧样式或 JSON 规范化等价。需要审计旧布局时使用 `--legacy_alt` 和原 DSL，不把旧几何样本混入自动 ALT 训练集。
 
 ## 13. 批量转换工具
 
-转换器位于 `scripts/alt_converter.py`。`-o` 指向数据集目录，该目录的每个直接子目录视为一个 Case。
-
-DSL 转 ALT 与 ASC：
+DSL 转自动 ALT/ASC：
 
 ```powershell
 python scripts/alt_converter.py `
@@ -368,69 +287,63 @@ python scripts/alt_converter.py `
   --mode d2t
 ```
 
-ALT、ASC 与 TaskSpec 转 DSL：
+自动 ALT/ASC 编译为新 DSL：
 
 ```powershell
 python scripts/alt_converter.py `
   -o references/datasets `
-  --mode t2d
+  --mode t2d `
+  --dsl_name card.auto.dsl.jsonl
 ```
 
-完整参数：
+旧几何 ALT 兼容导出：
+
+```powershell
+python scripts/alt_converter.py `
+  -o references/datasets `
+  --mode d2t `
+  --legacy_alt `
+  --alt_name card.legacy.alt.txt
+```
 
 | 参数 | 必需 | 默认值 | 含义 |
 | --- | --- | --- | --- |
-| `-o DATASET_DIR` | 是 | 无 | 数据集目录 |
+| `-o DATASET_DIR` | 是 | 无 | 每个直接子目录为一个 Case |
 | `--mode d2t/t2d` | 是 | 无 | 转换方向 |
 | `--dsl_name` | 否 | `card.dsl.jsonl` | Case 内 DSL 文件名 |
 | `--alt_name` | 否 | `card.alt.txt` | Case 内 ALT 文件名 |
-| `--asc_name` | 否 | `card.asc.txt` | Case 内 ASC 语义伴随文件名 |
-| `--layout_report_name` | 否 | `card.layout-report.txt` | `t2d` 输出的 JSON 布局检测报告文件名 |
+| `--asc_name` | 否 | `card.asc.txt` | Case 内 ASC 文件名 |
 | `--taskspec_name` | 否 | `task.taskSpec.json` | Case 内 TaskSpec 文件名 |
+| `--layout_report_name` | 否 | `card.layout-report.txt` | t2d 布局报告名 |
+| `--legacy_alt` | 否 | 关闭 | 仅 d2t：输出旧几何 ALT |
 
-`d2t` 会覆盖同名 ALT 和 ASC；`t2d` 会读取两者并覆盖同名 DSL，同时输出布局报告。TaskSpec、ALT、ASC 都是反向转换的必需输入。写入使用临时文件替换，单个 Case 失败不会阻止其余 Case 继续处理，进程在存在失败 Case 时返回非零退出码。
+脚本逐 Case 打印标准化进度。单个 Case 失败不会中断其他 Case；存在失败 Case 时进程返回非零。自动布局有 hard error 时仍会写布局报告，但不会覆盖目标 DSL。
 
-布局报告只记录静态检测结果，不修改 ALT、ASC、DSL 或 GenUI 组件默认参数。报告内容是 JSON，扩展名保留为 `.txt`，包含 Case、尺寸、输入输出文件、检测状态、问题数量以及按节点列出的稳定问题代码、严重级别、组件类型和说明。没有发现问题时仍输出报告，`status` 为 `pass` 且 `issues` 为空数组。存在布局问题不会阻止非严格模式生成 DSL。
+## 14. 训练 RequestBody
 
-控制台日志格式：
+`scripts/taskspec_to_alt_chat_completions.py` 将 TaskSpec 压缩为 PlanningSpec，并把 `card.alt.txt`、`card.asc.txt` 组装为 Assistant 内容。
 
-```text
-[2026-07-30 14:50:33] [INFO] [3/21] [Case-01-low-power-003] START
-[2026-07-30 14:50:33] [WARNING] [3/21] [Case-01-low-power-003] ...
-[2026-07-30 14:50:33] [INFO] [3/21] [Case-01-low-power-003] DONE dsl=card.dsl.jsonl alt=card.alt.txt asc=card.asc.txt nodes=6
-[2026-07-30 14:50:33] [INFO] SUMMARY mode=d2t total=21 success=21 failed=0
-```
+PlanningSpec 只向模型暴露：
 
-## 14. 训练 RequestBody 工具
+- userQuery 与卡片规格；
+- schema 字段路径、类型、样例和文本单位；
+- 事件候选索引；
+- SVG 素材候选索引和描述；
+- 当前规格的结构与文本容量；
+- 三个可选主题名。
 
-TaskSpec 到 ALT+ASC 训练请求的组装脚本位于：
-
-```text
-.agents/skills/harmony-card-generation-datamodel-first/scripts/taskspec_to_alt_chat_completions.py
-```
-
-默认读取 TaskSpec 同目录下的 `card.alt.txt` 和 `card.asc.txt` 组装 Assistant 内容：
-
-```powershell
-python .agents/skills/harmony-card-generation-datamodel-first/scripts/taskspec_to_alt_chat_completions.py `
-  references/datasets/Case-01-low-power-001/task.taskSpec.json `
-  -o references/datasets/Case-01-low-power-001/task.alt.request.json
-```
-
-可用 `-a/--alt` 和 `-s/--asc` 指定其他文件。Assistant 内容固定为：
+Assistant 固定格式：
 
 ```text
-<think>
-
-</think>
-
 <alt>
-Column root ...
+Column root card=2x2 theme=neutral-light
+  Text title role=title
+  Text primary_value role=primary
 </alt>
 <asc>
-Text title_text bind=/data/title
-Button action_button label=立即查看 event=0
+Text title text=今日用电
+Text primary_value bind=/power/value
 </asc>
 ```
 
-脚本生成的 system message 要求模型同时输出纯布局 ALT 和节点语义 ASC，并明确限制 Checkbox、要求 Button 的 `font` 与 `chars` 容量。
+提示词禁止模型输出具体样式、尺寸、字体、颜色、素材路径和 DataModel，并要求在容量不足时删减信息，而不是尝试手工布局。

@@ -1,0 +1,103 @@
+{
+  "profile": "genui@0.7.0-alpha.7",
+  "canvas": {
+    "2x2": {
+      "width": 140,
+      "height": 140,
+      "padding": 12,
+      "radius": 18
+    },
+    "2x4": {
+      "width": 300,
+      "height": 140,
+      "padding": 12,
+      "radius": 22
+    }
+  },
+  "limits": {
+    "2x2": {
+      "maxDepth": 4,
+      "maxNodes": 10,
+      "maxText": 4,
+      "maxButtons": 1,
+      "maxImages": 2,
+      "maxProgress": 1,
+      "maxCheckbox": 0,
+      "maxLists": 0,
+      "maxVisibleTextUnits": 32
+    },
+    "2x4": {
+      "maxDepth": 5,
+      "maxNodes": 18,
+      "maxText": 8,
+      "maxButtons": 2,
+      "maxImages": 3,
+      "maxProgress": 2,
+      "maxCheckbox": 1,
+      "maxLists": 1,
+      "maxVisibleTextUnits": 72,
+      "maxVisibleListItems": 3
+    }
+  },
+  "spacing": {
+    "rootGap": 8,
+    "nestedGap": 6,
+    "denseGap": 4,
+    "allowed": [2, 4, 6, 8, 10, 12, 14, 16]
+  },
+  "typography": {
+    "regular": {
+      "title": [14, 600],
+      "primary": [32, 500],
+      "status": [14, 500],
+      "metric": [20, 500],
+      "support": [12, 400],
+      "meta": [10, 400],
+      "action": [14, 500],
+      "default": [14, 400]
+    },
+    "compact": {
+      "title": [14, 600],
+      "primary": [20, 500],
+      "status": [14, 500],
+      "metric": [18, 500],
+      "support": [12, 400],
+      "meta": [10, 400],
+      "action": [14, 500],
+      "default": [12, 400]
+    }
+  },
+  "components": {
+    "button": {
+      "paddingVertical": 8,
+      "paddingHorizontal": 12,
+      "minimumHeight": 32,
+      "minimumWidth": 48,
+      "widthSafety": 4
+    },
+    "checkbox": {
+      "outerHeight": 48,
+      "controlSize": 20,
+      "controlMargin": 2,
+      "labelGap": 12,
+      "labelFontSize": 16
+    },
+    "image": {
+      "meta": 18,
+      "support": 20,
+      "action": 20,
+      "asset": 24,
+      "primary2x2": 48,
+      "primary2x4": 56
+    },
+    "progress": {
+      "ring2x2": 56,
+      "ring2x4": 64,
+      "linearHeight": 8,
+      "linearMinimumWidth": 64
+    },
+    "divider": {
+      "stroke": "1px"
+    }
+  }
+}

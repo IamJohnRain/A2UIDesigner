@@ -834,4 +834,43 @@ TEST_F(ExtendedImageComponentSchemaWarningTest,
     EXPECT_GE(TestHelpers::CountWarningRequests(mockNapiPtr_, "ERROR_CODE_TYPE_MISMATCH", "styles"), 1U);
 }
 
+TEST_F(ExtendedImageComponentTest, L0_should_apply_reset_and_validate_static_image_fill_color)
+{
+    TestableExtendedImageComponent component;
+    ArkUINodeApiAdapter applier = CreateNodeApiAdapter(component);
+
+    std::unique_ptr<JsonAdapter> validStyles = JsonAdapter::Parse(R"({
+        "fillColor": "#FF317AF7"
+    })");
+    ASSERT_NE(validStyles, nullptr);
+    component.ApplyComponentSpecificStylesForTest(validStyles->GetRoot(), applier);
+    EXPECT_TRUE(component.HasFillColorForTest());
+    EXPECT_EQ(component.GetFillColorForTest(), 0xFF317AF7U);
+    ExpectU32Attribute(component.GetNativeView(), NODE_IMAGE_FILL_COLOR, 0xFF317AF7U);
+
+    component.SetApplyingStyleDeltaUpdateForTest(true);
+    std::unique_ptr<JsonAdapter> unrelatedDelta = JsonAdapter::Parse(R"({
+        "objectFit": "contain"
+    })");
+    ASSERT_NE(unrelatedDelta, nullptr);
+    component.ApplyComponentSpecificStylesForTest(unrelatedDelta->GetRoot(), applier);
+    EXPECT_TRUE(component.HasFillColorForTest());
+    EXPECT_EQ(component.GetFillColorForTest(), 0xFF317AF7U);
+
+    std::unique_ptr<JsonAdapter> invalidDelta = JsonAdapter::Parse(R"({
+        "fillColor": "blue"
+    })");
+    ASSERT_NE(invalidDelta, nullptr);
+    component.ApplyComponentSpecificStylesForTest(invalidDelta->GetRoot(), applier);
+    EXPECT_FALSE(component.HasFillColorForTest());
+
+    component.SetApplyingStyleDeltaUpdateForTest(false);
+    component.ApplyComponentSpecificStylesForTest(validStyles->GetRoot(), applier);
+    ASSERT_TRUE(component.HasFillColorForTest());
+    std::unique_ptr<JsonAdapter> emptyStyles = JsonAdapter::Parse(R"({})");
+    ASSERT_NE(emptyStyles, nullptr);
+    component.ApplyComponentSpecificStylesForTest(emptyStyles->GetRoot(), applier);
+    EXPECT_FALSE(component.HasFillColorForTest());
+}
+
 } // namespace

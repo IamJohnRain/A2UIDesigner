@@ -51,6 +51,16 @@ public:
         return static_cast<int32_t>(objectFit_);
     }
 
+    bool HasFillColorForTest() const
+    {
+        return hasFillColor_;
+    }
+
+    uint32_t GetFillColorForTest() const
+    {
+        return fillColor_;
+    }
+
     PropertyDeclaration GetPrivatePropertyDeclarationForTest(const std::string& propertyName)
     {
         return GetPrivatePropertyDeclaration(propertyName);
@@ -94,11 +104,15 @@ private:
     void SetAlt(const std::string& alt);
     void SetAspectRatio(float ratio);
     void SetObjectFit(A2UIObjectFit objectFit);
+    void SetFillColor(uint32_t color);
+    void ResetFillColor();
 
     std::string srcValue_;
     std::string altValue_;
     float aspectRatio_ = 1.0F;
     A2UIObjectFit objectFit_ = A2UIObjectFit::COVER;
+    bool hasFillColor_ = false;
+    uint32_t fillColor_ = 0;
 };
 
 } // namespace NativeModule

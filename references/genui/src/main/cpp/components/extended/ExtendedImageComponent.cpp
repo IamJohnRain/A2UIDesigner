@@ -66,6 +66,11 @@ bool TryParsePositiveAspectRatio(const JsonValue& value, float& ratio)
     return ratio > 0.0F;
 }
 
+bool TryParseFillColor(const JsonValue& value, uint32_t& color)
+{
+    return value.IsString() && StyleApplyUtils::ParseHexColorString(value.GetStringValue(""), color);
+}
+
 const char* ToUpdateTypeLabel(bool isDeltaUpdate)
 {
     static constexpr const char* UPDATE_TYPE_LABELS[] = { "full", "delta" };
@@ -177,6 +182,7 @@ void ExtendedImageComponent::ApplyComponentSpecificStyles(const JsonValue& style
             "styles");
         SetAspectRatio(DEFAULT_ASPECT_RATIO);
         SetObjectFit(DEFAULT_OBJECT_FIT);
+        ResetFillColor();
         LogImageDfxEvent(componentId, "ApplyComponentSpecificStyles", "aspectRatio", styles, isDeltaUpdate,
             ImageDfxDecision::FALLBACK, "aspectRatio=" + std::to_string(aspectRatio_));
         LogImageDfxEvent(componentId, "ApplyComponentSpecificStyles", "objectFit", styles, isDeltaUpdate,
@@ -237,6 +243,23 @@ void ExtendedImageComponent::ApplyComponentSpecificStyles(const JsonValue& style
         LogImageDfxEvent(componentId, "ApplyComponentSpecificStyles", "objectFit", objectFitValue, isDeltaUpdate,
             ImageDfxDecision::FALLBACK, "objectFit=" + std::to_string(static_cast<int32_t>(objectFit_)));
     }
+
+    uint32_t fillColor = 0;
+    JsonValue fillColorValue = styles.GetItem("fillColor");
+    if (TryParseFillColor(fillColorValue, fillColor)) {
+        SetFillColor(fillColor);
+        LogImageDfxEvent(componentId, "ApplyComponentSpecificStyles", "fillColor", fillColorValue, isDeltaUpdate,
+            ImageDfxDecision::APPLIED, "fillColor=" + std::to_string(fillColor_));
+    } else if (fillColorValue.IsValid()) {
+        ReportStyleWarning(fillColorValue.IsString() ? SCHEMA_ERROR_CODE_INVALID_VALUE : SCHEMA_ERROR_CODE_TYPE_MISMATCH,
+            "fillColor", "Property fillColor expects #RRGGBB or #AARRGGBB string, " +
+                std::string(DescribeStyleResolution(isDeltaUpdate)));
+        ResetFillColor();
+        LogImageDfxEvent(componentId, "ApplyComponentSpecificStyles", "fillColor", fillColorValue, isDeltaUpdate,
+            ImageDfxDecision::FALLBACK);
+    } else if (!isDeltaUpdate) {
+        ResetFillColor();
+    }
 }
 
 void ExtendedImageComponent::SetSrc(const std::string& src)
@@ -286,6 +309,26 @@ void ExtendedImageComponent::SetObjectFit(A2UIObjectFit objectFit)
     }
 
     ArkUINodeApiAdapter::SetNodeImageObjectFit(nativeView_, objectFit_);
+}
+
+void ExtendedImageComponent::SetFillColor(uint32_t color)
+{
+    hasFillColor_ = true;
+    fillColor_ = color;
+    if (nativeView_ == nullptr) {
+        return;
+    }
+    ArkUINodeApiAdapter::SetNodeImageFillColor(nativeView_, fillColor_);
+}
+
+void ExtendedImageComponent::ResetFillColor()
+{
+    hasFillColor_ = false;
+    fillColor_ = 0;
+    if (nativeView_ == nullptr) {
+        return;
+    }
+    ArkUINodeApiAdapter::ResetNodeImageFillColor(nativeView_);
 }
 
 } // namespace NativeModule

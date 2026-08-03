@@ -9,7 +9,7 @@
   ],
   "componentStyleFields": {
     "Text": ["fontSize", "fontWeight", "fontColor", "maxLines", "minFontSize", "maxFontSize", "textAlign", "textOverflow", "wordBreak", "decoration"],
-    "Image": ["objectFit", "aspectRatio"],
+    "Image": ["objectFit", "aspectRatio", "fillColor"],
     "Divider": ["strokeWidth", "vertical", "color"],
     "Progress": ["type", "color"],
     "Button": ["fontSize", "fontWeight", "fontColor", "backgroundColor", "borderRadius"],

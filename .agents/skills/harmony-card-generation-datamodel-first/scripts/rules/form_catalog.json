@@ -2314,13 +2314,13 @@
         },
         {
           "type": "object",
-          "description": "Image component for displaying local, network, or resource images",
+          "description": "Image component for displaying local SVG resources",
           "properties": {
             "component": {
               "const": "Image"
             },
             "src": {
-              "description": "Image source: local resource path only. Network URLs are not supported. Supports expression/path binding for dynamic local resource path. SVG format is not supported, including base64-encoded SVG (e.g., data:image/svg+xml;base64,...).",
+              "description": "Image source: declared local SVG resource path only. Network URLs, PNG, data URLs and base64 are not supported. Supports expression/path binding only when it resolves to an allowlisted local SVG.",
               "oneOf": [
                 {
                   "type": "string"
@@ -2360,6 +2360,11 @@
                   ],
                   "description": "Width-to-height ratio (width/height). Default: 1.0. When only width is set, height = width/ratio. When only height is set, width = height*ratio. When both set with ratio, height is recalculated. constraintSize takes priority over aspectRatio."
                 },
+                "fillColor": {
+                  "type": "string",
+                  "pattern": "^#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$",
+                  "description": "Static SVG fill color in #RRGGBB or #AARRGGBB format. Dynamic bindings are not supported."
+                },
                 "objectFit": {
                   "oneOf": [
                     {
@@ -2397,7 +2402,7 @@
               "additionalProperties": true
             }
           },
-          "description": "Image component for displaying local, network, or resource images. Supports aspect ratio and various object-fit modes."
+          "description": "Image component for displaying local SVG resources. Supports a static fill color, aspect ratio and object-fit modes."
         }
       ],
       "unevaluatedProperties": false

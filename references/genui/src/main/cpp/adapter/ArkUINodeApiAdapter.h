@@ -127,6 +127,7 @@ public:
     static int32_t SetNodeHeightPercent(ArkUI_NodeHandle nodeHandle, float value);
     static int32_t SetNodeId(ArkUI_NodeHandle nodeHandle, const std::string& value);
     static int32_t SetNodeImageAlt(ArkUI_NodeHandle nodeHandle, const std::string& value);
+    static int32_t SetNodeImageFillColor(ArkUI_NodeHandle nodeHandle, uint32_t value);
     static int32_t SetNodeImageObjectFit(ArkUI_NodeHandle nodeHandle, A2UIObjectFit value);
     static int32_t SetNodeImageSrc(ArkUI_NodeHandle nodeHandle, const std::string& value);
     static A2UIObjectFit ParseImageObjectFit(
@@ -255,6 +256,7 @@ public:
     static int32_t ResetNodeHeightPercent(ArkUI_NodeHandle nodeHandle);
     static int32_t ResetNodeId(ArkUI_NodeHandle nodeHandle);
     static int32_t ResetNodeImageAlt(ArkUI_NodeHandle nodeHandle);
+    static int32_t ResetNodeImageFillColor(ArkUI_NodeHandle nodeHandle);
     static int32_t ResetNodeImageObjectFit(ArkUI_NodeHandle nodeHandle);
     static int32_t ResetNodeImageSrc(ArkUI_NodeHandle nodeHandle);
     static int32_t ResetNodeLayoutWeight(ArkUI_NodeHandle nodeHandle);

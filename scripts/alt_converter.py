@@ -8,6 +8,7 @@ import logging
 import math
 import re
 import sys
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
@@ -20,6 +21,9 @@ if hasattr(sys.stderr, "reconfigure"):
 
 
 GENUI_PROFILE = "genui@0.7.0-alpha.7"
+CONFIG_DIR = Path(__file__).resolve().parent / "config"
+THEMES_PATH = CONFIG_DIR / "alt-themes.json"
+LAYOUT_PROFILE_PATH = CONFIG_DIR / "alt-layout-profile.json"
 DEFAULT_DSL_NAME = "card.dsl.jsonl"
 DEFAULT_ALT_NAME = "card.alt.txt"
 DEFAULT_ASC_NAME = "card.asc.txt"
@@ -29,6 +33,13 @@ SURFACE_ID = "surface_card"
 CATALOG_ID = "ohos.a2ui.extended.catalog"
 LAYOUT_TOP_LEVEL_FIELDS = {
     "id", "component", "children", "styles", "itemMargin", "space", "wrap", "vertical"
+}
+AUTO_ASC_FIELDS = {
+    "Text": {"text", "bind", "expr"},
+    "Image": {"asset"},
+    "Progress": {"value", "total"},
+    "Button": {"label", "event"},
+    "Checkbox": {"label", "value", "group", "bind", "select", "event"},
 }
 SIMPLE_BINDING_PATTERN = re.compile(r"^\{\{\s*\$\{([^}]+)\}\s*\}\}$")
 
@@ -61,6 +72,8 @@ MAIN_FROM_DSL = {
 MAIN_TO_DSL = {value: key for key, value in MAIN_FROM_DSL.items()}
 
 ATTRIBUTE_ORDER = [
+    "card",
+    "theme",
     "box",
     "size",
     "pad",
@@ -84,6 +97,7 @@ ATTRIBUTE_ORDER = [
     "overflow",
     "text",
     "fit",
+    "fill",
     "ratio",
     "type",
     "color",
@@ -104,6 +118,8 @@ ATTRIBUTE_ORDER = [
 ]
 
 COMMON_NODE_ATTRS = {
+    "card",
+    "theme",
     "box",
     "pad",
     "margin",
@@ -121,7 +137,7 @@ COMMON_NODE_ATTRS = {
 }
 COMPONENT_NODE_ATTRS = {
     "Text": {"font", "lines", "overflow", "text", "fg"},
-    "Image": {"size", "fit", "ratio"},
+    "Image": {"size", "fit", "ratio", "fill"},
     "Divider": {"axis", "len", "stroke", "color"},
     "Progress": {"size", "type", "color"},
     "Button": {"font", "chars", "fg"},
@@ -132,7 +148,6 @@ COMPONENT_NODE_ATTRS = {
     "Stack": {"align"},
     "Repeat": {"visible", "role"},
 }
-
 
 class ConversionError(ValueError):
     pass
@@ -176,6 +191,68 @@ def configure_logging() -> logging.Logger:
 
 
 LOGGER = configure_logging()
+
+
+def load_json_config(path: Path) -> dict[str, Any]:
+    if not path.is_file():
+        raise ConversionError(f"required configuration file does not exist: {path}")
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ConversionError(f"cannot load configuration {path}: {exc}") from exc
+    if not isinstance(value, dict):
+        raise ConversionError(f"configuration root must be an object: {path}")
+    return value
+
+
+THEME_CONFIG = load_json_config(THEMES_PATH)
+LAYOUT_PROFILE = load_json_config(LAYOUT_PROFILE_PATH)
+AUTO_THEMES = set(THEME_CONFIG.get("themes", {}))
+
+
+def validate_configuration() -> None:
+    required_themes = {"neutral-light", "ambient-light", "focus-dark"}
+    missing_themes = sorted(required_themes - AUTO_THEMES)
+    if missing_themes:
+        raise ConversionError("theme configuration is missing: " + ", ".join(missing_themes))
+    default_theme = THEME_CONFIG.get("defaultTheme")
+    if default_theme not in AUTO_THEMES:
+        raise ConversionError("theme configuration defaultTheme must reference a declared theme")
+
+    required_colors = {
+        "surface": {"root", "panel"},
+        "text": {"primary", "secondary", "tertiary", "onAccent"},
+        "icon": {"primary", "secondary", "onAccent"},
+        "action": {"primaryBackground", "primaryText", "secondaryBackground", "secondaryText"},
+        "progress": {"fill", "track"},
+        "selection": {"selected", "unselected", "mark"},
+        "status": {"success", "warning", "error"},
+    }
+    themes = THEME_CONFIG.get("themes", {})
+    for theme_name, theme in themes.items():
+        if not isinstance(theme, dict) or theme.get("mode") not in {"light", "dark"}:
+            raise ConversionError(f"theme {theme_name!r} must declare mode=light or mode=dark")
+        for section_name, field_names in required_colors.items():
+            section = theme.get(section_name)
+            if not isinstance(section, dict):
+                raise ConversionError(f"theme {theme_name!r} is missing section {section_name!r}")
+            for field_name in field_names:
+                color = section.get(field_name)
+                if not isinstance(color, str) or not re.fullmatch(r"#[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?", color):
+                    raise ConversionError(
+                        f"theme {theme_name!r} {section_name}.{field_name} must be #RRGGBB or #AARRGGBB"
+                    )
+        divider = theme.get("divider")
+        if not isinstance(divider, str) or not re.fullmatch(r"#[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?", divider):
+            raise ConversionError(f"theme {theme_name!r} divider must be #RRGGBB or #AARRGGBB")
+
+    for size, expected in {"2x2": (140, 140), "2x4": (300, 140)}.items():
+        canvas = LAYOUT_PROFILE.get("canvas", {}).get(size)
+        if not isinstance(canvas, dict) or (canvas.get("width"), canvas.get("height")) != expected:
+            raise ConversionError(f"layout profile canvas {size} must be {expected[0]}x{expected[1]}")
+
+
+validate_configuration()
 
 
 def compact_json(value: Any) -> str:
@@ -526,6 +603,7 @@ def extract_alt_attrs(component: dict[str, Any], diagnostics: list[str]) -> dict
     elif component_type == "Image":
         add_static_attr(attrs, "fit", styles.get("objectFit"), diagnostics, "styles.objectFit")
         add_static_attr(attrs, "ratio", styles.get("aspectRatio"), diagnostics, "styles.aspectRatio")
+        add_static_attr(attrs, "fill", styles.get("fillColor"), diagnostics, "styles.fillColor")
     elif component_type == "Progress":
         add_static_attr(attrs, "type", styles.get("type"), diagnostics, "styles.type")
         add_static_attr(attrs, "color", styles.get("color"), diagnostics, "styles.color")
@@ -884,15 +962,13 @@ def build_asc(
     return "\n".join(lines).rstrip() + "\n"
 
 
-def parse_asc(path: Path, document: AltDocument) -> dict[str, dict[str, Any]]:
-    if not path.is_file():
-        raise ConversionError(f"ASC file does not exist: {path}")
+def parse_asc_text(text: str, document: AltDocument) -> dict[str, dict[str, Any]]:
     nodes = alt_nodes(document)
     node_map = {node.node_id: node for node in nodes}
     node_order = {node.node_id: index for index, node in enumerate(nodes)}
     result: dict[str, dict[str, Any]] = {}
     previous = -1
-    for line_number, line in enumerate(path.read_text(encoding="utf-8-sig").splitlines(), 1):
+    for line_number, line in enumerate(text.splitlines(), 1):
         if not line.strip():
             continue
         tokens = split_alt_tokens(line.strip())
@@ -915,6 +991,63 @@ def parse_asc(path: Path, document: AltDocument) -> dict[str, dict[str, Any]]:
         result[node_id] = attrs
         previous = node_order[node_id]
     return result
+
+
+def parse_asc(path: Path, document: AltDocument) -> dict[str, dict[str, Any]]:
+    if not path.is_file():
+        raise ConversionError(f"ASC file does not exist: {path}")
+    return parse_asc_text(path.read_text(encoding="utf-8-sig"), document)
+
+
+def validate_auto_asc(
+    document: AltDocument,
+    task_spec: dict[str, Any],
+    asc: dict[str, dict[str, Any]],
+) -> None:
+    events = task_spec.get("eventCandidates", [])
+    assets = task_spec.get("assetCandidates", [])
+    for node in alt_nodes(document):
+        attrs = asc.get(node.node_id, {})
+        allowed = AUTO_ASC_FIELDS.get(node.component, set())
+        unknown = sorted(set(attrs) - allowed)
+        if unknown:
+            raise ConversionError(
+                f"{node.node_id}: auto ASC {node.component} does not support field(s): "
+                + ", ".join(unknown)
+            )
+        if node.component == "Text" and not any(key in attrs for key in ("text", "bind", "expr")):
+            raise ConversionError(f"{node.node_id}: auto ASC Text requires text, bind, or expr")
+        if node.component == "Image" and "asset" not in attrs:
+            raise ConversionError(f"{node.node_id}: auto ASC Image requires asset=N")
+        if node.component == "Progress" and not all(key in attrs for key in ("value", "total")):
+            raise ConversionError(f"{node.node_id}: auto ASC Progress requires value and total")
+        if node.component == "Button" and not all(key in attrs for key in ("label", "event")):
+            raise ConversionError(f"{node.node_id}: auto ASC Button requires label and event=N")
+
+        for key in ("text", "label", "value", "group"):
+            if key in attrs and not isinstance(attrs[key], str):
+                raise ConversionError(f"{node.node_id}: auto ASC {key} must be a string")
+        for key in ("bind",):
+            if key in attrs and (not isinstance(attrs[key], str) or not attrs[key].startswith("/")):
+                raise ConversionError(f"{node.node_id}: auto ASC {key} must be a JSON Pointer")
+        if node.component == "Progress":
+            for key in ("value", "total"):
+                if not isinstance(attrs[key], str) or not attrs[key].startswith("/"):
+                    raise ConversionError(f"{node.node_id}: auto ASC {key} must be a JSON Pointer")
+        if "expr" in attrs and not is_dynamic(attrs["expr"]):
+            raise ConversionError(f"{node.node_id}: auto ASC expr must be a complete {{ ... }} expression")
+        if "asset" in attrs:
+            index = attrs["asset"]
+            if not isinstance(index, int) or index < 0 or index >= len(assets):
+                raise ConversionError(f"{node.node_id}: auto ASC asset must reference a valid assetCandidate")
+            candidate = assets[index]
+            source = candidate.get("src") if isinstance(candidate, dict) else None
+            if not isinstance(source, str) or not source.lower().endswith(".svg"):
+                raise ConversionError(f"{node.node_id}: auto ASC asset must reference a local SVG")
+        if "event" in attrs:
+            index = attrs["event"]
+            if not isinstance(index, int) or index < 0 or index >= len(events):
+                raise ConversionError(f"{node.node_id}: auto ASC event must reference a valid eventCandidate")
 
 
 def apply_asc_to_dsl(
@@ -946,8 +1079,11 @@ def apply_asc_to_dsl(
                 if not isinstance(value, int) or value < 0 or value >= len(candidates):
                     raise ConversionError(f"{node_id}: invalid ASC asset index {value!r}")
                 candidate = candidates[value]
+                source = candidate.get("src") if isinstance(candidate, dict) else None
+                if is_auto_layout(document) and (not isinstance(source, str) or not source.lower().endswith(".svg")):
+                    raise ConversionError(f"{node_id}: auto ALT assets must use a local .svg source")
                 bind_to = candidate.get("bindTo") if isinstance(candidate, dict) else None
-                component["src"] = f"{{{{ ${{{bind_to}}} }}}}" if isinstance(bind_to, str) else candidate["src"]
+                component["src"] = f"{{{{ ${{{bind_to}}} }}}}" if isinstance(bind_to, str) else source
             elif key == "event":
                 candidates = task_spec.get("eventCandidates", [])
                 if not isinstance(value, int) or value < 0 or value >= len(candidates):
@@ -960,6 +1096,9 @@ def apply_asc_to_dsl(
             elif key == "select":
                 component["select"] = value
             else:
+                if component_type == "Image" and key == "src" and is_auto_layout(document):
+                    if not isinstance(value, str) or not value.lower().endswith(".svg"):
+                        raise ConversionError(f"{node_id}: auto ALT Image.src must be a local .svg path")
                 component[key] = value
     return "\n".join(compact_json(message) for message in messages) + "\n"
 
@@ -1058,6 +1197,159 @@ def parse_alt(path: Path) -> AltDocument:
     if len(roots) != 1:
         raise ConversionError(f"ALT must contain exactly one root node, got {len(roots)}")
     return AltDocument(roots[0])
+
+
+def is_auto_layout(document: AltDocument) -> bool:
+    return "card" in document.root.attrs or "theme" in document.root.attrs
+
+
+def theme_values(theme_name: str) -> dict[str, Any]:
+    themes = THEME_CONFIG.get("themes", {})
+    theme = themes.get(theme_name) if isinstance(themes, dict) else None
+    if not isinstance(theme, dict):
+        raise ConversionError(f"unknown ALT theme {theme_name!r}")
+    return theme
+
+
+def infer_theme_name(document: AltDocument) -> str:
+    attrs = document.root.attrs
+    background = attrs.get("bg")
+    if not isinstance(background, str):
+        style = attrs.get("style")
+        if isinstance(style, dict):
+            background = style.get("backgroundColor")
+    if not isinstance(background, str) or not re.fullmatch(r"#[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?", background):
+        return str(THEME_CONFIG.get("defaultTheme", "neutral-light"))
+    raw = background[1:]
+    if len(raw) == 8:
+        red, green, blue = int(raw[2:4], 16), int(raw[4:6], 16), int(raw[6:8], 16)
+    else:
+        red, green, blue = int(raw[0:2], 16), int(raw[2:4], 16), int(raw[4:6], 16)
+    luminance = (0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255.0
+    if luminance < 0.42:
+        return "focus-dark"
+    channel_spread = max(red, green, blue) - min(red, green, blue)
+    if channel_spread >= 12 or min(red, green, blue) < 238:
+        return "ambient-light"
+    return "neutral-light"
+
+
+def simplify_to_auto(document: AltDocument, size: str) -> AltDocument:
+    result = copy.deepcopy(document)
+
+    def visit(node: AltNode, root: bool = False) -> None:
+        role = node.attrs.get("role")
+        if node.component == "Stack":
+            node.component = "Column"
+        node.attrs = {}
+        if root:
+            node.attrs["card"] = size
+            node.attrs["theme"] = infer_theme_name(document)
+        if isinstance(role, str) and role:
+            node.attrs["role"] = role
+        for child in node.children:
+            visit(child)
+
+    visit(result.root, True)
+    return result
+
+
+def validate_auto_protocol(document: AltDocument, task_size: str | None = None) -> list[ValidationIssue]:
+    issues: list[ValidationIssue] = []
+    root = document.root
+    size = root.attrs.get("card")
+    theme = root.attrs.get("theme")
+    if size not in {"2x2", "2x4"}:
+        issues.append(ValidationIssue("error", root.node_id, "auto ALT root must declare card=2x2 or card=2x4"))
+        return issues
+    if task_size is not None and size != task_size:
+        issues.append(
+            ValidationIssue("error", root.node_id, f"ALT card={size} does not match TaskSpec.size={task_size}")
+        )
+    if theme not in AUTO_THEMES:
+        issues.append(
+            ValidationIssue(
+                "error",
+                root.node_id,
+                "auto ALT theme must be one of: " + ", ".join(sorted(AUTO_THEMES)),
+            )
+        )
+    if root.component not in {"Row", "Column"}:
+        issues.append(ValidationIssue("error", root.node_id, "auto ALT root must be Row or Column"))
+
+    limits_value = LAYOUT_PROFILE.get("limits", {}).get(str(size), {})
+    limits = limits_value if isinstance(limits_value, dict) else {}
+    nodes = alt_nodes(document)
+    counters = {
+        "maxNodes": len(nodes),
+        "maxText": sum(node.component == "Text" for node in nodes),
+        "maxButtons": sum(node.component == "Button" for node in nodes),
+        "maxImages": sum(node.component == "Image" for node in nodes),
+        "maxProgress": sum(node.component == "Progress" for node in nodes),
+        "maxCheckbox": sum(node.component == "Checkbox" for node in nodes),
+        "maxLists": sum(node.component == "List" for node in nodes),
+    }
+    labels = {
+        "maxNodes": "nodes",
+        "maxText": "Text nodes",
+        "maxButtons": "Button nodes",
+        "maxImages": "Image nodes",
+        "maxProgress": "Progress nodes",
+        "maxCheckbox": "Checkbox nodes",
+        "maxLists": "List nodes",
+    }
+    for key, actual in counters.items():
+        maximum = limits.get(key)
+        if isinstance(maximum, int) and actual > maximum:
+            issues.append(
+                ValidationIssue("error", root.node_id, f"auto ALT has {actual} {labels[key]}; {size} allows {maximum}")
+            )
+
+    primary_count = 0
+
+    def visit(node: AltNode, depth: int, is_root: bool = False) -> None:
+        nonlocal primary_count
+        allowed = {"card", "theme", "role"} if is_root else {"role"}
+        forbidden = sorted(set(node.attrs) - allowed)
+        if forbidden:
+            issues.append(
+                ValidationIssue(
+                    "error",
+                    node.node_id,
+                    "auto ALT cannot contain inferred attribute(s): " + ", ".join(forbidden),
+                )
+            )
+        if not is_root and any(key in node.attrs for key in ("card", "theme")):
+            issues.append(ValidationIssue("error", node.node_id, "card/theme are allowed only on the root node"))
+        role = node.attrs.get("role")
+        if node.component not in CONTAINERS | VIRTUAL_COMPONENTS and not isinstance(role, str):
+            issues.append(ValidationIssue("error", node.node_id, "auto ALT leaf nodes must declare role"))
+        if role == "primary":
+            primary_count += 1
+        max_depth = limits.get("maxDepth")
+        if isinstance(max_depth, int) and depth > max_depth:
+            issues.append(
+                ValidationIssue("error", node.node_id, f"auto ALT depth {depth} exceeds {size} limit {max_depth}")
+            )
+        if node.component in CONTAINERS and not node.children:
+            issues.append(ValidationIssue("error", node.node_id, "auto ALT containers cannot be empty"))
+        if node.component in {"Row", "Column", "Stack"} and len(node.children) > 3:
+            issues.append(
+                ValidationIssue("error", node.node_id, "auto ALT containers can have at most three direct children")
+            )
+        if node.component == "Stack":
+            issues.append(
+                ValidationIssue("error", node.node_id, "Stack is compiler-reserved and cannot appear in auto ALT input")
+            )
+        for child in node.children:
+            visit(child, depth + 1)
+
+    visit(root, 1, True)
+    if primary_count > 1:
+        issues.append(ValidationIssue("error", root.node_id, "auto ALT allows only one role=primary node"))
+    if primary_count == 0:
+        issues.append(ValidationIssue("warning", root.node_id, "auto ALT has no role=primary node"))
+    return issues
 
 
 def node_box(node: AltNode, intrinsic: bool = True) -> tuple[float | None, float | None]:
@@ -1504,24 +1796,585 @@ def humanize_id(node_id: str, component: str) -> str:
     return cleaned.replace("_", " ") or "信息"
 
 
-def estimated_text_width(text: str, font_size: float) -> float:
-    width = 0.0
+def text_units(text: str) -> float:
+    units = 0.0
     for character in text:
         if character.isspace():
-            width += font_size * 0.35
-        elif ord(character) > 127:
-            width += font_size
-        elif character.isalnum():
-            width += font_size * 0.6
+            units += 0.35
+        elif unicodedata.east_asian_width(character) in {"W", "F"}:
+            units += 1.0
+        elif character.isupper():
+            units += 0.68
+        elif character.islower():
+            units += 0.56
+        elif character.isdigit():
+            units += 0.62
         else:
-            width += font_size * 0.45
-    return width
+            units += 0.45
+    return units
+
+
+def estimated_text_width(text: str, font_size: float, font_weight: int = 400, safety: float = 1.0) -> float:
+    weight_factor = 1.0 + max(0, font_weight - 400) / 5000.0
+    return text_units(text) * font_size * weight_factor * safety
 
 
 def node_font_size(node: AltNode, fallback: float) -> float:
     if "font" not in node.attrs:
         return fallback
     return numeric_dimension(str(node.attrs["font"]).split("/", 1)[0]) or fallback
+
+
+@dataclass
+class AutoMeasure:
+    preferred_width: float
+    preferred_height: float
+    minimum_width: float
+    minimum_height: float
+    font_size: float = 0.0
+    font_weight: int = 400
+    max_lines: int = 1
+    content: str = ""
+    variant: str = ""
+
+
+def auto_role(node: AltNode) -> str:
+    role = node.attrs.get("role")
+    return role if isinstance(role, str) and role else node_role(node.node_id, node.component)
+
+
+def auto_semantic_text(
+    node: AltNode,
+    asc: dict[str, dict[str, Any]],
+    data_model: Any,
+    diagnostics: list[ValidationIssue],
+) -> str:
+    attrs = asc.get(node.node_id, {})
+    key = "label" if node.component in {"Button", "Checkbox"} else "text"
+    value = attrs.get(key)
+    if isinstance(value, (str, int, float)):
+        return str(value)
+    pointer = attrs.get("bind")
+    if isinstance(pointer, str) and pointer.startswith("/"):
+        try:
+            resolved = pointer_get(data_model, pointer)
+        except ConversionError:
+            resolved = None
+        if isinstance(resolved, (str, int, float, bool)):
+            return str(resolved)
+        diagnostics.append(
+            ValidationIssue(
+                "warning",
+                node.node_id,
+                f"dynamic text binding {pointer!r} has no scalar sampleValue; layout uses a semantic fallback",
+            )
+        )
+    expression = attrs.get("expr")
+    if isinstance(expression, str):
+        pointer = binding_path(expression)
+        if pointer:
+            try:
+                resolved = pointer_get(data_model, pointer)
+            except ConversionError:
+                resolved = None
+            if isinstance(resolved, (str, int, float, bool)):
+                return str(resolved)
+        diagnostics.append(
+            ValidationIssue(
+                "warning",
+                node.node_id,
+                "complex dynamic text has no statically measurable upper bound; layout uses a semantic fallback",
+            )
+        )
+    return humanize_id(node.node_id, node.component)
+
+
+def auto_asset_src(
+    node: AltNode,
+    asc: dict[str, dict[str, Any]],
+    task_spec: dict[str, Any],
+    data_model: Any,
+) -> str | None:
+    attrs = asc.get(node.node_id, {})
+    asset_index = attrs.get("asset")
+    candidates = task_spec.get("assetCandidates", [])
+    if isinstance(asset_index, int) and 0 <= asset_index < len(candidates):
+        candidate = candidates[asset_index]
+        if isinstance(candidate, dict) and isinstance(candidate.get("src"), str):
+            return candidate["src"]
+    src = attrs.get("src")
+    if isinstance(src, str):
+        return src
+    pointer = attrs.get("bind")
+    if isinstance(pointer, str) and pointer.startswith("/"):
+        try:
+            value = pointer_get(data_model, pointer)
+        except ConversionError:
+            value = None
+        if isinstance(value, str):
+            return value
+    return None
+
+
+def auto_font(role: str, content: str, density: str) -> tuple[int, int]:
+    typography_value = LAYOUT_PROFILE.get("typography", {}).get(density, {})
+    typography = typography_value if isinstance(typography_value, dict) else {}
+    value = typography.get(role, typography.get("default", [14, 400]))
+    if not (isinstance(value, list) and len(value) == 2):
+        value = [14, 400]
+    font_size, font_weight = int(value[0]), int(value[1])
+    units = text_units(content)
+    if role == "primary":
+        if units > 12:
+            font_size = 16
+        elif units > 8:
+            font_size = 18
+        elif units > 3:
+            font_size = 20
+    return font_size, font_weight
+
+
+def auto_gap(node: AltNode, depth: int, density: str) -> int:
+    spacing = LAYOUT_PROFILE.get("spacing", {})
+    if density == "compact" or len(node.children) >= 3:
+        return int(spacing.get("denseGap", 4))
+    if depth == 0:
+        return int(spacing.get("rootGap", 8))
+    return int(spacing.get("nestedGap", 6))
+
+
+def rounded_dimension(value: float) -> int:
+    return max(1, int(math.ceil(value - 1e-9)))
+
+
+def allocate_axis(preferred: list[float], minimum: list[float], available: float) -> list[float]:
+    if not preferred:
+        return []
+    preferred_total = sum(preferred)
+    minimum_total = sum(minimum)
+    if available >= preferred_total:
+        result = list(preferred)
+        result[-1] += available - preferred_total
+        return result
+    if available <= minimum_total:
+        if minimum_total <= 0:
+            return [available / len(minimum)] * len(minimum)
+        scale = max(0.0, available) / minimum_total
+        return [value * scale for value in minimum]
+    shrink_needed = preferred_total - available
+    capacity = [max(0.0, pref - floor) for pref, floor in zip(preferred, minimum)]
+    capacity_total = sum(capacity)
+    if capacity_total <= 0:
+        return list(minimum)
+    return [
+        pref - shrink_needed * room / capacity_total
+        for pref, room in zip(preferred, capacity)
+    ]
+
+
+def auto_layout_document(
+    document: AltDocument,
+    task_spec: dict[str, Any],
+    asc: dict[str, dict[str, Any]],
+) -> tuple[AltDocument, list[ValidationIssue]]:
+    protocol_issues = validate_auto_protocol(document, str(task_spec.get("size")))
+    errors = [issue for issue in protocol_issues if issue.severity == "error"]
+    if errors:
+        detail = "; ".join(f"{issue.node_id}: {issue.message}" for issue in errors)
+        raise ConversionError(f"auto ALT protocol validation failed: {detail}")
+
+    result = copy.deepcopy(document)
+    size = str(result.root.attrs["card"])
+    theme_name = str(result.root.attrs["theme"])
+    theme = theme_values(theme_name)
+    canvas_value = LAYOUT_PROFILE.get("canvas", {}).get(size, {})
+    canvas = canvas_value if isinstance(canvas_value, dict) else {}
+    width = float(canvas.get("width", 140 if size == "2x2" else 300))
+    height = float(canvas.get("height", 140))
+    root_padding = float(canvas.get("padding", 12))
+    data_model = sample_data_model(task_spec["dataModelSchema"])
+    diagnostics = list(protocol_issues)
+    semantic_text: dict[str, str] = {}
+    visible_units = 0.0
+    for node in alt_nodes(result):
+        if node.component in {"Text", "Button", "Checkbox"}:
+            value = auto_semantic_text(node, asc, data_model, diagnostics)
+            semantic_text[node.node_id] = value
+            visible_units += text_units(value)
+        if node.component == "Image":
+            src = auto_asset_src(node, asc, task_spec, data_model)
+            if not isinstance(src, str) or not src.lower().endswith(".svg"):
+                diagnostics.append(
+                    ValidationIssue(
+                        "error",
+                        node.node_id,
+                        "auto ALT Image must resolve to a local .svg assetCandidate",
+                    )
+                )
+
+    limits_value = LAYOUT_PROFILE.get("limits", {}).get(size, {})
+    limits = limits_value if isinstance(limits_value, dict) else {}
+    max_units = float(limits.get("maxVisibleTextUnits", 32 if size == "2x2" else 72))
+    if visible_units > max_units:
+        diagnostics.append(
+            ValidationIssue(
+                "error",
+                result.root.node_id,
+                f"visible text budget is {visible_units:.1f} units; {size} allows {max_units:g}",
+            )
+        )
+    density = "compact" if (
+        len(alt_nodes(result)) > (7 if size == "2x2" else 13)
+        or visible_units > max_units * 0.72
+    ) else "regular"
+
+    components = LAYOUT_PROFILE.get("components", {})
+    button_profile = components.get("button", {})
+    checkbox_profile = components.get("checkbox", {})
+    image_profile = components.get("image", {})
+    progress_profile = components.get("progress", {})
+    divider_profile = components.get("divider", {})
+    measures: dict[str, AutoMeasure] = {}
+
+    def measure(node: AltNode, depth: int = 0) -> AutoMeasure:
+        role = auto_role(node)
+        if node.component == "Text":
+            content = semantic_text.get(node.node_id, "信息")
+            font_size, font_weight = auto_font(role, content, density)
+            maximum_lines = 2 if role in {"title", "support", "default"} and text_units(content) > 6 else 1
+            preferred_width = estimated_text_width(content, font_size, font_weight, 1.10)
+            line_height = font_size + 4
+            minimum_width = max(font_size * 2.0, preferred_width / maximum_lines)
+            value = AutoMeasure(
+                preferred_width,
+                line_height,
+                minimum_width,
+                line_height,
+                font_size,
+                font_weight,
+                maximum_lines,
+                content,
+            )
+        elif node.component == "Button":
+            content = semantic_text.get(node.node_id, "查看")
+            font_size, font_weight = auto_font("action", content, density)
+            horizontal = float(button_profile.get("paddingHorizontal", 12)) * 2
+            safety = float(button_profile.get("widthSafety", 4))
+            preferred_width = max(
+                float(button_profile.get("minimumWidth", 48)),
+                estimated_text_width(content, font_size, font_weight, 1.08) + horizontal + safety,
+            )
+            preferred_height = max(
+                float(button_profile.get("minimumHeight", 32)),
+                font_size + 4 + float(button_profile.get("paddingVertical", 8)) * 2,
+            )
+            value = AutoMeasure(
+                preferred_width,
+                preferred_height,
+                preferred_width,
+                preferred_height,
+                font_size,
+                font_weight,
+                1,
+                content,
+            )
+        elif node.component == "Checkbox":
+            content = semantic_text.get(node.node_id, "选择")
+            font_size = float(checkbox_profile.get("labelFontSize", 16))
+            fixed = (
+                float(checkbox_profile.get("controlSize", 20))
+                + float(checkbox_profile.get("controlMargin", 2)) * 2
+                + float(checkbox_profile.get("labelGap", 12))
+            )
+            preferred_width = fixed + estimated_text_width(content, font_size, 400, 1.10)
+            preferred_height = float(checkbox_profile.get("outerHeight", 48))
+            value = AutoMeasure(
+                preferred_width,
+                preferred_height,
+                preferred_width,
+                preferred_height,
+                font_size,
+                400,
+                1,
+                content,
+            )
+        elif node.component == "Image":
+            if role == "primary":
+                image_size = float(image_profile.get("primary2x2" if size == "2x2" else "primary2x4", 48))
+            else:
+                image_size = float(image_profile.get(role, image_profile.get("asset", 24)))
+            value = AutoMeasure(image_size, image_size, image_size, image_size, variant="svg")
+        elif node.component == "Progress":
+            if role == "primary":
+                ring_size = float(progress_profile.get("ring2x2" if size == "2x2" else "ring2x4", 56))
+                value = AutoMeasure(ring_size, ring_size, ring_size, ring_size, variant="ring")
+            else:
+                linear_width = float(progress_profile.get("linearMinimumWidth", 64))
+                linear_height = float(progress_profile.get("linearHeight", 8))
+                value = AutoMeasure(linear_width, linear_height, linear_width, linear_height, variant="linear")
+        elif node.component == "Divider":
+            value = AutoMeasure(1, 1, 1, 1, variant="divider")
+        elif node.component == "Repeat":
+            child_measure = measure(node.children[0], depth + 1) if node.children else AutoMeasure(1, 1, 1, 1)
+            visible = int(limits.get("maxVisibleListItems", 1))
+            gap = auto_gap(node, depth, density)
+            value = AutoMeasure(
+                child_measure.preferred_width,
+                child_measure.preferred_height * visible + gap * max(0, visible - 1),
+                child_measure.minimum_width,
+                child_measure.minimum_height * visible + gap * max(0, visible - 1),
+                variant=str(visible),
+            )
+        else:
+            child_measures = [measure(child, depth + 1) for child in node.children]
+            gap = auto_gap(node, depth, density)
+            if node.component == "Row":
+                preferred_width = sum(item.preferred_width for item in child_measures) + gap * max(0, len(child_measures) - 1)
+                preferred_height = max((item.preferred_height for item in child_measures), default=1)
+                minimum_width = sum(item.minimum_width for item in child_measures) + gap * max(0, len(child_measures) - 1)
+                minimum_height = max((item.minimum_height for item in child_measures), default=1)
+            else:
+                preferred_width = max((item.preferred_width for item in child_measures), default=1)
+                preferred_height = sum(item.preferred_height for item in child_measures) + gap * max(0, len(child_measures) - 1)
+                minimum_width = max((item.minimum_width for item in child_measures), default=1)
+                minimum_height = sum(item.minimum_height for item in child_measures) + gap * max(0, len(child_measures) - 1)
+            value = AutoMeasure(preferred_width, preferred_height, minimum_width, minimum_height)
+        measures[node.node_id] = value
+        return value
+
+    measure(result.root)
+
+    def set_leaf_layout(node: AltNode, available_width: float, available_height: float, parent: AltNode | None) -> None:
+        measure_value = measures[node.node_id]
+        role = auto_role(node)
+        if node.component == "Text":
+            measured_width = estimated_text_width(
+                measure_value.content,
+                measure_value.font_size,
+                measure_value.font_weight,
+                1.10,
+            )
+            width_value = max(1.0, min(available_width, max(measure_value.minimum_width, measured_width)))
+            required_lines = max(1, int(math.ceil(measured_width / max(width_value, 1.0))))
+            if required_lines > measure_value.max_lines:
+                diagnostics.append(
+                    ValidationIssue(
+                        "error" if role in {"title", "primary", "status", "action"} else "warning",
+                        node.node_id,
+                        f"text {measure_value.content!r} needs {required_lines} lines but role={role} allows {measure_value.max_lines}",
+                    )
+                )
+            lines = min(required_lines, measure_value.max_lines)
+            height_value = (measure_value.font_size + 4) * lines
+            if height_value > available_height + 0.01:
+                diagnostics.append(
+                    ValidationIssue(
+                        "error",
+                        node.node_id,
+                        f"text requires {height_value:g}vp vertically but only {available_height:g}vp is available",
+                    )
+                )
+            node.attrs.update(
+                {
+                    "box": f"{rounded_dimension(width_value)}x{rounded_dimension(height_value)}",
+                    "font": f"{int(measure_value.font_size)}/{measure_value.font_weight}",
+                    "lines": lines,
+                    "overflow": "none",
+                    "fg": theme["text"]["primary" if role in {"title", "primary", "status", "metric"} else "secondary" if role == "support" else "tertiary"],
+                }
+            )
+            if role in {"title", "primary", "status"} or should_protect(node.node_id, node.component, role):
+                node.attrs["protect"] = True
+        elif node.component == "Button":
+            width_value = measure_value.preferred_width
+            height_value = measure_value.preferred_height
+            if width_value > available_width + 0.01 or height_value > available_height + 0.01:
+                diagnostics.append(
+                    ValidationIssue(
+                        "error",
+                        node.node_id,
+                        f"Button label {measure_value.content!r} needs {width_value:g}x{height_value:g}vp but only {available_width:g}x{available_height:g}vp is available",
+                    )
+                )
+            width_value = min(width_value, available_width)
+            height_value = min(height_value, available_height)
+            chars = max(1, int(math.floor((width_value - 24.0) / max(measure_value.font_size, 1.0))))
+            node.attrs.update(
+                {
+                    "box": f"{rounded_dimension(width_value)}x{rounded_dimension(height_value)}",
+                    "font": f"{int(measure_value.font_size)}/{measure_value.font_weight}",
+                    "chars": chars,
+                    "radius": rounded_dimension(height_value / 2),
+                    "bg": theme["action"]["primaryBackground"],
+                    "fg": theme["action"]["primaryText"],
+                    "protect": True,
+                }
+            )
+        elif node.component == "Checkbox":
+            width_value = min(measure_value.preferred_width, available_width)
+            height_value = measure_value.preferred_height
+            if measure_value.preferred_width > available_width + 0.01 or height_value > available_height + 0.01:
+                diagnostics.append(
+                    ValidationIssue(
+                        "error",
+                        node.node_id,
+                        f"Checkbox label {measure_value.content!r} cannot fit the available {available_width:g}x{available_height:g}vp slot",
+                    )
+                )
+            node.attrs.update(
+                {
+                    "box": f"{rounded_dimension(width_value)}x{rounded_dimension(height_value)}",
+                    "shape": "rounded_square",
+                    "selected": theme["selection"]["selected"],
+                    "unselected": theme["selection"]["unselected"],
+                    "mark": f"20/2/{theme['selection']['mark']}",
+                    "protect": True,
+                }
+            )
+        elif node.component == "Image":
+            image_size = min(measure_value.preferred_width, available_width, available_height)
+            if image_size + 0.01 < measure_value.minimum_width:
+                diagnostics.append(
+                    ValidationIssue("error", node.node_id, f"SVG icon requires {measure_value.minimum_width:g}vp square")
+                )
+            node.attrs.update(
+                {
+                    "size": rounded_dimension(image_size),
+                    "fit": "contain",
+                    "fill": theme["icon"]["primary" if role in {"primary", "asset", "title"} else "secondary"],
+                }
+            )
+        elif node.component == "Progress":
+            if measure_value.variant == "ring":
+                progress_size = min(measure_value.preferred_width, available_width, available_height)
+                node.attrs.update(
+                    {"size": rounded_dimension(progress_size), "type": "ring", "color": theme["progress"]["fill"]}
+                )
+                if progress_size + 0.01 < measure_value.minimum_width:
+                    diagnostics.append(
+                        ValidationIssue("error", node.node_id, f"ring Progress requires {measure_value.minimum_width:g}vp square")
+                    )
+            else:
+                width_value = max(1.0, available_width)
+                height_value = float(progress_profile.get("linearHeight", 8))
+                node.attrs.update(
+                    {
+                        "box": f"{rounded_dimension(width_value)}x{rounded_dimension(height_value)}",
+                        "type": "linear",
+                        "color": theme["progress"]["fill"],
+                    }
+                )
+        elif node.component == "Divider":
+            vertical = parent is not None and parent.component == "Row"
+            node.attrs.update(
+                {
+                    "axis": "v" if vertical else "h",
+                    "len": rounded_dimension(available_height if vertical else available_width),
+                    "stroke": divider_profile.get("stroke", "1px"),
+                    "color": theme["divider"],
+                }
+            )
+
+    def layout(node: AltNode, available_width: float, available_height: float, depth: int, parent: AltNode | None = None) -> None:
+        if node.component not in CONTAINERS | VIRTUAL_COMPONENTS:
+            set_leaf_layout(node, available_width, available_height, parent)
+            return
+        if node.component == "Repeat":
+            visible = int(measures[node.node_id].variant or 1)
+            node.attrs["visible"] = visible
+            if node.children:
+                item_height = max(1.0, (available_height - auto_gap(node, depth, density) * max(0, visible - 1)) / visible)
+                layout(node.children[0], available_width, item_height, depth + 1, parent)
+            return
+
+        root_node = node is result.root
+        own_width = width if root_node else available_width
+        own_height = height if root_node else available_height
+        content_width = max(1.0, own_width - root_padding * 2) if root_node else max(1.0, own_width)
+        content_height = max(1.0, own_height - root_padding * 2) if root_node else max(1.0, own_height)
+        node.attrs["box"] = f"{rounded_dimension(own_width)}x{rounded_dimension(own_height)}"
+        gap = auto_gap(node, depth, density)
+        children = node.children
+        if not children:
+            return
+        child_measures = [measures[child.node_id] for child in children]
+        gap_total = gap * max(0, len(children) - 1)
+        if node.component == "Row":
+            child_widths = allocate_axis(
+                [item.preferred_width for item in child_measures],
+                [item.minimum_width for item in child_measures],
+                max(1.0, content_width - gap_total),
+            )
+            if sum(item.minimum_width for item in child_measures) + gap_total > content_width + 0.01:
+                diagnostics.append(
+                    ValidationIssue(
+                        "error",
+                        node.node_id,
+                        f"auto Row minimum width exceeds the available {content_width:g}vp",
+                    )
+                )
+            node.attrs.update({"gap": gap, "main": "start", "cross": "center"})
+            for child, child_width in zip(children, child_widths):
+                child_height = content_height if child.component in CONTAINERS | VIRTUAL_COMPONENTS else min(
+                    content_height, measures[child.node_id].preferred_height
+                )
+                layout(child, max(1.0, child_width), max(1.0, child_height), depth + 1, node)
+        else:
+            preferred_heights: list[float] = []
+            minimum_heights: list[float] = []
+            for child, item in zip(children, child_measures):
+                if child.component == "Text":
+                    lines = min(item.max_lines, max(1, int(math.ceil(item.preferred_width / content_width))))
+                    text_height = (item.font_size + 4) * lines
+                    preferred_heights.append(text_height)
+                    minimum_heights.append(text_height)
+                else:
+                    preferred_heights.append(item.preferred_height)
+                    minimum_heights.append(item.minimum_height)
+            child_heights = allocate_axis(
+                preferred_heights,
+                minimum_heights,
+                max(1.0, content_height - gap_total),
+            )
+            if sum(minimum_heights) + gap_total > content_height + 0.01:
+                diagnostics.append(
+                    ValidationIssue(
+                        "error",
+                        node.node_id,
+                        f"auto Column minimum height exceeds the available {content_height:g}vp",
+                    )
+                )
+            has_bottom_action = children[-1].component == "Button"
+            if sum(preferred_heights) + gap_total < content_height - 18 and has_bottom_action:
+                node.attrs.update({"main": "between", "cross": "center"})
+                node.attrs.pop("gap", None)
+            else:
+                node.attrs.update({"gap": gap, "main": "center" if sum(preferred_heights) < content_height * 0.7 else "start", "cross": "center"})
+            for child, child_height in zip(children, child_heights):
+                if child.component in CONTAINERS | VIRTUAL_COMPONENTS or child.component in {"Text", "Progress", "Divider"}:
+                    child_width = content_width
+                elif child.component == "Button" and root_node:
+                    child_width = content_width
+                else:
+                    child_width = min(content_width, measures[child.node_id].preferred_width)
+                layout(child, max(1.0, child_width), max(1.0, child_height), depth + 1, node)
+
+    root_role = result.root.attrs.get("role")
+    result.root.attrs = {
+        "card": size,
+        "theme": theme_name,
+        **({"role": root_role} if isinstance(root_role, str) else {}),
+    }
+    layout(result.root, width, height, 0)
+    result.root.attrs.update(
+        {
+            "pad": rounded_dimension(root_padding),
+            "radius": int(canvas.get("radius", 18 if size == "2x2" else 22)),
+            "clip": True,
+            "bg": theme["surface"]["root"],
+        }
+    )
+    return result, diagnostics
 
 
 class SemanticResolver:
@@ -1694,6 +2547,8 @@ def apply_alt_styles(node: AltNode) -> tuple[dict[str, Any], dict[str, Any]]:
             styles["objectFit"] = attrs["fit"]
         if "ratio" in attrs:
             styles["aspectRatio"] = attrs["ratio"]
+        if "fill" in attrs:
+            styles["fillColor"] = attrs["fill"]
     elif node.component == "Progress":
         if "type" in attrs:
             styles["type"] = attrs["type"]
@@ -1956,6 +2811,14 @@ def parse_args() -> argparse.Namespace:
         choices=("d2t", "t2d"),
         help="d2t converts DSL to ALT; t2d converts ALT plus TaskSpec to DSL.",
     )
+    parser.add_argument(
+        "--legacy_alt",
+        action="store_true",
+        help=(
+            "During d2t, emit the geometry-preserving ALT v0.1 form instead of the default "
+            "automatic-layout ALT. t2d always auto-detects both forms."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -2008,36 +2871,85 @@ def main() -> int:
                 )
                 for warning in base_warnings:
                     LOGGER.warning("%s ASC base: %s", prefix, warning)
+                output_document = document if args.legacy_alt else simplify_to_auto(document, size)
                 asc_text = build_asc(
                     read_jsonl_messages(dsl_path),
-                    document,
+                    output_document,
                     task_spec,
                 )
-                atomic_write(alt_path, serialize_alt(document))
+                if not args.legacy_alt:
+                    protocol_issues = validate_auto_protocol(output_document, task_spec["size"])
+                    for issue in protocol_issues:
+                        LOGGER.warning("%s auto ALT [%s] %s", prefix, issue.node_id, issue.message)
+                    protocol_errors = [issue for issue in protocol_issues if issue.severity == "error"]
+                    if protocol_errors:
+                        detail = "; ".join(
+                            f"{issue.node_id}: {issue.message}" for issue in protocol_errors
+                        )
+                        raise ConversionError(f"migrated automatic ALT is invalid: {detail}")
+                    migrated_asc = parse_asc_text(asc_text, output_document)
+                    validate_auto_asc(output_document, task_spec, migrated_asc)
+                    compiled_migration, migration_issues = auto_layout_document(
+                        output_document,
+                        task_spec,
+                        migrated_asc,
+                    )
+                    migration_issues += validate_layout(compiled_migration, task_spec["size"])
+                    migration_errors = [issue for issue in migration_issues if issue.severity == "error"]
+                    if migration_errors:
+                        detail = "; ".join(
+                            f"{issue.node_id}: {issue.message}" for issue in migration_errors
+                        )
+                        raise ConversionError(f"migrated automatic ALT is infeasible: {detail}")
+                atomic_write(alt_path, serialize_alt(output_document))
                 atomic_write(asc_path, asc_text)
                 LOGGER.info(
-                    "%s DONE dsl=%s alt=%s asc=%s nodes=%d",
+                    "%s DONE dsl=%s alt=%s asc=%s protocol=%s nodes=%d",
                     prefix,
                     dsl_path.name,
                     alt_path.name,
                     asc_path.name,
+                    "legacy" if args.legacy_alt else "auto",
                     len([line for line in asc_text.splitlines() if line.strip()]),
                 )
             else:
                 task_spec = load_task_spec(task_path)
                 document = parse_alt(alt_path)
                 asc = parse_asc(asc_path, document)
-                issues = validate_layout(document, task_spec["size"])
+                compiled_document = document
+                auto_issues: list[ValidationIssue] = []
+                if is_auto_layout(document):
+                    validate_auto_asc(document, task_spec, asc)
+                    protocol_issues = validate_auto_protocol(document, str(task_spec.get("size")))
+                    protocol_errors = [issue for issue in protocol_issues if issue.severity == "error"]
+                    if protocol_errors:
+                        atomic_write(
+                            layout_report_path,
+                            build_layout_report(
+                                case_dir.name,
+                                task_spec["size"],
+                                alt_path.name,
+                                dsl_path.name,
+                                document,
+                                protocol_issues,
+                            ),
+                        )
+                        detail = "; ".join(
+                            f"{issue.node_id}: {issue.message}" for issue in protocol_errors
+                        )
+                        raise ConversionError(f"automatic ALT protocol is invalid: {detail}")
+                    compiled_document, auto_issues = auto_layout_document(document, task_spec, asc)
+                issues = auto_issues + validate_layout(compiled_document, task_spec["size"])
                 base_text, warnings = alt_to_dsl(
-                    document,
+                    compiled_document,
                     task_spec,
                     strict_layout=False,
                     validate_content=False,
                 )
                 dsl_text = apply_asc_to_dsl(base_text, document, task_spec, asc)
-                for warning in warnings:
-                    LOGGER.warning("%s %s", prefix, warning)
-                atomic_write(dsl_path, dsl_text)
+                if not is_auto_layout(document):
+                    for warning in warnings:
+                        LOGGER.warning("%s %s", prefix, warning)
                 atomic_write(
                     layout_report_path,
                     build_layout_report(
@@ -2045,10 +2957,15 @@ def main() -> int:
                         task_spec["size"],
                         alt_path.name,
                         dsl_path.name,
-                        document,
+                        compiled_document,
                         issues,
                     ),
                 )
+                hard_errors = [issue for issue in issues if issue.severity == "error"]
+                if is_auto_layout(document) and hard_errors:
+                    detail = "; ".join(f"{issue.node_id}: {issue.message}" for issue in hard_errors)
+                    raise ConversionError(f"automatic layout is infeasible: {detail}")
+                atomic_write(dsl_path, dsl_text)
                 LOGGER.info(
                     "%s DONE alt=%s asc=%s dsl=%s layout_report=%s issues=%d",
                     prefix,
