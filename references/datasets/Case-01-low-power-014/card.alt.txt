@@ -1,0 +1,17 @@
+Column root box=300x140 pad=12 radius=22 gradient={"direction":"RightBottom","colors":[["#ff191a1c",0],["#634794",0.58],["#ff000000",1]]} clip role=shell
+  Row main_row box=276x116 gap=10 cross=top role=group
+    Column hero_column box=154x116 gap=2 main=start cross=start role=primary protect
+      Text title_text box=154x16 font=12/500 lines=1 fg=#99ffffff role=title protect
+      Text battery_text box=154x38 font=32/700 lines=1 style={"fontColor":"{{ ${/data/device/batteryStatusColor} }}"} role=text
+      Progress battery_progress box=154x8 type=linear style={"color":"{{ ${/data/device/batteryProgressColor} }}"} role=metric
+      Text countdown_text box=154x18 font=14/500 lines=1 fg=#ffffffff role=text protect
+      Text alert_badge box=118x22 pad=2/8 font=12/600 lines=1 text=center radius=11 fg=#ffffffff style={"backgroundColor":"{{ ${/data/device/batteryAlertBgColor} }}"} role=status protect
+    Column schedule_panel box=112x116 pad=8 gap=4 main=start cross=start radius=16 bg=#19ffffff border=1/#33ffffff role=group
+      Text schedule_title box=96x14 font=12/600 lines=1 fg=#e5ffffff role=title protect
+      Row event_row_1 box=96x18 gap=4 cross=center role=group
+        Checkbox event_check_1 box=18x18 shape=rounded_square selected=#ff5ba854 unselected=#66ffffff mark=12/2/#ff000000 role=selection
+        Text event_text_1 box=74x18 font=12/400 lines=1 fg=#99ffffff style={"minFontSize":10,"maxFontSize":12} role=text
+      Row event_row_2 box=96x18 gap=4 cross=center role=group
+        Checkbox event_check_2 box=18x18 shape=rounded_square selected=#ff5ba854 unselected=#66ffffff mark=12/2/#ff000000 role=selection
+        Text event_text_2 box=74x18 font=12/400 lines=1 fg=#99ffffff style={"minFontSize":10,"maxFontSize":12} role=text
+      Button action_button box=96x34 font=14/500 chars=5 radius=17 bg=#33ffffff fg=#ffffffff role=action protect

@@ -1,0 +1,9 @@
+Image battery_icon asset=0
+Text title_text text=电量充足,放心出门
+Text weather_label text=天气
+Text weather_value bind=/data/weather/current/condition
+Text temp_label text=温度
+Text temp_value bind=/data/weather/current/temperatureText
+Text humidity_label text=湿度
+Text humidity_value expr="{{ ${/data/weather/current/humidityPercent} + '%' }}"
+Button action_button event=0 label=查看天气详情

@@ -1,0 +1,51 @@
+{
+  "type": "object",
+  "description": "Checks string length constraints.",
+  "properties": {
+    "call": {
+      "const": "length"
+    },
+    "args": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "$ref": "../common_types.json#/$defs/DynamicString"
+        },
+        "min": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The minimum allowed length. The boundary is inclusive, must be 0 or greater, and at least one of `min` or `max` must be provided."
+        },
+        "max": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The maximum allowed length. The boundary is inclusive, must be 0 or greater, and at least one of `min` or `max` must be provided."
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "anyOf": [
+        {
+          "required": [
+            "min"
+          ]
+        },
+        {
+          "required": [
+            "max"
+          ]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "returnType": {
+      "const": "boolean"
+    }
+  },
+  "required": [
+    "call",
+    "args"
+  ],
+  "unevaluatedProperties": false
+}

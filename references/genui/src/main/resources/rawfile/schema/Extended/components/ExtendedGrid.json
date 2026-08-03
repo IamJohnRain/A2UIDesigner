@@ -1,0 +1,51 @@
+{
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../common_types.json#/$defs/ComponentCommon"
+    },
+    {
+      "$ref": "../common_types.json#/$defs/CatalogComponentCommon"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "component": {
+          "const": "Grid"
+        },
+        "children": {
+          "$ref": "../common_types.json#/$defs/ChildList",
+          "description": "Child component IDs or a template child list."
+        },
+        "styles": {
+          "type": "object",
+          "properties": {
+            "columnsTemplate": {
+              "$ref": "../common_types.json#/$defs/DynamicString",
+              "description": "Grid column template such as 1fr 1fr 2fr."
+            },
+            "rowsTemplate": {
+              "$ref": "../common_types.json#/$defs/DynamicString",
+              "description": "Grid row template such as 1fr 1fr 2fr."
+            },
+            "columnsGap": {
+              "$ref": "../common_types.json#/$defs/DynamicNumber",
+              "description": "Gap between columns.",
+              "minimum": 0
+            },
+            "rowsGap": {
+              "$ref": "../common_types.json#/$defs/DynamicNumber",
+              "description": "Gap between rows.",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "component"
+      ]
+    }
+  ],
+  "additionalProperties": true
+}

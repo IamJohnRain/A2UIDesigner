@@ -1,0 +1,45 @@
+{
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../common_types.json#/$defs/ComponentCommon"
+    },
+    {
+      "$ref": "../common_types.json#/$defs/CatalogComponentCommon"
+    },
+    {
+      "$ref": "../common_types.json#/$defs/Checkable"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "component": {
+          "const": "Button"
+        },
+        "child": {
+          "$ref": "../common_types.json#/$defs/ComponentId",
+          "description": "The ID of the child component. Use a 'Text' component for a labeled button. Only use an 'Icon' if the requirements explicitly ask for an icon-only button. Do NOT define the child component inline."
+        },
+        "variant": {
+          "type": "string",
+          "description": "A hint for the button style. If omitted, a default button style is used. 'primary' indicates this is the main call-to-action button. 'borderless' means the button has no visual border or background, making its child content appear like a clickable link.",
+          "enum": [
+            "default",
+            "primary",
+            "borderless"
+          ],
+          "default": "default"
+        },
+        "action": {
+          "$ref": "../common_types.json#/$defs/Action"
+        }
+      },
+      "required": [
+        "component",
+        "child",
+        "action"
+      ]
+    }
+  ],
+  "unevaluatedProperties": false
+}

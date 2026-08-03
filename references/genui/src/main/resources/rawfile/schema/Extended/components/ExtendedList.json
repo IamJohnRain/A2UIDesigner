@@ -1,0 +1,153 @@
+{
+  "type": "object",
+  "$defs": {
+    "ListDirectionLiteral": {
+      "type": "string",
+      "enum": [
+        "vertical",
+        "horizontal"
+      ]
+    },
+    "ScrollBarLiteral": {
+      "type": "string",
+      "enum": [
+        "off",
+        "auto",
+        "on"
+      ]
+    },
+    "NestedScrollMode": {
+      "type": "string",
+      "enum": [
+        "selfOnly",
+        "selfFirst",
+        "parentFirst",
+        "paraller"
+      ]
+    },
+    "NestedScrollOptions": {
+      "type": "object",
+      "properties": {
+        "scrollForward": {
+          "$ref": "#/$defs/NestedScrollMode"
+        },
+        "scrollBackward": {
+          "$ref": "#/$defs/NestedScrollMode"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "allOf": [
+    {
+      "$ref": "../common_types.json#/$defs/ComponentCommon"
+    },
+    {
+      "$ref": "../common_types.json#/$defs/CatalogComponentCommon"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "component": {
+          "const": "List"
+        },
+        "children": {
+          "$ref": "../common_types.json#/$defs/ChildList",
+          "description": "Child component IDs or a template child list."
+        },
+        "space": {
+          "$ref": "../common_types.json#/$defs/DynamicNumber",
+          "description": "Main-axis spacing between list items."
+        },
+        "styles": {
+          "type": "object",
+          "properties": {
+            "listDirection": {
+              "description": "List layout direction.",
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/ListDirectionLiteral"
+                },
+                {
+                  "$ref": "../common_types.json#/$defs/DataBinding"
+                },
+                {
+                  "allOf": [
+                    {
+                      "$ref": "../common_types.json#/$defs/FunctionCall"
+                    },
+                    {
+                      "properties": {
+                        "returnType": {
+                          "const": "string"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "scrollBar": {
+              "description": "Scroll bar display mode.",
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/ScrollBarLiteral"
+                },
+                {
+                  "$ref": "../common_types.json#/$defs/DataBinding"
+                },
+                {
+                  "allOf": [
+                    {
+                      "$ref": "../common_types.json#/$defs/FunctionCall"
+                    },
+                    {
+                      "properties": {
+                        "returnType": {
+                          "const": "string"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "nestedScroll": {
+              "description": "Nested scroll mode configuration.",
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/NestedScrollOptions"
+                },
+                {
+                  "$ref": "#/$defs/NestedScrollMode"
+                },
+                {
+                  "$ref": "../common_types.json#/$defs/DataBinding"
+                },
+                {
+                  "allOf": [
+                    {
+                      "$ref": "../common_types.json#/$defs/FunctionCall"
+                    },
+                    {
+                      "properties": {
+                        "returnType": {
+                          "const": "object"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "component"
+      ]
+    }
+  ],
+  "additionalProperties": true
+}

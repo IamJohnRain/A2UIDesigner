@@ -1,0 +1,52 @@
+{
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../common_types.json#/$defs/ComponentCommon"
+    },
+    {
+      "$ref": "../common_types.json#/$defs/CatalogComponentCommon"
+    },
+    {
+      "type": "object",
+      "description": "A layout component that arranges its children horizontally. To create a grid layout, nest Columns within this Row.",
+      "properties": {
+        "component": {
+          "const": "Row"
+        },
+        "children": {
+          "description": "Defines the children. Use an array of strings for a fixed set of children, or a template object to generate children from a data list. Children cannot be defined inline, they must be referred to by ID.",
+          "$ref": "../common_types.json#/$defs/ChildList"
+        },
+        "justify": {
+          "type": "string",
+          "description": "Defines the arrangement of children along the main axis (horizontally). Use 'spaceBetween' to push items to the edges, or 'start'/'end'/'center' to pack them together. Values: `start` packs children at the left/start edge; `center` centers children horizontally; `end` packs children at the right/end edge; `spaceBetween` distributes extra space between children and pushes the first and last child to the edges; `spaceAround` places equal space around each child; `spaceEvenly` places equal space between children and at both edges.",
+          "enum": [
+            "center",
+            "end",
+            "spaceAround",
+            "spaceBetween",
+            "spaceEvenly",
+            "start"
+          ],
+          "default": "start"
+        },
+        "align": {
+          "type": "string",
+          "description": "Defines the alignment of children along the cross axis (vertically). This is similar to the CSS 'align-items' property, but uses camelCase values (e.g., 'start'). Values: `start` aligns children to the top; `center` centers children vertically; `end` aligns children to the bottom.",
+          "enum": [
+            "start",
+            "center",
+            "end"
+          ],
+          "default": "start"
+        }
+      },
+      "required": [
+        "component",
+        "children"
+      ]
+    }
+  ],
+  "unevaluatedProperties": false
+}

@@ -1,0 +1,42 @@
+{
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../common_types.json#/$defs/ComponentCommon"
+    },
+    {
+      "$ref": "../common_types.json#/$defs/CatalogComponentCommon"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "component": {
+          "const": "Text"
+        },
+        "text": {
+          "$ref": "../common_types.json#/$defs/DynamicString",
+          "description": "The text content to display. While simple Markdown formatting is supported (i.e. without HTML, images, or links), utilizing dedicated UI components is generally preferred for a richer and more structured presentation."
+        },
+        "variant": {
+          "type": "string",
+          "description": "A hint for the base text style. Values: `h1` is the largest top-level heading; `h2` is a second-level heading; `h3` is a third-level heading; `h4` is a smaller heading; `h5` is a small heading or subtitle; `caption` is small secondary text; `body` is the default body text.",
+          "enum": [
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "caption",
+            "body"
+          ],
+          "default": "body"
+        }
+      },
+      "required": [
+        "component",
+        "text"
+      ]
+    }
+  ],
+  "unevaluatedProperties": false
+}

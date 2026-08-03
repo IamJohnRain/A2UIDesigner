@@ -1,0 +1,82 @@
+{
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../common_types.json#/$defs/ComponentCommon"
+    },
+    {
+      "$ref": "../common_types.json#/$defs/CatalogComponentCommon"
+    },
+    {
+      "$ref": "../common_types.json#/$defs/Checkable"
+    },
+    {
+      "type": "object",
+      "description": "A component that allows selecting one or more options from a list.",
+      "properties": {
+        "component": {
+          "const": "ChoicePicker"
+        },
+        "label": {
+          "$ref": "../common_types.json#/$defs/DynamicString",
+          "description": "The label for the group of options."
+        },
+        "variant": {
+          "type": "string",
+              "description": "A hint for how the choice picker should be displayed and behave. Values: `mutuallyExclusive` allows at most one selected option; `multipleSelection` allows selecting more than one option.",
+          "enum": [
+            "multipleSelection",
+            "mutuallyExclusive"
+          ],
+          "default": "mutuallyExclusive"
+        },
+        "options": {
+          "type": "array",
+          "description": "The list of available options to choose from.",
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "description": "The text to display for this option.",
+                "$ref": "../common_types.json#/$defs/DynamicString"
+              },
+              "value": {
+                "type": "string",
+                "description": "The stable value associated with this option."
+              }
+            },
+            "required": [
+              "label",
+              "value"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "value": {
+          "$ref": "../common_types.json#/$defs/DynamicStringList",
+          "description": "The list of currently selected values. This should be bound to a string array in the data model."
+        },
+        "displayStyle": {
+          "type": "string",
+          "description": "The display style of the component. Values: `checkbox` displays each option with a checkbox or single-choice control; `chips` displays options as tappable pill-shaped chips.",
+          "enum": [
+            "checkbox",
+            "chips"
+          ],
+          "default": "checkbox"
+        },
+        "filterable": {
+          "type": "boolean",
+          "description": "If true, displays a search input to filter the options.",
+          "default": false
+        }
+      },
+      "required": [
+        "component",
+        "options",
+        "value"
+      ]
+    }
+  ],
+  "unevaluatedProperties": false
+}

@@ -1,0 +1,203 @@
+{
+  "type": "object",
+  "$defs": {
+    "NumericLike": {
+      "oneOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "string",
+          "pattern": "^-?(0|[1-9]\\d*)(?:\\.\\d+)?$"
+        }
+      ]
+    },
+    "ExpressionString": {
+      "type": "string",
+      "pattern": "^\\s*\\{\\{[\\s\\S]*\\}\\}\\s*$",
+      "description": "A full {{ }} expression string."
+    },
+    "ItemMarginValue": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/NumericLike"
+        },
+        {
+          "$ref": "../common_types.json#/$defs/DataBinding"
+        },
+        {
+          "$ref": "../common_types.json#/$defs/FunctionCallString"
+        },
+        {
+          "$ref": "../common_types.json#/$defs/FunctionCallNumber"
+        },
+        {
+          "$ref": "#/$defs/ExpressionString"
+        }
+      ]
+    },
+    "JustifyContentValue": {
+      "description": "Horizontal distribution of child components along the main axis.",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "start",
+            "center",
+            "end",
+            "spaceAround",
+            "spaceBetween",
+            "spaceEvenly"
+          ],
+          "default": "start"
+        },
+        {
+          "$ref": "#/$defs/ExpressionString"
+        },
+        {
+          "$ref": "../common_types.json#/$defs/DataBinding"
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "../common_types.json#/$defs/FunctionCall"
+            },
+            {
+              "properties": {
+                "returnType": {
+                  "const": "string"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "AlignItemsValue": {
+      "description": "Vertical alignment of child components on the cross axis.",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "top",
+            "center",
+            "bottom"
+          ],
+          "default": "center"
+        },
+        {
+          "$ref": "#/$defs/ExpressionString"
+        },
+        {
+          "$ref": "../common_types.json#/$defs/DataBinding"
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "../common_types.json#/$defs/FunctionCall"
+            },
+            {
+              "properties": {
+                "returnType": {
+                  "const": "string"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "WrapValue": {
+      "description": "Whether Row keeps items on one line or allows wrapping.",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "noWrap",
+            "wrap"
+          ],
+          "default": "noWrap"
+        },
+        {
+          "$ref": "#/$defs/ExpressionString"
+        },
+        {
+          "$ref": "../common_types.json#/$defs/DataBinding"
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "../common_types.json#/$defs/FunctionCall"
+            },
+            {
+              "properties": {
+                "returnType": {
+                  "const": "string"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "$ref": "../common_types.json#/$defs/ComponentCommon"
+    },
+    {
+      "$ref": "../common_types.json#/$defs/CatalogComponentCommon"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "component": {
+          "const": "Row"
+        },
+        "children": {
+          "$ref": "../common_types.json#/$defs/ChildList",
+          "description": "Child component IDs or a template child list."
+        },
+        "itemMargin": {
+          "$ref": "#/$defs/ItemMarginValue",
+          "description": "Horizontal spacing between child components. Literal numbers, numeric strings, data binding, function call, and expression strings are supported."
+        },
+        "justifyContent": {
+          "$ref": "#/$defs/JustifyContentValue",
+          "description": "Top-level alias of styles.justifyContent."
+        },
+        "alignItems": {
+          "$ref": "#/$defs/AlignItemsValue",
+          "description": "Top-level alias of styles.alignItems."
+        },
+        "wrap": {
+          "$ref": "#/$defs/WrapValue",
+          "description": "Whether Row keeps items on one line or allows wrapping."
+        },
+        "styles": {
+          "allOf": [
+            {
+              "$ref": "../common_types.json#/$defs/ExtendedCommonStyles"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "justifyContent": {
+                  "$ref": "#/$defs/JustifyContentValue"
+                },
+                "alignItems": {
+                  "$ref": "#/$defs/AlignItemsValue"
+                }
+              },
+              "additionalProperties": true
+            }
+          ]
+        }
+      },
+      "required": [
+        "component"
+      ]
+    }
+  ],
+  "additionalProperties": true
+}

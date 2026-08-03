@@ -1,0 +1,32 @@
+{
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../common_types.json#/$defs/ComponentCommon"
+    },
+    {
+      "$ref": "../common_types.json#/$defs/CatalogComponentCommon"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "component": {
+          "const": "Divider"
+        },
+        "axis": {
+          "type": "string",
+          "description": "The orientation of the divider. Values: `horizontal` renders a horizontal separator between vertical content blocks; `vertical` renders a vertical separator between horizontal content blocks.",
+          "enum": [
+            "horizontal",
+            "vertical"
+          ],
+          "default": "horizontal"
+        }
+      },
+      "required": [
+        "component"
+      ]
+    }
+  ],
+  "unevaluatedProperties": false
+}

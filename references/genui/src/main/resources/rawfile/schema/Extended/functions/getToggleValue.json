@@ -1,0 +1,30 @@
+{
+  "type": "object",
+  "description": "Returns the on/off state and label text of the target Extended.Toggle component. If args.componentId does not match a component or the matched component is not an Extended.Toggle component, returns an empty object ({}). If args.componentId is omitted, the functionCall is invalid.",
+  "properties": {
+    "call": {
+      "const": "getToggleValue"
+    },
+    "args": {
+      "type": "object",
+      "properties": {
+        "componentId": {
+          "$ref": "../common_types.json#/$defs/DynamicString",
+          "description": "The target Extended.Toggle component ID."
+        }
+      },
+      "required": [
+        "componentId"
+      ],
+      "additionalProperties": false
+    },
+    "returnType": {
+      "const": "object"
+    }
+  },
+  "required": [
+    "call",
+    "args"
+  ],
+  "unevaluatedProperties": false
+}

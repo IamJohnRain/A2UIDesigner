@@ -1,0 +1,11 @@
+Image leadingIcon asset=0
+Text titleText bind=/card/title
+Progress meterTrack value=100 total=100
+Progress meterRing value=/meter/progressValue total=/meter/progressTotal
+Text meterValue bind=/meter/centerLabel
+Text factLabel bind=/meter/caption
+Text factValue bind=/support/line1
+Text factMeta bind=/support/line2
+Row primaryAction event=0
+Image actionIcon asset=1
+Text actionText bind=/action/label

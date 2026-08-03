@@ -1,0 +1,22 @@
+Stack root box=300x140 pad=12 align=center radius=22 gradient={"direction":"RightBottom","colors":[["#FF191A1C",0],["#FF000000",1]]} clip role=shell
+  Row content_row box=276x116 gap=8 cross=center role=group
+    Column meter_col box=92x116 gap=4 main=center cross=center role=group
+      Row power_header box=92x24 gap=4 main=center cross=center role=group
+        Stack power_icon_chip box=22x22 align=center radius=8 bg=#FFE5E5E5 role=group
+          Image power_icon size=16 fit=contain role=asset
+        Text status_text box=58x18 font=12/600 lines=1 text=start role=status protect
+      Stack meter_stack box=88x88 align=center role=group
+        Progress battery_ring size=86 type=ring role=metric
+        Text battery_value box=72x38 font=32/700 lines=1 text=center fg=#FFFFFFFF role=text protect
+    Column schedule_panel box=106x116 pad=8 gap=6 radius=16 bg=#19FFFFFF clip role=group
+      Row schedule_header box=90x18 gap=4 cross=center role=group
+        Stack schedule_icon_chip box=18x18 align=center radius=6 bg=#FFE5E5E5 role=group
+          Image schedule_icon size=13 fit=contain role=asset
+        Text schedule_title box=68x16 font=12/600 lines=1 fg=#FFFFFFFF role=title protect
+      Text event_time box=90x16 font=12/500 lines=1 fg=#99FFFFFF role=support protect
+      Text event_title box=90x32 font=12/600 lines=2 fg=#FFFFFFFF role=title protect
+      Text remain_text box=90x16 font=12/500 lines=1 fg=#D1A738 role=text
+    Column switch_col box=62x116 gap=4 main=center cross=center role=group
+      Button save_power_button box=62x36 font=12/600 radius=18 bg=#FF5BA854 fg=#FFFFFFFF role=action protect
+      Button bluetooth_button box=62x36 font=12/600 radius=18 bg=#19FFFFFF fg=#FFFFFFFF role=action protect
+      Button location_button box=62x36 font=12/600 radius=18 bg=#19FFFFFF fg=#FFFFFFFF role=action protect

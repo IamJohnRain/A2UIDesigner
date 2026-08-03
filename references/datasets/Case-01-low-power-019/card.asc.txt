@@ -1,0 +1,10 @@
+Text title_text text=电量告急
+Text weather_condition bind=/data/weather/current/condition
+Text weather_temp bind=/data/weather/current/temperatureText
+Text save_icon text=⚡
+Text save_label text=省电
+Text power_icon text=🔋
+Text power_label text=充电宝
+Text setting_icon text=⚙
+Text setting_label text=设置
+Button action_button event=0 label=开启省电模式

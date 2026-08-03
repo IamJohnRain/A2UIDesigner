@@ -1,0 +1,14 @@
+{
+  "type": "object",
+  "description": "Signals the client to delete the surface identified by 'surfaceId'. The createSurface message MUST have been previously sent with the 'catalogId' that is in this message.",
+  "properties": {
+    "surfaceId": {
+      "type": "string",
+      "description": "The unique identifier for the UI surface to be deleted."
+    }
+  },
+  "required": [
+    "surfaceId"
+  ],
+  "additionalProperties": false
+}

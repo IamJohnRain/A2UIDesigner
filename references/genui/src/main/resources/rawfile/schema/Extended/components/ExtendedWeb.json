@@ -1,0 +1,36 @@
+{
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../common_types.json#/$defs/ComponentCommon"
+    },
+    {
+      "$ref": "../common_types.json#/$defs/CatalogComponentCommon"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "component": {
+          "const": "Web"
+        },
+        "url": {
+          "$ref": "../common_types.json#/$defs/DynamicString",
+          "description": "Address of the web component. Accepts strings and data binding paths."
+        },
+        "styles": {
+          "description": "Shared container style overrides consumed by ExtendedCommonStyleModifier.",
+          "allOf": [
+            {
+              "$ref": "../common_types.json#/$defs/ExtendedCommonStyles"
+            }
+          ]
+        }
+      },
+      "required": [
+        "component",
+        "url"
+      ]
+    }
+  ],
+  "additionalProperties": true
+}

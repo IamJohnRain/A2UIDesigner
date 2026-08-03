@@ -1,0 +1,16 @@
+Column root box=140x140 pad=12 gap=2 main=start cross=center radius=18 bg=#fff1f3f5 clip role=shell
+  Row battery_row box=116x38 gap=4 main=start cross=center role=group
+    Image battery_icon size=38 fit=contain role=asset
+    Column battery_info box=74x38 gap=2 main=center cross=start role=group
+      Text battery_value box=74x22 font=20/700 lines=1 text=start fg=#e5000000 role=text protect
+      Text battery_caption box=74x14 font=12/500 lines=1 text=start fg=#ffe84026 role=support
+  Text weather_text box=116x14 font=12/400 lines=1 text=center fg=#99000000 role=text
+  Column schedule_panel box=116x56 pad=2 gap=4 main=start cross=center radius=12 bg=#0c000000 role=group
+    Row todo1_row box=108x24 gap=4 main=start cross=center role=group
+      Checkbox todo1_check box=16x16 shape=rounded_square selected=#ff0a59f7 unselected=#33000000 mark=8/2/#ffffffff role=selection
+      Text todo1_title box=40x16 font=12/500 lines=1 text=start style={"fontColor":"{{ ${/state/battery/isLowBattery} ? '#ffe84026' : '#e5000000' }}"} role=title protect
+      Button todo1_button box=44x24 font=10/500 chars=2 radius=12 bg=#19000000 fg=#e5000000 role=action protect
+    Row todo2_row box=108x24 gap=4 main=start cross=center role=group
+      Checkbox todo2_check box=16x16 shape=rounded_square selected=#ff0a59f7 unselected=#33000000 mark=8/2/#ffffffff role=selection
+      Text todo2_title box=40x16 font=12/500 lines=1 text=start style={"fontColor":"{{ ${/state/battery/isLowBattery} ? '#ffe84026' : '#e5000000' }}"} role=title protect
+      Button todo2_button box=44x24 font=10/500 chars=2 radius=12 bg=#19000000 fg=#e5000000 role=action protect

@@ -1,0 +1,49 @@
+{
+  "type": "object",
+  "description": "Checks numeric range constraints.",
+  "properties": {
+    "call": {
+      "const": "numeric"
+    },
+    "args": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "$ref": "../common_types.json#/$defs/DynamicNumber"
+        },
+        "min": {
+          "type": "number",
+          "description": "The minimum allowed value. The boundary is inclusive, should be a finite number, and at least one of `min` or `max` must be provided."
+        },
+        "max": {
+          "type": "number",
+          "description": "The maximum allowed value. The boundary is inclusive, should be a finite number, and at least one of `min` or `max` must be provided."
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "anyOf": [
+        {
+          "required": [
+            "min"
+          ]
+        },
+        {
+          "required": [
+            "max"
+          ]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "returnType": {
+      "const": "boolean"
+    }
+  },
+  "required": [
+    "call",
+    "args"
+  ],
+  "unevaluatedProperties": false
+}

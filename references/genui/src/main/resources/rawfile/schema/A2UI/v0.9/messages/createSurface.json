@@ -1,0 +1,27 @@
+{
+  "type": "object",
+  "description": "Signals the client to create a new surface and begin rendering it. It is an error to send 'createSurface' for a surfaceId that already exists without first deleting it. When this message is sent, the client will expect 'updateComponents' and/or 'updateDataModel' messages for the same surfaceId that define the component tree.",
+  "properties": {
+    "surfaceId": {
+      "type": "string",
+      "description": "The unique identifier for the UI surface to be rendered."
+    },
+    "catalogId": {
+      "description": "A string that uniquely identifies this catalog. It is recommended to prefix this with an internet domain that you own, to avoid conflicts e.g. mycompany.com:somecatalog'.",
+      "type": "string"
+    },
+    "theme": {
+      "$ref": "../common_types.json#/$defs/theme",
+      "description": "Theme parameters for the surface (e.g., {'primaryColor': '#FF0000'}). These must validate against the 'theme' schema defined in the catalog."
+    },
+    "sendDataModel": {
+      "type": "boolean",
+      "description": "If true, the client will send the full data model of this surface in the metadata of every A2A message sent to the server that created the surface. Defaults to false."
+    }
+  },
+  "required": [
+    "surfaceId",
+    "catalogId"
+  ],
+  "additionalProperties": false
+}

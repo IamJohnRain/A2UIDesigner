@@ -1,0 +1,11 @@
+Row root box=300x140 pad=12 gap=10 cross=center radius=22 bg=#fff1f3f5 clip role=shell
+  Stack hero_stack box=168x116 align=center radius=18 bg=#ffffffff clip role=primary protect
+    Image hero_image size=104 fit=contain role=asset
+    Column hero_overlay box=168x116 pad=12 gap=4 main=between cross=start bg=#99ffffff role=primary protect
+      Text title_text box=144x18 font=14/600 lines=1 fg=#e5000000 role=title protect
+      Text primary_value box=144x40 font=40/700 lines=1 fg=#ff64bb5c role=primary protect
+      Text status_text box=144x18 font=12/500 lines=1 fg=#99000000 role=status protect
+  Column side_panel box=98x116 pad=8 gap=10 main=between cross=center radius=18 bg=#ffffffff role=group
+    Text estimate_text box=82x32 font=12/500 lines=2 text=center fg=#99000000 role=text
+    Progress battery_progress box=82x8 type=linear color=#ff64bb5c role=metric
+    Button action_button box=82x32 font=14/medium chars=4 radius=16 bg=#ff0a59f7 fg=#ffffffff role=action protect

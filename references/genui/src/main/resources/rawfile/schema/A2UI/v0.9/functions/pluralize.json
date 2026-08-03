@@ -1,0 +1,55 @@
+{
+  "type": "object",
+  "description": "Returns a localized string based on the Common Locale Data Repository (CLDR) plural category of the count (zero, one, two, few, many, other). Requires an 'other' fallback. For English, just use 'one' and 'other'.",
+  "properties": {
+    "call": {
+      "const": "pluralize"
+    },
+    "args": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "$ref": "../common_types.json#/$defs/DynamicNumber",
+          "description": "The numeric value used to determine the plural category."
+        },
+        "zero": {
+          "$ref": "../common_types.json#/$defs/DynamicString",
+          "description": "String for the 'zero' category (e.g., 0 items)."
+        },
+        "one": {
+          "$ref": "../common_types.json#/$defs/DynamicString",
+          "description": "String for the 'one' category (e.g., 1 item)."
+        },
+        "two": {
+          "$ref": "../common_types.json#/$defs/DynamicString",
+          "description": "String for the 'two' category (used in Arabic, Welsh, etc.)."
+        },
+        "few": {
+          "$ref": "../common_types.json#/$defs/DynamicString",
+          "description": "String for the 'few' category (e.g., small groups in Slavic languages)."
+        },
+        "many": {
+          "$ref": "../common_types.json#/$defs/DynamicString",
+          "description": "String for the 'many' category (e.g., large groups in various languages)."
+        },
+        "other": {
+          "$ref": "../common_types.json#/$defs/DynamicString",
+          "description": "The default/fallback string (used for general plural cases)."
+        }
+      },
+      "required": [
+        "value",
+        "other"
+      ],
+      "unevaluatedProperties": false
+    },
+    "returnType": {
+      "const": "string"
+    }
+  },
+  "required": [
+    "call",
+    "args"
+  ],
+  "unevaluatedProperties": false
+}

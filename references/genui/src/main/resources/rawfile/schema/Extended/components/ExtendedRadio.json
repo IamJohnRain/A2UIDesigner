@@ -1,0 +1,48 @@
+{
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../common_types.json#/$defs/ComponentCommon"
+    },
+    {
+      "$ref": "../common_types.json#/$defs/CatalogComponentCommon"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "component": {
+          "const": "Radio"
+        },
+        "value": {
+          "type": "string",
+          "description": "Value of the current radio button. Default is an empty string."
+        },
+        "checked": {
+          "type": "boolean",
+          "description": "Selected state of the radio button. Default: false. true means selected, false means unselected.",
+          "default": false
+        },
+        "group": {
+          "type": "string",
+          "description": "Group name of the current radio button. Default is an empty string. Only one Radio in the same group can be selected."
+        },
+        "checkedBackgroundColor": {
+          "type": "string",
+          "description": "Background color in the selected state. Hex color string. Default follows the theme emphasis background. Dark theme: #FF317AF7. Light theme: #FF0A59F7."
+        },
+        "unCheckedBorderColor": {
+          "type": "string",
+          "description": "Border color in the unselected state. Hex color string. Default follows the switch-off outline theme color. Dark theme: #66FFFFFF. Light theme: #66000000."
+        },
+        "indicatorColor": {
+          "type": "string",
+          "description": "Inner dot color in the selected state. Hex color string. Default follows the contrary foreground theme color. The default for both dark and light themes is #FFFFFFFF."
+        }
+      },
+      "required": [
+        "component"
+      ]
+    }
+  ],
+  "additionalProperties": true
+}

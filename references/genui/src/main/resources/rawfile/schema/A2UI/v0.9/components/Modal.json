@@ -1,0 +1,33 @@
+{
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../common_types.json#/$defs/ComponentCommon"
+    },
+    {
+      "$ref": "../common_types.json#/$defs/CatalogComponentCommon"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "component": {
+          "const": "Modal"
+        },
+        "trigger": {
+          "$ref": "../common_types.json#/$defs/ComponentId",
+          "description": "The ID of the component that opens the modal when interacted with (e.g., a button). Do NOT define the component inline."
+        },
+        "content": {
+          "$ref": "../common_types.json#/$defs/ComponentId",
+          "description": "The ID of the component to be displayed inside the modal. Do NOT define the component inline."
+        }
+      },
+      "required": [
+        "component",
+        "trigger",
+        "content"
+      ]
+    }
+  ],
+  "unevaluatedProperties": false
+}

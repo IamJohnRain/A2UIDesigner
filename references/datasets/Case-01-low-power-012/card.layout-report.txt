@@ -1,0 +1,21 @@
+{
+  "case": "Case-01-low-power-012",
+  "size": "2x2",
+  "sourceAlt": "card.alt.txt",
+  "generatedDsl": "card.dsl.jsonl",
+  "status": "issues",
+  "summary": {
+    "total": 1,
+    "errors": 1,
+    "warnings": 0
+  },
+  "issues": [
+    {
+      "code": "conflicting_spacing",
+      "severity": "error",
+      "nodeId": "header_row",
+      "component": "Row",
+      "message": "main=between cannot be combined with a fixed gap"
+    }
+  ]
+}

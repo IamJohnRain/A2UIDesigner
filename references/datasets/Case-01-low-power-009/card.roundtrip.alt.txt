@@ -1,0 +1,16 @@
+Stack root box=300x140 pad=12 align=center radius=22 gradient={"direction":"RightBottom","colors":[["#9e644f",0],["#ed6f21",0.56],["#f9bc64",1]]} clip role=shell
+  Row main_row box=276x116 gap=8 main=start cross=center role=group
+    Stack left_hero_stack box=140x116 align=center role=primary protect
+      Image hero_bg_icon size=108 fit=contain role=asset
+      Column hero_column box=132x116 gap=4 main=center cross=start radius=18 bg=#33000000 role=primary protect
+        Text mode_label box=124x16 margin=0/0/0/8 font=12/600 lines=1 overflow=none text=start fg=#99ffffff role=text
+        Text battery_value box=124x36 margin=0/0/0/8 font=32/800 lines=1 overflow=none text=start fg=#ffffffff role=text protect
+        Text power_hint box=124x16 margin=0/0/0/8 font=12/500 lines=1 overflow=none text=start fg=#99ffffff role=support
+        Button action_button box=88x32 margin=0/0/0/8 font=14/600 radius=16 bg=#330a59f7 fg=#ffffffff role=action protect
+    Column schedule_panel box=128x116 pad=10 gap=6 main=start cross=start radius=18 bg=#33ffffff role=group
+      Row schedule_header box=108x18 gap=4 main=start cross=center role=group
+        Image schedule_icon size=16 fit=contain role=asset
+        Text schedule_caption box=88x16 font=12/700 lines=1 overflow=none text=start fg=#ffffffff role=support
+      Text event_title box=108x18 font=14/800 lines=1 overflow=none text=start fg=#ffffffff role=title protect
+      Text event_time box=108x18 font=12/600 lines=1 overflow=none text=start fg=#99ffffff role=support protect
+      Text event_location box=108x16 font=12/500 lines=1 overflow=none text=start fg=#99ffffff role=text

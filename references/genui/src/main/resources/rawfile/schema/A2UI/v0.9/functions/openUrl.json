@@ -1,0 +1,31 @@
+{
+  "type": "object",
+  "description": "Opens the specified URL in a browser or handler. This function has no return value.",
+  "properties": {
+    "call": {
+      "const": "openUrl"
+    },
+    "args": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "description": "The URL to open."
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "additionalProperties": false
+    },
+    "returnType": {
+      "const": "void"
+    }
+  },
+  "required": [
+    "call",
+    "args"
+  ],
+  "unevaluatedProperties": false
+}

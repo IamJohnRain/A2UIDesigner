@@ -1,0 +1,14 @@
+Row saving_panel event=0
+Image saving_icon bind=/assets/savingIcon
+Text saving_text bind=/modes/savingText
+Checkbox saving_switch event=0 bind=/modes/savingEnabled label=""
+Row dnd_panel event=1
+Image dnd_icon bind=/assets/dndIcon
+Text dnd_text bind=/modes/dndText
+Checkbox dnd_switch event=1 bind=/modes/dndEnabled label=""
+Progress battery_ring value=/metrics/battery/value total=/metrics/battery/total
+Text battery_label bind=/metrics/battery/label
+Progress temperature_ring value=/metrics/temperature/value total=/metrics/temperature/total
+Text temperature_label bind=/metrics/temperature/label
+Progress usage_ring value=/metrics/usage/value total=/metrics/usage/total
+Text usage_label bind=/metrics/usage/label

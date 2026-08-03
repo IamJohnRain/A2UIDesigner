@@ -1,0 +1,73 @@
+{
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../common_types.json#/$defs/ComponentCommon"
+    },
+    {
+      "$ref": "../common_types.json#/$defs/CatalogComponentCommon"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "component": {
+          "const": "Checkbox"
+        },
+        "label": {
+          "$ref": "../common_types.json#/$defs/DynamicString",
+          "description": "The text to display next to the checkbox. Type: string. Default is an empty string."
+        },
+        "select": {
+          "$ref": "../common_types.json#/$defs/DynamicBoolean",
+          "description": "Selected state of the checkbox. If CheckboxGroup.selectAll is set for the same group but this Checkbox explicitly sets select, this select value takes precedence.",
+          "default": false
+        },
+        "selectedColor": {
+          "type": "string",
+          "description": "The fill color when selected. Hex color string. Supports #RRGGBB and #AARRGGBB formats.",
+          "default": "#007DFF"
+        },
+        "unselectedColor": {
+          "type": "string",
+          "description": "The border/outline color when not selected. Hex color string. Supports #RRGGBB and #AARRGGBB formats.",
+          "default": "#182431"
+        },
+        "mark": {
+          "type": "object",
+          "description": "The mark style of the checkmark.",
+          "properties": {
+            "strokeColor": {
+              "type": "string",
+              "description": "The stroke color of the checkmark.",
+              "default": "#FFFFFF"
+            },
+            "size": {
+              "type": "number",
+              "description": "Internal checkmark size in vp. Default size is the same as the checkbox width."
+            },
+            "strokeWidth": {
+              "type": "number",
+              "description": "The stroke width of the checkmark in vp.",
+              "default": 2.0
+            }
+          }
+        },
+        "shape": {
+          "type": "string",
+          "description": "The shape of the checkbox. If CheckboxGroup.checkboxShape is set for the same group but this Checkbox explicitly sets shape, this shape value takes precedence.",
+          "enum": ["circle", "rounded_square"],
+          "default": "circle"
+        },
+        "group": {
+          "type": "string",
+          "description": "CheckboxGroup name that this checkbox belongs to. Type: string. Default is an empty string. This value is not used when the Checkbox is not used with a CheckboxGroup.",
+          "default": ""
+        }
+      },
+      "required": [
+        "component"
+      ]
+    }
+  ],
+  "additionalProperties": true
+}

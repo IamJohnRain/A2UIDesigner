@@ -1,0 +1,28 @@
+{
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../common_types.json#/$defs/ComponentCommon"
+    },
+    {
+      "$ref": "../common_types.json#/$defs/CatalogComponentCommon"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "component": {
+          "const": "Video"
+        },
+        "url": {
+          "$ref": "../common_types.json#/$defs/DynamicString",
+          "description": "The URL of the video to display."
+        }
+      },
+      "required": [
+        "component",
+        "url"
+      ]
+    }
+  ],
+  "unevaluatedProperties": false
+}

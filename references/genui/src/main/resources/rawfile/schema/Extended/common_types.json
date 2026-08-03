@@ -1,0 +1,1252 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://a2ui.org/specification/v0_9/common_types.json",
+  "title": "A2UI Common Types",
+  "description": "Common type definitions used across A2UI schemas.",
+  "$defs": {
+    "ComponentId": {
+      "type": "string",
+      "description": "The unique identifier for a component, used for both definitions and references within the same surface."
+    },
+    "DataBinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "A JSON Pointer path to a value in the data model."
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "additionalProperties": false
+    },
+    "FunctionCall": {
+      "type": "object",
+      "description": "Invokes a named function on the client.",
+      "properties": {
+        "call": {
+          "type": "string",
+          "description": "The name of the function to call."
+        },
+        "args": {
+          "type": "object",
+          "description": "Arguments passed to the function.",
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/DynamicValue"
+              },
+              {
+                "type": "object",
+                "description": "A literal object argument (e.g. configuration)."
+              }
+            ]
+          }
+        },
+        "returnType": {
+          "type": "string",
+          "description": "The expected return type of the function call.",
+          "enum": [
+            "string",
+            "number",
+            "boolean",
+            "array",
+            "object",
+            "any",
+            "void"
+          ],
+          "default": "boolean"
+        }
+      },
+      "required": [
+        "call"
+      ],
+       "oneOf": [
+         {
+           "$ref": "#/$defs/anyFunction"
+         }
+       ]
+    },
+    "anyFunction": {
+      "oneOf": [
+        {
+          "$ref": "functions/required.json"
+        },
+        {
+          "$ref": "functions/regex.json"
+        },
+        {
+          "$ref": "functions/length.json"
+        },
+        {
+          "$ref": "functions/numeric.json"
+        },
+        {
+          "$ref": "functions/email.json"
+        },
+        {
+          "$ref": "functions/formatString.json"
+        },
+        {
+          "$ref": "functions/formatNumber.json"
+        },
+        {
+          "$ref": "functions/formatCurrency.json"
+        },
+        {
+          "$ref": "functions/formatDate.json"
+        },
+        {
+          "$ref": "functions/pluralize.json"
+        },
+        {
+          "$ref": "functions/openUrl.json"
+        },
+        {
+          "$ref": "functions/and.json"
+        },
+        {
+          "$ref": "functions/or.json"
+        },
+        {
+          "$ref": "functions/not.json"
+        },
+        {
+          "$ref": "functions/getRadioValue.json"
+        },
+        {
+          "$ref": "functions/getCheckboxGroupValues.json"
+        },
+        {
+          "$ref": "functions/getToggleValue.json"
+        },
+        {
+          "$ref": "functions/getSelectValue.json"
+        },
+        {
+          "$ref": "functions/navigate.json"
+        }
+      ]
+    },
+    "DynamicValue": {
+      "description": "A value that can be a literal, a path, or a function call returning any type.",
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "array"
+        },
+        {
+          "$ref": "#/$defs/DataBinding"
+        },
+        {
+          "$ref": "#/$defs/FunctionCall"
+        }
+      ]
+    },
+    "DynamicString": {
+      "description": "Represents a string",
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "$ref": "#/$defs/DataBinding"
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/FunctionCall"
+            },
+            {
+              "properties": {
+                "returnType": {
+                  "const": "string"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "DynamicNumber": {
+      "description": "Represents a value that can be either a literal number, a path to a number in the data model, or a function call returning a number.",
+      "oneOf": [
+        {
+          "type": "number"
+        },
+        {
+          "$ref": "#/$defs/DataBinding"
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/FunctionCall"
+            },
+            {
+              "properties": {
+                "returnType": {
+                  "const": "number"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "DynamicBoolean": {
+      "description": "A boolean value that can be a literal, a path, or a function call returning a boolean.",
+      "oneOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/$defs/DataBinding"
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/FunctionCall"
+            },
+            {
+              "properties": {
+                "returnType": {
+                  "const": "boolean"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "DynamicStringList": {
+      "description": "Represents a value that can be either a literal array of strings, a path to a string array in the data model, or a function call returning a string array.",
+      "oneOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        {
+          "$ref": "#/$defs/DataBinding"
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/FunctionCall"
+            },
+            {
+              "properties": {
+                "returnType": {
+                  "const": "array"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "FunctionCallString": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/FunctionCall"
+        },
+        {
+          "properties": {
+            "returnType": {
+              "const": "string"
+            }
+          }
+        }
+      ]
+    },
+    "FunctionCallNumber": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/FunctionCall"
+        },
+        {
+          "properties": {
+            "returnType": {
+              "const": "number"
+            }
+          }
+        }
+      ]
+    },
+    "FunctionCallBoolean": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/FunctionCall"
+        },
+        {
+          "properties": {
+            "returnType": {
+              "const": "boolean"
+            }
+          }
+        }
+      ]
+    },
+    "FunctionCallArray": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/FunctionCall"
+        },
+        {
+          "properties": {
+            "returnType": {
+              "const": "array"
+            }
+          }
+        }
+      ]
+    },
+    "FunctionCallObject": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/FunctionCall"
+        },
+        {
+          "properties": {
+            "returnType": {
+              "const": "object"
+            }
+          }
+        }
+      ]
+    },
+    "NumericLike": {
+      "oneOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "string",
+          "pattern": "^-?(0|[1-9]\\d*)(?:\\.\\d+)?$"
+        }
+      ]
+    },
+    "BooleanLike": {
+      "oneOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "string",
+          "enum": [
+            "true",
+            "false"
+          ]
+        }
+      ]
+    },
+    "ColorLike": {
+      "oneOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "string",
+          "pattern": "^(transparent|#([0-9a-fA-F]{6}|[0-9a-fA-F]{8}))$"
+        }
+      ]
+    },
+    "LengthValue": {
+      "oneOf": [
+        {
+          "type": "number",
+          "minimum": 0
+        },
+        {
+          "type": "string",
+          "pattern": "^\\d+(?:\\.\\d+)?(?:fp|vp|%)?$"
+        }
+      ]
+    },
+    "LengthOrPolicy": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/LengthValue"
+        },
+        {
+          "type": "string",
+          "enum": [
+            "matchParent",
+            "match_parent",
+            "wrapContent",
+            "wrap_content",
+            "fixAtIdealSize",
+            "fix_at_ideal_size"
+          ]
+        }
+      ]
+    },
+    "DynamicNumericLike": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/NumericLike"
+        },
+        {
+          "$ref": "#/$defs/DataBinding"
+        },
+        {
+          "$ref": "#/$defs/FunctionCallString"
+        },
+        {
+          "$ref": "#/$defs/FunctionCallNumber"
+        }
+      ]
+    },
+    "DynamicBooleanLike": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/BooleanLike"
+        },
+        {
+          "$ref": "#/$defs/DataBinding"
+        },
+        {
+          "$ref": "#/$defs/FunctionCallString"
+        },
+        {
+          "$ref": "#/$defs/FunctionCallBoolean"
+        }
+      ]
+    },
+    "DynamicColorLike": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ColorLike"
+        },
+        {
+          "$ref": "#/$defs/DataBinding"
+        },
+        {
+          "$ref": "#/$defs/FunctionCallString"
+        },
+        {
+          "$ref": "#/$defs/FunctionCallNumber"
+        }
+      ]
+    },
+    "DynamicLength": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/LengthValue"
+        },
+        {
+          "$ref": "#/$defs/DataBinding"
+        },
+        {
+          "$ref": "#/$defs/FunctionCallString"
+        },
+        {
+          "$ref": "#/$defs/FunctionCallNumber"
+        }
+      ]
+    },
+    "DynamicLengthOrPolicy": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/LengthOrPolicy"
+        },
+        {
+          "$ref": "#/$defs/DataBinding"
+        },
+        {
+          "$ref": "#/$defs/FunctionCallString"
+        },
+        {
+          "$ref": "#/$defs/FunctionCallNumber"
+        }
+      ]
+    },
+    "EdgeLengthObject": {
+      "type": "object",
+      "properties": {
+        "top": {
+          "$ref": "#/$defs/DynamicLength"
+        },
+        "right": {
+          "$ref": "#/$defs/DynamicLength"
+        },
+        "bottom": {
+          "$ref": "#/$defs/DynamicLength"
+        },
+        "left": {
+          "$ref": "#/$defs/DynamicLength"
+        }
+      },
+      "additionalProperties": false
+    },
+    "BorderRadiusObject": {
+      "type": "object",
+      "properties": {
+        "topLeft": {
+          "$ref": "#/$defs/DynamicLength"
+        },
+        "topRight": {
+          "$ref": "#/$defs/DynamicLength"
+        },
+        "bottomLeft": {
+          "$ref": "#/$defs/DynamicLength"
+        },
+        "bottomRight": {
+          "$ref": "#/$defs/DynamicLength"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ConstraintSizeObject": {
+      "type": "object",
+      "properties": {
+        "minWidth": {
+          "$ref": "#/$defs/DynamicLength"
+        },
+        "maxWidth": {
+          "$ref": "#/$defs/DynamicLength"
+        },
+        "minHeight": {
+          "$ref": "#/$defs/DynamicLength"
+        },
+        "maxHeight": {
+          "$ref": "#/$defs/DynamicLength"
+        }
+      },
+      "additionalProperties": false
+    },
+    "EdgeColorObject": {
+      "type": "object",
+      "properties": {
+        "top": {
+          "$ref": "#/$defs/DynamicColorLike"
+        },
+        "right": {
+          "$ref": "#/$defs/DynamicColorLike"
+        },
+        "bottom": {
+          "$ref": "#/$defs/DynamicColorLike"
+        },
+        "left": {
+          "$ref": "#/$defs/DynamicColorLike"
+        }
+      },
+      "additionalProperties": false
+    },
+    "EdgeLengthStyle": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/LengthValue"
+        },
+        {
+          "$ref": "#/$defs/EdgeLengthObject"
+        }
+      ]
+    },
+    "BorderRadiusStyle": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/LengthValue"
+        },
+        {
+          "$ref": "#/$defs/BorderRadiusObject"
+        }
+      ]
+    },
+    "EdgeColorStyle": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ColorLike"
+        },
+        {
+          "$ref": "#/$defs/EdgeColorObject"
+        }
+      ]
+    },
+    "DynamicEdgeLengthStyle": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/EdgeLengthStyle"
+        },
+        {
+          "$ref": "#/$defs/DataBinding"
+        },
+        {
+          "$ref": "#/$defs/FunctionCallString"
+        },
+        {
+          "$ref": "#/$defs/FunctionCallNumber"
+        },
+        {
+          "$ref": "#/$defs/FunctionCallObject"
+        }
+      ]
+    },
+    "DynamicBorderRadiusStyle": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/BorderRadiusStyle"
+        },
+        {
+          "$ref": "#/$defs/DataBinding"
+        },
+        {
+          "$ref": "#/$defs/FunctionCallString"
+        },
+        {
+          "$ref": "#/$defs/FunctionCallNumber"
+        },
+        {
+          "$ref": "#/$defs/FunctionCallObject"
+        }
+      ]
+    },
+    "DynamicConstraintSize": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ConstraintSizeObject"
+        },
+        {
+          "$ref": "#/$defs/DataBinding"
+        },
+        {
+          "$ref": "#/$defs/FunctionCallObject"
+        }
+      ]
+    },
+    "DynamicEdgeColorStyle": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/EdgeColorStyle"
+        },
+        {
+          "$ref": "#/$defs/DataBinding"
+        },
+        {
+          "$ref": "#/$defs/FunctionCallString"
+        },
+        {
+          "$ref": "#/$defs/FunctionCallNumber"
+        },
+        {
+          "$ref": "#/$defs/FunctionCallObject"
+        }
+      ]
+    },
+    "BackgroundImageSizeKeyword": {
+      "type": "string",
+      "enum": [
+        "cover",
+        "contain",
+        "auto",
+        "fill"
+      ]
+    },
+    "BackgroundImageSizeObject": {
+      "type": "object",
+      "properties": {
+        "width": {
+          "$ref": "#/$defs/DynamicLength"
+        },
+        "height": {
+          "$ref": "#/$defs/DynamicLength"
+        }
+      },
+      "required": [
+        "width",
+        "height"
+      ],
+      "additionalProperties": false
+    },
+    "DynamicBackgroundImageSize": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/BackgroundImageSizeKeyword"
+        },
+        {
+          "$ref": "#/$defs/BackgroundImageSizeObject"
+        },
+        {
+          "$ref": "#/$defs/DataBinding"
+        },
+        {
+          "$ref": "#/$defs/FunctionCallString"
+        },
+        {
+          "$ref": "#/$defs/FunctionCallObject"
+        }
+      ]
+    },
+    "VisibilityLiteral": {
+      "type": "string",
+      "enum": [
+        "visible",
+        "hidden",
+        "none"
+      ]
+    },
+    "DynamicVisibility": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/VisibilityLiteral"
+        },
+        {
+          "$ref": "#/$defs/DataBinding"
+        },
+        {
+          "$ref": "#/$defs/FunctionCallString"
+        }
+      ]
+    },
+    "ShadowStyleLiteral": {
+      "oneOf": [
+        {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 5,
+          "multipleOf": 1
+        },
+        {
+          "type": "string",
+          "pattern": "^[0-5]$"
+        },
+        {
+          "type": "string",
+          "enum": [
+            "outerDefaultXs",
+            "outerDefaultSm",
+            "outerDefaultMd",
+            "outerDefaultLg",
+            "outerFloatingSm",
+            "outerFloatingMd"
+          ]
+        }
+      ]
+    },
+    "ShadowTypeLiteral": {
+      "oneOf": [
+        {
+          "type": "number",
+          "enum": [
+            0,
+            1
+          ]
+        },
+        {
+          "type": "string",
+          "enum": [
+            "color",
+            "blur"
+          ]
+        }
+      ]
+    },
+    "DynamicShadowStyle": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ShadowStyleLiteral"
+        },
+        {
+          "$ref": "#/$defs/DataBinding"
+        },
+        {
+          "$ref": "#/$defs/FunctionCallString"
+        },
+        {
+          "$ref": "#/$defs/FunctionCallNumber"
+        }
+      ]
+    },
+    "DynamicShadowType": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ShadowTypeLiteral"
+        },
+        {
+          "$ref": "#/$defs/DataBinding"
+        },
+        {
+          "$ref": "#/$defs/FunctionCallString"
+        },
+        {
+          "$ref": "#/$defs/FunctionCallNumber"
+        }
+      ]
+    },
+    "ShadowOptionsObject": {
+      "type": "object",
+      "properties": {
+        "style": {
+          "$ref": "#/$defs/DynamicShadowStyle"
+        },
+        "radius": {
+          "$ref": "#/$defs/DynamicNumericLike"
+        },
+        "offsetX": {
+          "$ref": "#/$defs/DynamicNumericLike"
+        },
+        "offsetY": {
+          "$ref": "#/$defs/DynamicNumericLike"
+        },
+        "color": {
+          "$ref": "#/$defs/DynamicColorLike"
+        },
+        "fill": {
+          "$ref": "#/$defs/DynamicBooleanLike"
+        },
+        "type": {
+          "$ref": "#/$defs/DynamicShadowType"
+        }
+      },
+      "additionalProperties": false
+    },
+    "DynamicShadow": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ShadowStyleLiteral"
+        },
+        {
+          "$ref": "#/$defs/ShadowOptionsObject"
+        },
+        {
+          "$ref": "#/$defs/DataBinding"
+        },
+        {
+          "$ref": "#/$defs/FunctionCallString"
+        },
+        {
+          "$ref": "#/$defs/FunctionCallNumber"
+        },
+        {
+          "$ref": "#/$defs/FunctionCallObject"
+        }
+      ]
+    },
+    "GradientDirectionLiteral": {
+      "oneOf": [
+        {
+          "type": "number",
+          "enum": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8
+          ]
+        },
+        {
+          "type": "string",
+          "enum": [
+            "left",
+            "top",
+            "right",
+            "bottom",
+            "leftTop",
+            "leftBottom",
+            "rightTop",
+            "rightBottom",
+            "none"
+          ]
+        }
+      ]
+    },
+    "DynamicGradientDirection": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/GradientDirectionLiteral"
+        },
+        {
+          "$ref": "#/$defs/DataBinding"
+        },
+        {
+          "$ref": "#/$defs/FunctionCallString"
+        },
+        {
+          "$ref": "#/$defs/FunctionCallNumber"
+        }
+      ]
+    },
+    "DynamicGradientAngle": {
+      "oneOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "string",
+          "minLength": 1
+        },
+        {
+          "$ref": "#/$defs/DataBinding"
+        },
+        {
+          "$ref": "#/$defs/FunctionCallString"
+        },
+        {
+          "$ref": "#/$defs/FunctionCallNumber"
+        }
+      ]
+    },
+    "GradientColorStopTuple": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "$ref": "#/$defs/ColorLike"
+          },
+          {
+            "$ref": "#/$defs/NumericLike"
+          },
+          {
+            "$ref": "#/$defs/DataBinding"
+          },
+          {
+            "$ref": "#/$defs/FunctionCallString"
+          },
+          {
+            "$ref": "#/$defs/FunctionCallNumber"
+          }
+        ]
+      },
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "GradientColorStopObject": {
+      "type": "object",
+      "properties": {
+        "color": {
+          "$ref": "#/$defs/DynamicColorLike"
+        },
+        "stop": {
+          "$ref": "#/$defs/DynamicNumericLike"
+        }
+      },
+      "required": [
+        "color"
+      ],
+      "additionalProperties": false
+    },
+    "GradientColorItem": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/DynamicColorLike"
+        },
+        {
+          "$ref": "#/$defs/GradientColorStopTuple"
+        },
+        {
+          "$ref": "#/$defs/GradientColorStopObject"
+        }
+      ]
+    },
+    "DynamicGradientColors": {
+      "oneOf": [
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/GradientColorItem"
+          },
+          "minItems": 1
+        },
+        {
+          "$ref": "#/$defs/DataBinding"
+        },
+        {
+          "$ref": "#/$defs/FunctionCallArray"
+        }
+      ]
+    },
+    "DynamicGradientStops": {
+      "oneOf": [
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DynamicNumericLike"
+          }
+        },
+        {
+          "$ref": "#/$defs/DataBinding"
+        },
+        {
+          "$ref": "#/$defs/FunctionCallArray"
+        }
+      ]
+    },
+    "DynamicLinearGradient": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "colors": {
+              "$ref": "#/$defs/DynamicGradientColors"
+            },
+            "angle": {
+              "$ref": "#/$defs/DynamicGradientAngle"
+            },
+            "direction": {
+              "$ref": "#/$defs/DynamicGradientDirection"
+            },
+            "repeating": {
+              "$ref": "#/$defs/DynamicBooleanLike"
+            },
+            "stops": {
+              "$ref": "#/$defs/DynamicGradientStops"
+            }
+          },
+          "required": [
+            "colors"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "$ref": "#/$defs/DataBinding"
+        },
+        {
+          "$ref": "#/$defs/FunctionCallObject"
+        }
+      ]
+    },
+    "ExtendedCommonStyles": {
+      "type": "object",
+      "properties": {
+        "width": {
+          "$ref": "#/$defs/DynamicLengthOrPolicy"
+        },
+        "height": {
+          "$ref": "#/$defs/DynamicLengthOrPolicy"
+        },
+        "constraintSize": {
+          "$ref": "#/$defs/DynamicConstraintSize"
+        },
+        "backgroundImage": {
+          "$ref": "#/$defs/DynamicString"
+        },
+        "backgroundImageSizeWithStyle": {
+          "$ref": "#/$defs/DynamicBackgroundImageSize"
+        },
+        "backgroundImageSize": {
+          "$ref": "#/$defs/DynamicBackgroundImageSize"
+        },
+        "backgroundimageSize": {
+          "$ref": "#/$defs/DynamicBackgroundImageSize"
+        },
+        "margin": {
+          "$ref": "#/$defs/DynamicEdgeLengthStyle"
+        },
+        "borderRadius": {
+          "$ref": "#/$defs/DynamicBorderRadiusStyle"
+        },
+        "visibility": {
+          "$ref": "#/$defs/DynamicVisibility"
+        },
+        "clip": {
+          "$ref": "#/$defs/DynamicBooleanLike"
+        },
+        "backgroundColor": {
+          "$ref": "#/$defs/DynamicColorLike"
+        },
+        "borderWidth": {
+          "$ref": "#/$defs/DynamicEdgeLengthStyle"
+        },
+        "borderColor": {
+          "$ref": "#/$defs/DynamicEdgeColorStyle"
+        },
+        "padding": {
+          "$ref": "#/$defs/DynamicEdgeLengthStyle"
+        },
+        "layoutWeight": {
+          "$ref": "#/$defs/DynamicNumericLike"
+        },
+        "flexShrink": {
+          "$ref": "#/$defs/DynamicNumericLike"
+        },
+        "shadow": {
+          "$ref": "#/$defs/DynamicShadow"
+        },
+        "linearGradient": {
+          "$ref": "#/$defs/DynamicLinearGradient"
+        }
+      },
+      "additionalProperties": true
+    },
+    "AccessibilityAttributes": {
+      "type": "object",
+      "description": "Attributes to enhance accessibility when using assistive technologies like screen readers.",
+      "properties": {
+        "label": {
+          "$ref": "#/$defs/DynamicString",
+          "description": "A short string, typically 1 to 3 words, used by assistive technologies to convey the purpose or intent of an element. For example, an input field might have an accessible label of 'User ID' or a button might be labeled 'Submit'."
+        },
+        "description": {
+          "$ref": "#/$defs/DynamicString",
+          "description": "Additional information provided by assistive technologies about an element such as instructions, format requirements, or result of an action. For example, a mute button might have a label of 'Mute' and a description of 'Silences notifications about this conversation'."
+        }
+      }
+    },
+    "ComponentCommon": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/ComponentId"
+        },
+        "accessibility": {
+          "$ref": "#/$defs/AccessibilityAttributes"
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "CatalogComponentCommon": {
+      "type": "object",
+      "properties": {
+        "weight": {
+          "type": "number",
+          "description": "The relative weight of this component within a Row or Column. This is similar to the CSS 'flex-grow' property. Layout allocation: Children without weight are laid out first and allocated their preferred space; remaining space is then distributed among children with weight, proportionally to their weight values. Note: this may ONLY be set when the component is a direct descendant of a Row or Column."
+        }
+      }
+    },
+    "ChildList": {
+      "oneOf": [
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ComponentId"
+          },
+          "description": "A static list of child component IDs."
+        },
+        {
+          "type": "object",
+          "description": "A template for generating a dynamic list of children from a data model list. The `componentId` is the component to use as a template.",
+          "properties": {
+            "componentId": {
+              "$ref": "#/$defs/ComponentId"
+            },
+            "path": {
+              "type": "string",
+              "description": "The path to the list of component property objects in the data model."
+            }
+          },
+          "required": [
+            "componentId",
+            "path"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "CheckRule": {
+      "type": "object",
+      "description": "A single validation rule applied to an input component.",
+      "properties": {
+        "condition": {
+          "$ref": "#/$defs/DynamicBoolean"
+        },
+        "message": {
+          "type": "string",
+          "description": "The error message to display if the check fails."
+        }
+      },
+      "required": [
+        "condition",
+        "message"
+      ],
+      "additionalProperties": false
+    },
+    "Checkable": {
+      "description": "Properties for components that support client-side checks.",
+      "type": "object",
+      "properties": {
+        "checks": {
+          "type": "array",
+          "description": "A list of checks to perform. These are function calls that must return a boolean indicating validity.",
+          "items": {
+            "$ref": "#/$defs/CheckRule"
+          }
+        }
+      }
+    },
+    "Action": {
+      "description": "Defines an interaction handler that can either trigger a server-side event or execute a local client-side function.",
+      "oneOf": [
+        {
+          "type": "object",
+          "description": "Triggers a server-side event.",
+          "properties": {
+            "event": {
+              "type": "object",
+              "description": "The event to dispatch to the server.",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "The name of the action to be dispatched to the server."
+                },
+                "context": {
+                  "type": "object",
+                  "description": "A JSON object containing the key-value pairs for the action context. Values can be literals or paths. Use literal values unless the value must be dynamically bound to the data model. Do NOT use paths for static IDs.",
+                  "additionalProperties": {
+                    "$ref": "#/$defs/DynamicValue"
+                  }
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "event"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "description": "Executes a local client-side function.",
+          "properties": {
+            "functionCall": {
+              "$ref": "#/$defs/FunctionCall"
+            }
+          },
+          "required": [
+            "functionCall"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "theme": {
+      "type": "object",
+      "properties": {
+        "primaryColor": {
+          "type": "string",
+          "description": "The primary brand color used for highlights (e.g., primary buttons, active borders). Renderers may generate variants of this color for different contexts. Format: Hexadecimal code (e.g., '#00BFFF').",
+          "pattern": "^#[0-9a-fA-F]{6}$"
+        },
+        "iconUrl": {
+          "type": "string",
+          "format": "uri",
+          "description": "A URL for an image that identifies the agent or tool associated with the surface."
+        },
+        "agentDisplayName": {
+          "type": "string",
+          "description": "Text to be displayed next to the surface to identify the agent or tool that created it."
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

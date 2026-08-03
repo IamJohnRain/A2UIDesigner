@@ -1,0 +1,30 @@
+{
+  "type": "object",
+  "description": "Returns the currently selected text value of the target Select component. If the target Select component has no selected item, args.componentId does not match a component, or the matched component is not a Select component, returns an empty string (\"\"). If args.componentId is omitted, the functionCall is invalid.",
+  "properties": {
+    "call": {
+      "const": "getSelectValue"
+    },
+    "args": {
+      "type": "object",
+      "properties": {
+        "componentId": {
+          "$ref": "../common_types.json#/$defs/DynamicString",
+          "description": "The target Select component ID."
+        }
+      },
+      "required": [
+        "componentId"
+      ],
+      "additionalProperties": false
+    },
+    "returnType": {
+      "const": "string"
+    }
+  },
+  "required": [
+    "call",
+    "args"
+  ],
+  "unevaluatedProperties": false
+}

@@ -1,0 +1,34 @@
+{
+  "type": "object",
+  "description": "Performs a logical OR operation on a list of boolean values.",
+  "properties": {
+    "call": {
+      "const": "or"
+    },
+    "args": {
+      "type": "object",
+      "properties": {
+        "values": {
+          "type": "array",
+          "description": "The list of boolean values to evaluate. At least two values are required; the function returns true when any value is true.",
+          "items": {
+            "$ref": "../common_types.json#/$defs/DynamicBoolean"
+          },
+          "minItems": 2
+        }
+      },
+      "required": [
+        "values"
+      ],
+      "unevaluatedProperties": false
+    },
+    "returnType": {
+      "const": "boolean"
+    }
+  },
+  "required": [
+    "call",
+    "args"
+  ],
+  "unevaluatedProperties": false
+}

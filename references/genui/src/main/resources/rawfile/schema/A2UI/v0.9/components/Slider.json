@@ -1,0 +1,45 @@
+{
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../common_types.json#/$defs/ComponentCommon"
+    },
+    {
+      "$ref": "../common_types.json#/$defs/CatalogComponentCommon"
+    },
+    {
+      "$ref": "../common_types.json#/$defs/Checkable"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "component": {
+          "const": "Slider"
+        },
+        "label": {
+          "$ref": "../common_types.json#/$defs/DynamicString",
+          "description": "The label for the slider."
+        },
+        "min": {
+          "type": "number",
+          "description": "The minimum value of the slider. Defaults to 0. Together with `max`, it defines the inclusive selectable range; `min` should be less than `max`.",
+          "default": 0
+        },
+        "max": {
+          "type": "number",
+          "description": "The maximum value of the slider. Required. Together with `min`, it defines the inclusive selectable range; `max` should be greater than `min`."
+        },
+        "value": {
+          "$ref": "../common_types.json#/$defs/DynamicNumber",
+          "description": "The current value of the slider. It should be within the inclusive range defined by `min` and `max`; renderers may clamp out-of-range values."
+        }
+      },
+      "required": [
+        "component",
+        "value",
+        "max"
+      ]
+    }
+  ],
+  "unevaluatedProperties": false
+}

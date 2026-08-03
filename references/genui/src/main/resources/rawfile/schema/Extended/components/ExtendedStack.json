@@ -1,0 +1,70 @@
+{
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../common_types.json#/$defs/ComponentCommon"
+    },
+    {
+      "$ref": "../common_types.json#/$defs/CatalogComponentCommon"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "component": {
+          "const": "Stack"
+        },
+        "children": {
+          "$ref": "../common_types.json#/$defs/ChildList",
+          "description": "Child component IDs or a template child list."
+        },
+        "styles": {
+          "type": "object",
+          "properties": {
+            "alignContent": {
+              "description": "Alignment of children inside the stack area.",
+              "oneOf": [
+                {
+                  "type": "string",
+                  "enum": [
+                    "topStart",
+                    "top",
+                    "topEnd",
+                    "start",
+                    "center",
+                    "end",
+                    "bottomStart",
+                    "bottom",
+                    "bottomEnd"
+                  ],
+                  "default": "center"
+                },
+                {
+                  "$ref": "../common_types.json#/$defs/DataBinding"
+                },
+                {
+                  "allOf": [
+                    {
+                      "$ref": "../common_types.json#/$defs/FunctionCall"
+                    },
+                    {
+                      "properties": {
+                        "returnType": {
+                          "const": "string"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "component"
+      ]
+    }
+  ],
+  "additionalProperties": true
+}

@@ -1,0 +1,36 @@
+{
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../common_types.json#/$defs/ComponentCommon"
+    },
+    {
+      "$ref": "../common_types.json#/$defs/CatalogComponentCommon"
+    },
+    {
+      "$ref": "../common_types.json#/$defs/Checkable"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "component": {
+          "const": "CheckBox"
+        },
+        "label": {
+          "$ref": "../common_types.json#/$defs/DynamicString",
+          "description": "The text to display next to the checkbox."
+        },
+        "value": {
+          "$ref": "../common_types.json#/$defs/DynamicBoolean",
+          "description": "The current state of the checkbox (true for checked, false for unchecked)."
+        }
+      },
+      "required": [
+        "component",
+        "label",
+        "value"
+      ]
+    }
+  ],
+  "unevaluatedProperties": false
+}

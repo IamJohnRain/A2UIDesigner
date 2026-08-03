@@ -1,0 +1,12 @@
+Text mode_status bind=/power/modeStatus
+Text primary_value bind=/power/levelText
+Text weather_text expr="{{ ${/data/weather/current/condition} + ' ' + ${/data/weather/current/temperatureText} }}"
+Text status_title text=省电项
+Text bluetooth_swatch text=" "
+Text bluetooth_label bind=/optimizations/bluetooth/shortLabel
+Text location_swatch text=" "
+Text location_label bind=/optimizations/location/shortLabel
+Text brightness_swatch text=" "
+Text brightness_label bind=/optimizations/brightness/shortLabel
+Text summary_text bind=/optimizations/summaryText
+Button action_button event=0 label=切到省电模式 enabled=true

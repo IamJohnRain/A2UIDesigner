@@ -1,0 +1,180 @@
+{
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../common_types.json#/$defs/ComponentCommon"
+    },
+    {
+      "$ref": "../common_types.json#/$defs/CatalogComponentCommon"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "component": {
+          "const": "TextInput"
+        },
+        "text": {
+          "type": "string",
+          "description": "Default text content. Type: string. Default is an empty string."
+        },
+        "placeholder": {
+          "type": "string",
+          "description": "Default prompt text for the single-line text input. Type: string. Default is an empty string."
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether text input is enabled. Type: boolean. Default: true. true means enabled, false means disabled."
+        },
+        "maxLength": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Maximum number of input characters. Type: number. Value range: [0, inf). Default: Infinity. If unset or invalid, input length is unlimited."
+        },
+        "type": {
+          "type": "string",
+          "description": "Input box type. normal: basic input mode. number: digits only, without negative numbers or decimals. phoneNumber: phone number mode, supporting digits, spaces, +, -, #, and parentheses. email: email address mode.",
+          "enum": [
+            "normal",
+            "number",
+            "phoneNumber",
+            "email"
+          ]
+        },
+        "placeholderColor": {
+          "type": "string",
+          "description": "Placeholder text color. Hex color string. Supports #RRGGBB and #AARRGGBB. Default follows the theme."
+        },
+        "cancelButton": {
+          "type": "object",
+          "description": "Style of the clear button on the right. Object format: { style, fontColor, fontSize }. The icon source is fixed to the built-in delete icon. fontColor maps to the icon color, and fontSize maps to the icon size. All fields are optional. Default: { style: 'input' }.",
+          "properties": {
+            "style": {
+              "type": "string",
+              "description": "Clear button display mode. constant: always visible. invisible: always hidden. input: visible while input exists. Default: input.",
+              "enum": [
+                "constant",
+                "invisible",
+                "input"
+              ]
+            },
+            "fontColor": {
+              "type": "string",
+              "description": "Clear button icon color. Hex color string. Supports #RRGGBB and #AARRGGBB."
+            },
+            "fontSize": {
+              "type": "number",
+              "description": "Clear button icon size in fp."
+            }
+          }
+        },
+        "caretColor": {
+          "type": "string",
+          "description": "Caret color. Hex color string. Default: #007DFF. Dark theme: #5291FF. Light theme: #FF0A59F7."
+        },
+        "selectedBackgroundColor": {
+          "type": "string",
+          "description": "Text selection background color. Hex color string. Default is a theme color with about 20% opacity."
+        },
+        "showUnderline": {
+          "type": "boolean",
+          "description": "Whether to show the underline. Type: boolean. Default: false. true enables the underline, false disables it. The underline is supported only when type=normal."
+        },
+        "underlineColor": {
+          "type": "object",
+          "description": "Underline color object: { typing, normal, error, disable }. All fields are optional and use hex color strings.",
+          "properties": {
+            "typing": {
+              "type": "string",
+              "description": "Underline color while typing."
+            },
+            "normal": {
+              "type": "string",
+              "description": "Underline color in the normal state."
+            },
+            "error": {
+              "type": "string",
+              "description": "Underline color in the error state."
+            },
+            "disable": {
+              "type": "string",
+              "description": "Underline color in the disabled state."
+            }
+          }
+        },
+        "fontSize": {
+          "type": "number",
+          "description": "Sets the font size in fp. Default: 16fp."
+        },
+        "fontWeight": {
+          "type": "string",
+          "description": "Font weight. String enum: lighter=100, normal/regular=400, medium=500, bold=700, bolder=900. Default: normal.",
+          "enum": [
+            "lighter",
+            "normal",
+            "regular",
+            "medium",
+            "bold",
+            "bolder"
+          ]
+        },
+        "fontColor": {
+          "type": "string",
+          "description": "Font color. Hex color string. Default: #E5000000. Dark theme: #99FFFFFF. Light theme: #99000000."
+        },
+        "textAlign": {
+          "type": "string",
+          "description": "Horizontal alignment. start: leading edge. center: centered. end: trailing edge. justify: justified, handled as start.",
+          "enum": [
+            "start",
+            "center",
+            "end",
+            "justify"
+          ]
+        },
+        "maxFontSize": {
+          "type": "number",
+          "description": "Maximum text display size in fp. It must be used with minFontSize and maxLines or a layout size constraint; setting it alone does not take effect. When adaptive font sizing is active, fontSize does not take effect. If maxFontSize <= 0 or maxFontSize < minFontSize, fontSize or its default value is used."
+        },
+        "minFontSize": {
+          "type": "number",
+          "description": "Minimum text display size in fp. It must be used with maxFontSize and maxLines or a layout size constraint; setting it alone does not take effect. When adaptive font sizing is active, fontSize does not take effect. If minFontSize <= 0, fontSize or its default value is used."
+        },
+        "wordBreak": {
+          "type": "string",
+          "description": "Text line break rule. normal: CJK text may break between any two characters, while Non-CJK text breaks only at whitespace. breakWord: prefer break points, otherwise break between any two characters. hyphenation: try hyphenating words at line end, otherwise use breakWord.",
+          "enum": [
+            "normal",
+            "breakAll",
+            "breakWord",
+            "hyphenation"
+          ]
+        },
+        "maxLines": {
+          "type": "number",
+          "description": "Maximum number of text lines. Type: number. Value range: (0, inf]. Default: 3. Takes effect only in inline editing mode."
+        },
+        "fontScaleMode": {
+          "type": "string",
+          "description": "Font scaling mode. followSystem follows the system font scale. custom uses the configured custom font scale range.",
+          "enum": [
+            "followSystem",
+            "custom"
+          ],
+          "default": "followSystem"
+        },
+        "minFontScale": {
+          "type": "number",
+          "description": "Minimum font scale. Value range: [0, 1]. Values less than 0 are clamped to 0, values greater than 1 are clamped to 1, and non-number values do not take effect."
+        },
+        "maxFontScale": {
+          "type": "number",
+          "description": "Maximum font scale. Value range: [1, inf). Values less than 1 are clamped to 1, and non-number values do not take effect. After this property is set, showError can scale up to 2x at most."
+        }
+      },
+      "required": [
+        "component"
+      ]
+    }
+  ],
+  "additionalProperties": true
+}

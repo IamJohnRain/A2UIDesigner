@@ -1,0 +1,719 @@
+{
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../common_types.json#/$defs/ComponentCommon"
+    },
+    {
+      "$ref": "../common_types.json#/$defs/CatalogComponentCommon"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "component": {
+          "const": "Select"
+        },
+        "options": {
+          "$ref": "#/$defs/DynamicSelectOptions",
+          "description": "Dropdown option list. Each item uses the format { value, icon, symbolIcon }. value is the option text and is required. icon is the image path. symbolIcon has higher priority than icon. symbolIcon.src accepts built-in Icon names that resolve to system symbol resources."
+        },
+        "selected": {
+          "$ref": "#/$defs/DynamicSelectedIndex",
+          "description": "Initial selected option index. Default: -1. -1 means no option is selected and the value text is displayed."
+        },
+        "value": {
+          "$ref": "#/$defs/DynamicString",
+          "description": "Text content of the dropdown button. Default is an empty string. After a menu item is selected, the button text is automatically updated to the selected item text."
+        },
+        "styles": {
+          "$ref": "#/$defs/DynamicSelectStyles",
+          "description": "Select private style object, including font, color, divider, arrow position, menu alignment, and menu size settings."
+        }
+      },
+      "required": [
+        "component",
+        "options",
+        "value"
+      ]
+    }
+  ],
+  "additionalProperties": true,
+  "$defs": {
+    "DataBinding": {
+      "$ref": "../common_types.json#/$defs/DataBinding"
+    },
+    "FunctionCall": {
+      "$ref": "../common_types.json#/$defs/FunctionCall"
+    },
+    "DynamicString": {
+      "$ref": "../common_types.json#/$defs/DynamicString"
+    },
+    "DynamicNumber": {
+      "$ref": "../common_types.json#/$defs/DynamicNumber"
+    },
+    "DynamicPositiveNumber": {
+      "description": "Dynamic positive number.",
+      "oneOf": [
+        {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        {
+          "$ref": "#/$defs/DataBinding"
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/FunctionCall"
+            },
+            {
+              "properties": {
+                "returnType": {
+                  "const": "number"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "DynamicNonNegativeNumber": {
+      "description": "Dynamic non-negative number.",
+      "oneOf": [
+        {
+          "type": "number",
+          "minimum": 0
+        },
+        {
+          "$ref": "#/$defs/DataBinding"
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/FunctionCall"
+            },
+            {
+              "properties": {
+                "returnType": {
+                  "const": "number"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "DynamicColor": {
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$"
+        },
+        {
+          "$ref": "#/$defs/DataBinding"
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/FunctionCall"
+            },
+            {
+              "properties": {
+                "returnType": {
+                  "const": "string"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "DynamicSelectedIndex": {
+      "description": "Dynamic selected index. Static values are numbers. Default: -1. Data binding and function calls returning number are also supported.",
+      "oneOf": [
+        {
+          "type": "number",
+          "default": -1
+        },
+        {
+          "$ref": "#/$defs/DataBinding"
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/FunctionCall"
+            },
+            {
+              "properties": {
+                "returnType": {
+                  "const": "number"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "DynamicStringEnumArrowPosition": {
+      "description": "Arrow position. end: text before arrow, default. start: arrow before text. Input values use lowercase strings.",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "end",
+            "start"
+          ],
+          "default": "end"
+        },
+        {
+          "$ref": "#/$defs/DataBinding"
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/FunctionCall"
+            },
+            {
+              "properties": {
+                "returnType": {
+                  "const": "string"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "DynamicStringEnumMenuAlign": {
+      "description": "Menu alignment. start: align to the leading edge in the current language direction, default. center: centered. end: align to the trailing edge. Input values use lowercase strings.",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "start",
+            "center",
+            "end"
+          ],
+          "default": "start"
+        },
+        {
+          "$ref": "#/$defs/DataBinding"
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/FunctionCall"
+            },
+            {
+              "properties": {
+                "returnType": {
+                  "const": "string"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "DynamicSymbolRenderingStrategy": {
+      "description": "Symbol rendering strategy. single: monochrome mode, default. multipleColor: multi-color mode with up to three colors. multipleOpacity: layered opacity mode.",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "single",
+            "multipleColor",
+            "multipleOpacity"
+          ],
+          "default": "single"
+        },
+        {
+          "$ref": "#/$defs/DataBinding"
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/FunctionCall"
+            },
+            {
+              "properties": {
+                "returnType": {
+                  "const": "string"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "DynamicSymbolEffectStrategy": {
+      "description": "Symbol effect strategy. none: no effect, default. scale: overall scale effect. hierarchical: hierarchical effect.",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "none",
+            "scale",
+            "hierarchical"
+          ],
+          "default": "none"
+        },
+        {
+          "$ref": "#/$defs/DataBinding"
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/FunctionCall"
+            },
+            {
+              "properties": {
+                "returnType": {
+                  "const": "string"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "DynamicSymbolIconName": {
+      "description": "Built-in Icon name that resolves to a single system symbol resource. The supported names follow the standard Icon component's system-symbol map; composite Icon names such as starHalf are not accepted here.",
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "accountCircle",
+            "add",
+            "arrowBack",
+            "arrowForward",
+            "attachFile",
+            "calendarToday",
+            "call",
+            "camera",
+            "check",
+            "close",
+            "delete",
+            "download",
+            "edit",
+            "event",
+            "error",
+            "fastForward",
+            "favorite",
+            "favoriteOff",
+            "folder",
+            "help",
+            "home",
+            "info",
+            "locationOn",
+            "lock",
+            "lockOpen",
+            "mail",
+            "menu",
+            "moreVert",
+            "moreHoriz",
+            "notificationsOff",
+            "notifications",
+            "pause",
+            "payment",
+            "person",
+            "phone",
+            "photo",
+            "play",
+            "print",
+            "refresh",
+            "rewind",
+            "search",
+            "send",
+            "settings",
+            "share",
+            "shoppingCart",
+            "skipNext",
+            "skipPrevious",
+            "star",
+            "starOff",
+            "stop",
+            "upload",
+            "visibility",
+            "visibilityOff",
+            "volumeDown",
+            "volumeMute",
+            "volumeOff",
+            "volumeUp",
+            "warning"
+          ]
+        },
+        {
+          "$ref": "#/$defs/DataBinding"
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/FunctionCall"
+            },
+            {
+              "properties": {
+                "returnType": {
+                  "const": "string"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "DynamicSelectOptions": {
+      "description": "Dynamic Select option list. Static values are SelectOption arrays. Data binding and function calls returning array are also supported.",
+      "oneOf": [
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SelectOption"
+          }
+        },
+        {
+          "$ref": "#/$defs/DataBinding"
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/FunctionCall"
+            },
+            {
+              "properties": {
+                "returnType": {
+                  "const": "array"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "SelectOption": {
+      "type": "object",
+      "description": "Dropdown option object. value is the option text and is required. icon is the image path. symbolIcon is the Symbol image and has higher priority than icon.",
+      "properties": {
+        "value": {
+          "$ref": "#/$defs/DynamicString",
+          "description": "Dropdown option text content."
+        },
+        "icon": {
+          "$ref": "#/$defs/DynamicString",
+          "description": "Dropdown option image path."
+        },
+        "symbolIcon": {
+          "$ref": "#/$defs/DynamicSymbolIcon",
+          "description": "Symbol image configuration for the dropdown option. It has higher priority than icon."
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "additionalProperties": true
+    },
+    "DynamicSymbolIcon": {
+      "description": "Dynamic Symbol icon object. Format: { src, fontSize, fontWeight, fontColor, renderingStrategy, effectStrategy }. src is optional; when provided, it must be a built-in Icon name that maps to a system symbol resource.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "src": {
+              "$ref": "#/$defs/DynamicSymbolIconName",
+              "description": "Built-in Icon name that maps to a system symbol resource."
+            },
+            "fontSize": {
+              "$ref": "#/$defs/DynamicPositiveNumber",
+              "description": "Symbol icon font size in fp. The value must be greater than 0."
+            },
+            "fontWeight": {
+              "$ref": "#/$defs/DynamicPositiveNumber",
+              "description": "Symbol icon font weight. The value must be greater than 0."
+            },
+            "fontColor": {
+              "$ref": "#/$defs/DynamicColor",
+              "description": "Symbol icon color."
+            },
+            "renderingStrategy": {
+              "$ref": "#/$defs/DynamicSymbolRenderingStrategy",
+              "description": "Symbol rendering strategy."
+            },
+            "effectStrategy": {
+              "$ref": "#/$defs/DynamicSymbolEffectStrategy",
+              "description": "Symbol effect strategy."
+            }
+          },
+          "required": [
+            "src"
+          ],
+          "additionalProperties": true
+        },
+        {
+          "$ref": "#/$defs/DataBinding"
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/FunctionCall"
+            },
+            {
+              "properties": {
+                "returnType": {
+                  "const": "object"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "DynamicFont": {
+      "description": "Dynamic font object. Format: { size, weight, family, style }. size is in fp. family is a prioritized font list. style supports normal and italic.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "size": {
+              "$ref": "#/$defs/DynamicPositiveNumber",
+              "description": "Text size in fp. The value must be greater than 0."
+            },
+            "weight": {
+              "description": "Text font weight. Supports number or string enum: lighter=100, normal/regular=400, medium=500, bold=700, bolder=900.",
+              "oneOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "$ref": "#/$defs/DataBinding"
+                },
+                {
+                  "$ref": "#/$defs/FunctionCall"
+                }
+              ]
+            },
+            "family": {
+              "$ref": "#/$defs/DynamicString",
+              "description": "Font list. Type: string. Multiple fonts are separated by commas and matched in priority order, for example 'Arial, HarmonyOS Sans'."
+            },
+            "style": {
+              "$ref": "#/$defs/DynamicString",
+              "description": "Font style. normal: standard font style, default. italic: italic font style."
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "$ref": "#/$defs/DataBinding"
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/FunctionCall"
+            },
+            {
+              "properties": {
+                "returnType": {
+                  "const": "object"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "DynamicMenuAlign": {
+      "description": "Dynamic menu alignment configuration. It can be a direct string value start/center/end or an object { alignType, offset }. offset uses { dx, dy } in vp. Default: { dx: 0, dy: 0 }.",
+      "oneOf": [
+        {
+          "$ref": "#/$defs/DynamicStringEnumMenuAlign"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "alignType": {
+              "$ref": "#/$defs/DynamicStringEnumMenuAlign",
+              "description": "Alignment type: start, center, or end."
+            },
+            "offset": {
+              "description": "Offset of the dropdown menu relative to the button after alignType is applied. Format: { dx, dy }. Default: { dx: 0, dy: 0 }.",
+              "oneOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "dx": {
+                      "$ref": "#/$defs/DynamicNumber",
+                      "description": "Horizontal offset in vp."
+                    },
+                    "dy": {
+                      "$ref": "#/$defs/DynamicNumber",
+                      "description": "Vertical offset in vp."
+                    }
+                  },
+                  "additionalProperties": true
+                },
+                {
+                  "$ref": "#/$defs/DataBinding"
+                },
+                {
+                  "$ref": "#/$defs/FunctionCall"
+                }
+              ]
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "$ref": "#/$defs/DataBinding"
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/FunctionCall"
+            },
+            {
+              "properties": {
+                "returnType": {
+                  "const": "object"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "DynamicDivider": {
+      "description": "Dynamic divider style. Object format: { strokeWidth, color, startMargin, endMargin }. null means no divider style is set.",
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "strokeWidth": {
+              "$ref": "#/$defs/DynamicPositiveNumber",
+              "description": "Divider stroke width in vp. The value must be greater than 0. Default is about 1px."
+            },
+            "color": {
+              "$ref": "#/$defs/DynamicColor",
+              "description": "Divider color. Hex color string."
+            },
+            "startMargin": {
+              "$ref": "#/$defs/DynamicNonNegativeNumber",
+              "description": "Distance from the divider to the leading edge in vp. The value must be greater than or equal to 0."
+            },
+            "endMargin": {
+              "$ref": "#/$defs/DynamicNonNegativeNumber",
+              "description": "Distance from the divider to the trailing edge in vp. The value must be greater than or equal to 0."
+            }
+          },
+          "additionalProperties": true
+        },
+        {
+          "$ref": "#/$defs/DataBinding"
+        },
+        {
+          "$ref": "#/$defs/FunctionCall"
+        }
+      ]
+    },
+    "DynamicSelectStyles": {
+      "description": "Dynamic Select private style object. All fields are optional.",
+      "oneOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "../common_types.json#/$defs/ExtendedCommonStyles"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "font": {
+                  "$ref": "#/$defs/DynamicFont",
+                  "description": "Text style of the dropdown button. Default is about { size: $r('sys.float.ohos_id_text_size_button1'), weight: medium }."
+                },
+                "fontColor": {
+                  "$ref": "#/$defs/DynamicColor",
+                  "description": "Text color of the dropdown button. Default follows the theme primary text color."
+                },
+                "selectedOptionBgColor": {
+                  "$ref": "#/$defs/DynamicColor",
+                  "description": "Background color of the selected menu option. Default follows the theme component activated color."
+                },
+                "selectedOptionFont": {
+                  "$ref": "#/$defs/DynamicFont",
+                  "description": "Text style of the selected menu option. Supports size, weight, family, and style. Default is about { size: body1, weight: regular }."
+                },
+                "selectedOptionFontColor": {
+                  "$ref": "#/$defs/DynamicColor",
+                  "description": "Text color of the selected menu option. Default follows the theme activated primary text color."
+                },
+                "optionBgColor": {
+                  "$ref": "#/$defs/DynamicColor",
+                  "description": "Background color of normal menu options. Default: transparent."
+                },
+                "optionFont": {
+                  "$ref": "#/$defs/DynamicFont",
+                  "description": "Text style of normal menu options. Supports size, weight, family, and style. Default is about { size: body1, weight: regular }."
+                },
+                "optionFontColor": {
+                  "$ref": "#/$defs/DynamicColor",
+                  "description": "Text color of normal menu options. Default follows the theme primary text color."
+                },
+                "space": {
+                  "$ref": "#/$defs/DynamicNonNegativeNumber",
+                  "description": "Spacing between the dropdown button text and arrow in vp. Default: 8. Invalid values or values <= 8 are handled as the default value."
+                },
+                "arrowPosition": {
+                  "$ref": "#/$defs/DynamicStringEnumArrowPosition",
+                  "description": "Arrow position of the dropdown button. Input lowercase string start or end."
+                },
+                "menuAlign": {
+                  "$ref": "#/$defs/DynamicMenuAlign",
+                  "description": "Alignment between the dropdown button and dropdown menu. Input lowercase string start/center/end or object { alignType, offset }."
+                },
+                "optionWidth": {
+                  "$ref": "#/$defs/DynamicPositiveNumber",
+                  "description": "Dropdown menu option width in vp. If unset, invalid, or less than the minimum width 56vp, it does not take effect and the default two-column grid width is used."
+                },
+                "optionHeight": {
+                  "$ref": "#/$defs/DynamicPositiveNumber",
+                  "description": "Maximum dropdown menu height in vp. If unset or 0, it does not take effect. The default maximum height is 80% of the available screen height."
+                },
+                "menuBackgroundColor": {
+                  "$ref": "#/$defs/DynamicColor",
+                  "description": "Dropdown menu background color. Hex color string. Default: transparent."
+                },
+                "divider": {
+                  "$ref": "#/$defs/DynamicDivider",
+                  "description": "Dropdown menu divider style."
+                }
+              },
+              "additionalProperties": true
+            }
+          ]
+        },
+        {
+          "$ref": "#/$defs/DataBinding"
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/FunctionCall"
+            },
+            {
+              "properties": {
+                "returnType": {
+                  "const": "object"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

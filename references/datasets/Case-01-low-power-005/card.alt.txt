@@ -1,0 +1,16 @@
+Column root box=140x140 pad=12 gap=6 main=start cross=center radius=18 gradient={"direction":"RightBottom","colors":[["#ff191a1c",0],["#ff202224",1]]} clip role=shell
+  Row headerRow box=116x20 gap=6 main=start cross=center role=group
+    Image leadingIcon size=16 fit=contain role=asset
+    Text titleText box=94x18 font=14/600 lines=1 overflow=none text=start fg=#e5ffffff role=title protect
+  Row mainRow box=116x58 gap=8 main=start cross=center role=group
+    Stack meterGauge box=58x58 align=center role=group
+      Progress meterTrack size=58 type=ring color=#33ffffff role=metric
+      Progress meterRing size=58 type=ring color=#ffed6f21 role=metric
+      Text meterValue box=58x24 font=20/700 lines=1 overflow=none text=center fg=#ffffffff role=text protect
+    Column factColumn box=50x58 gap=2 main=center cross=start role=group
+      Text factLabel box=50x14 font=12/500 lines=1 overflow=none text=start fg=#99ffffff role=text
+      Text factValue box=50x16 font=14/700 lines=1 overflow=none text=start fg=#ffed6f21 role=text protect
+      Text factMeta box=50x12 font=12/500 lines=1 overflow=none text=start fg=#e5ffffff role=support
+  Row primaryAction box=116x26 pad=0/10 gap=6 main=center cross=center radius=13 bg=#ffed6f21 role=action protect
+    Image actionIcon size=16 fit=contain role=action protect
+    Text actionText box=70x18 font=14/600 lines=1 overflow=none text=center fg=#ffffffff role=action protect

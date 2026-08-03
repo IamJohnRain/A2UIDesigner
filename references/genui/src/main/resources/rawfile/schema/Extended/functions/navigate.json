@@ -1,0 +1,38 @@
+{
+  "type": "object",
+  "description": "Switches to a target child component in a NavContainer component. The target component can be identified either by child component ID or by child index, and the function prefers targetComponentId when both are provided.",
+  "properties": {
+    "call": {
+      "const": "navigate"
+    },
+    "args": {
+      "type": "object",
+      "properties": {
+        "componentId": {
+          "$ref": "../common_types.json#/$defs/DynamicString",
+          "description": "The target NavContainer component ID."
+        },
+        "targetComponentId": {
+          "$ref": "../common_types.json#/$defs/DynamicString",
+          "description": "The destination child component ID under the target NavContainer."
+        },
+        "targetIndex": {
+          "$ref": "../common_types.json#/$defs/DynamicNumber",
+          "description": "The zero-based child index under the target NavContainer."
+        }
+      },
+      "required": [
+        "componentId"
+      ],
+      "additionalProperties": false
+    },
+    "returnType": {
+      "const": "void"
+    }
+  },
+  "required": [
+    "call",
+    "args"
+  ],
+  "unevaluatedProperties": false
+}

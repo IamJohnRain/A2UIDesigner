@@ -1,0 +1,156 @@
+{
+  "type": "object",
+  "$defs": {
+    "ExpressionString": {
+      "type": "string",
+      "pattern": "^\\s*\\{\\{[\\s\\S]*\\}\\}\\s*$",
+      "description": "A full {{ }} expression string."
+    },
+    "BooleanLike": {
+      "oneOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "string",
+          "enum": ["true", "false"]
+        }
+      ]
+    },
+    "DynamicBooleanLike": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/BooleanLike"
+        },
+        {
+          "$ref": "../common_types.json#/$defs/DataBinding"
+        },
+        {
+          "$ref": "../common_types.json#/$defs/FunctionCallString"
+        },
+        {
+          "$ref": "../common_types.json#/$defs/FunctionCallBoolean"
+        },
+        {
+          "$ref": "#/$defs/ExpressionString"
+        }
+      ]
+    },
+    "NumericLike": {
+      "oneOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "string",
+          "pattern": "^-?(0|[1-9]\\d*)(?:\\.\\d+)?$"
+        }
+      ]
+    },
+    "DynamicNumericLike": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/NumericLike"
+        },
+        {
+          "$ref": "../common_types.json#/$defs/DataBinding"
+        },
+        {
+          "$ref": "../common_types.json#/$defs/FunctionCallString"
+        },
+        {
+          "$ref": "../common_types.json#/$defs/FunctionCallNumber"
+        },
+        {
+          "$ref": "#/$defs/ExpressionString"
+        }
+      ]
+    },
+    "DynamicBarPosition": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": ["start", "end", "right", "bottom"]
+        },
+        {
+          "$ref": "../common_types.json#/$defs/DataBinding"
+        },
+        {
+          "$ref": "../common_types.json#/$defs/FunctionCallString"
+        },
+        {
+          "$ref": "#/$defs/ExpressionString"
+        }
+      ]
+    },
+    "OnChangeHandler": {
+      "oneOf": [
+        {
+          "$ref": "../common_types.json#/$defs/FunctionCall"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "functionCall": {
+              "$ref": "../common_types.json#/$defs/FunctionCall"
+            }
+          },
+          "required": ["functionCall"],
+          "additionalProperties": true
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "$ref": "../common_types.json#/$defs/ComponentCommon"
+    },
+    {
+      "$ref": "../common_types.json#/$defs/CatalogComponentCommon"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "component": {
+          "const": "Tabs"
+        },
+        "barPosition": {
+          "$ref": "#/$defs/DynamicBarPosition",
+          "description": "Tab bar position. 'start' and 'end' are canonical values."
+        },
+        "children": {
+          "$ref": "../common_types.json#/$defs/ChildList",
+          "description": "Tab content component IDs or template source. Child component type must be TabContent."
+        },
+        "vertical": {
+          "$ref": "#/$defs/DynamicBooleanLike",
+          "description": "Whether the tabs render vertically. Literal booleans, stringified booleans, data binding, function call, and expression strings are supported."
+        },
+        "scrollable": {
+          "$ref": "#/$defs/DynamicBooleanLike",
+          "description": "Whether the tab bar can scroll. Literal booleans, stringified booleans, data binding, function call, and expression strings are supported."
+        },
+        "tabIndex": {
+          "$ref": "#/$defs/DynamicNumericLike",
+          "description": "Initial selected tab index. Literal numbers, numeric strings, data binding, function call, and expression strings are supported."
+        },
+        "onChange": {
+          "$ref": "#/$defs/OnChangeHandler",
+          "description": "Callback invoked after tab switch completes. Supports either a direct FunctionCall or { functionCall: FunctionCall }."
+        },
+        "styles": {
+          "description": "Shared container style overrides consumed by ExtendedCommonStyleModifier.",
+          "allOf": [
+            {
+              "$ref": "../common_types.json#/$defs/ExtendedCommonStyles"
+            }
+          ]
+        }
+      },
+      "required": [
+        "component"
+      ]
+    }
+  ],
+  "additionalProperties": true
+}

@@ -1,0 +1,205 @@
+{
+  "type": "object",
+  "$defs": {
+    "ExpressionString": {
+      "type": "string",
+      "pattern": "^\\s*\\{\\{[\\s\\S]*\\}\\}\\s*$",
+      "description": "A full {{ }} expression string."
+    },
+    "NumericLike": {
+      "oneOf": [
+        {
+          "$ref": "../common_types.json#/$defs/DynamicNumber"
+        },
+        {
+          "type": "string",
+          "pattern": "^-?(0|[1-9]\\d*)(?:\\.\\d+)?$"
+        },
+        {
+          "$ref": "#/$defs/ExpressionString"
+        }
+      ]
+    },
+    "DynamicTabType": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": ["", "capsule", "underline"]
+        },
+        {
+          "$ref": "../common_types.json#/$defs/DataBinding"
+        },
+        {
+          "$ref": "../common_types.json#/$defs/FunctionCallString"
+        },
+        {
+          "$ref": "#/$defs/ExpressionString"
+        }
+      ]
+    },
+    "FontWeightLike": {
+      "oneOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "string",
+          "enum": ["lighter", "normal", "regular", "medium", "bold", "bolder"]
+        },
+        {
+          "type": "string",
+          "pattern": "^-?(0|[1-9]\\d*)(?:\\.\\d+)?$"
+        },
+        {
+          "$ref": "../common_types.json#/$defs/DataBinding"
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "../common_types.json#/$defs/FunctionCall"
+            },
+            {
+              "properties": {
+                "returnType": {
+                  "const": "string"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "allOf": [
+            {
+              "$ref": "../common_types.json#/$defs/FunctionCall"
+            },
+            {
+              "properties": {
+                "returnType": {
+                  "const": "number"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "$ref": "#/$defs/ExpressionString"
+        }
+      ]
+    },
+    "BindingPathMap": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "icon": {
+          "type": "string"
+        },
+        "selectedSrc": {
+          "type": "string"
+        },
+        "selectedColor": {
+          "type": "string"
+        },
+        "unSelectedColor": {
+          "type": "string"
+        },
+        "defaultBackgroundColor": {
+          "type": "string"
+        },
+        "selectedBackgroundColor": {
+          "type": "string"
+        },
+        "defaultBorderColor": {
+          "type": "string"
+        },
+        "selectedBorderColor": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "allOf": [
+    {
+      "$ref": "../common_types.json#/$defs/ComponentCommon"
+    },
+    {
+      "$ref": "../common_types.json#/$defs/CatalogComponentCommon"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "component": {
+          "const": "TabContent"
+        },
+        "title": {
+          "$ref": "../common_types.json#/$defs/DynamicString"
+        },
+        "icon": {
+          "$ref": "../common_types.json#/$defs/DynamicString"
+        },
+        "selectedSrc": {
+          "$ref": "../common_types.json#/$defs/DynamicString"
+        },
+        "tabType": {
+          "$ref": "#/$defs/DynamicTabType"
+        },
+        "__a2uiBindings": {
+          "$ref": "#/$defs/BindingPathMap",
+          "description": "Optional binding path map consumed by Extended.TabContent for string-backed metadata fields."
+        },
+        "styles": {
+          "allOf": [
+            {
+              "$ref": "../common_types.json#/$defs/ExtendedCommonStyles"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "selectedColor": {
+                  "$ref": "../common_types.json#/$defs/DynamicString"
+                },
+                "unSelectedColor": {
+                  "$ref": "../common_types.json#/$defs/DynamicString"
+                },
+                "defaultBackgroundColor": {
+                  "$ref": "../common_types.json#/$defs/DynamicString"
+                },
+                "selectedBackgroundColor": {
+                  "$ref": "../common_types.json#/$defs/DynamicString"
+                },
+                "defaultBorderColor": {
+                  "$ref": "../common_types.json#/$defs/DynamicString"
+                },
+                "selectedBorderColor": {
+                  "$ref": "../common_types.json#/$defs/DynamicString"
+                },
+                "fontSize": {
+                  "$ref": "#/$defs/NumericLike"
+                },
+                "fontWeight": {
+                  "$ref": "#/$defs/FontWeightLike"
+                },
+                "iconSize": {
+                  "$ref": "#/$defs/NumericLike"
+                },
+                "space": {
+                  "$ref": "#/$defs/NumericLike"
+                }
+              },
+              "additionalProperties": true
+            }
+          ]
+        },
+        "children": {
+          "$ref": "../common_types.json#/$defs/ChildList"
+        }
+      },
+      "required": [
+        "component"
+      ]
+    }
+  ],
+  "additionalProperties": true
+}

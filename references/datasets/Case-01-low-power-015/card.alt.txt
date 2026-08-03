@@ -1,0 +1,17 @@
+Column root box=140x140 pad=12 gap=6 radius=18 gradient={"direction":"RightBottom","colors":[["#564af7",0],["#ac49f5",1]]} clip role=shell
+  Row top_row box=116x26 gap=4 main=start cross=center role=group
+    Image battery_icon size=20 fit=contain radius=6 bg=#ffffffff role=asset
+    Text battery_value box=44x24 font=20/700 lines=1 fg=#ffffffff role=text protect
+    Text battery_status box=44x18 font=10/500 lines=1 style={"fontColor":"{{ ${/data/battery/statusColor} }}"} role=status protect
+  Column info_panel box=116x54 pad=4 gap=4 radius=14 bg=#ffffffff role=group
+    Row weather_row box=100x16 gap=6 main=start cross=center role=group
+      Image weather_icon size=16 fit=contain role=asset
+      Text weather_text box=78x16 font=12/500 lines=1 fg=#e5000000 role=text
+    Row alarm_row box=100x16 gap=6 main=start cross=center role=group
+      Image alarm_icon size=16 fit=contain role=asset
+      Text alarm_text box=78x16 font=12/500 lines=1 fg=#99000000 role=text
+    Progress battery_bar box=100x6 type=capsule style={"color":"{{ ${/data/battery/statusColor} }}"} role=metric
+  Row icon_row box=116x24 gap=12 main=center cross=center role=group
+    Image bottom_charge size=22 fit=contain radius=8 bg=#ffffffff role=asset
+    Image bottom_save size=22 fit=contain radius=8 bg=#ffffffff role=asset
+    Image bottom_alarm size=22 fit=contain radius=8 bg=#ffffffff role=asset

@@ -1,0 +1,21 @@
+Row root box=300x140 pad=12 gap=8 cross=center radius=22 gradient={"direction":"RightBottom","colors":[["#fff1f3f5",0],["#ed955f",1]]} clip role=shell
+  Column left_panel box=112x116 gap=6 main=center cross=start role=group
+    Row title_row box=112x24 gap=6 cross=center role=title protect
+      Image battery_icon size=20 fit=contain radius=6 bg=#ffffffff role=asset
+      Text title_text box=86x20 font=14/700 lines=1 fg=#e5000000 role=title protect
+    Text battery_value box=108x36 font=32/700 lines=1 fg=#ffed6f21 role=text protect
+    Progress battery_progress box=108x8 type=linear color=#ffed6f21 radius=4 bg=#33000000 role=metric
+    Text battery_caption box=108x16 font=12/500 lines=1 fg=#99000000 role=support
+  Column middle_panel box=94x116 gap=8 main=center cross=start role=group
+    Row alert_badge box=94x30 pad=4/8 gap=6 cross=center radius=15 bg=#ffffffff role=status protect
+      Image charge_icon size=18 fit=contain role=asset
+      Text alert_text box=54x18 font=12/700 lines=1 fg=#ffed6f21 role=text
+    Column schedule_box box=94x78 pad=8 gap=4 main=center cross=start radius=16 bg=#ffffffff role=group
+      Row schedule_label_row box=78x18 gap=4 cross=center role=group
+        Image schedule_icon size=16 fit=contain role=asset
+        Text schedule_label box=58x16 font=12/500 lines=1 fg=#99000000 role=text
+      Text schedule_title box=78x18 font=14/700 lines=1 fg=#e5000000 role=title protect
+      Text schedule_time box=78x16 font=12/400 lines=1 fg=#99000000 role=support protect
+  Column right_panel box=54x116 gap=10 main=end cross=center role=group
+    Text power_hint box=54x34 font=12/500 lines=2 text=center fg=#e5000000 role=support
+    Button action_button box=54x32 font=14/medium radius=16 bg=#ffed6f21 fg=#ffffffff role=action protect

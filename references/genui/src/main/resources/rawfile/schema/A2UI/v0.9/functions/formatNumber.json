@@ -1,0 +1,38 @@
+{
+  "type": "object",
+  "description": "Formats a number with the specified grouping and decimal precision.",
+  "properties": {
+    "call": {
+      "const": "formatNumber"
+    },
+    "args": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "$ref": "../common_types.json#/$defs/DynamicNumber",
+          "description": "The number to format."
+        },
+        "decimals": {
+          "$ref": "../common_types.json#/$defs/DynamicNumber",
+          "description": "Optional. The number of decimal places to show. Defaults to 0 or 2 depending on locale."
+        },
+        "grouping": {
+          "$ref": "../common_types.json#/$defs/DynamicBoolean",
+          "description": "Optional. If true, uses locale-specific grouping separators (e.g. '1,000'). If false, returns raw digits (e.g. '1000'). Defaults to true."
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "unevaluatedProperties": false
+    },
+    "returnType": {
+      "const": "string"
+    }
+  },
+  "required": [
+    "call",
+    "args"
+  ],
+  "unevaluatedProperties": false
+}

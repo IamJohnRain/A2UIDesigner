@@ -1,0 +1,13 @@
+{
+  "case": "Case-01-low-power-005",
+  "size": "2x2",
+  "sourceAlt": "card.alt.txt",
+  "generatedDsl": "card.dsl.jsonl",
+  "status": "pass",
+  "summary": {
+    "total": 0,
+    "errors": 0,
+    "warnings": 0
+  },
+  "issues": []
+}

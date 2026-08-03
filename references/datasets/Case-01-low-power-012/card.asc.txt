@@ -1,0 +1,14 @@
+Text title_text text=低电模式
+Row weather_action event=0
+Image weather_icon asset=0
+Text weather_rain_text bind=/data/weather/daily/0/rainProbabilityPercent
+Progress usage_ring value=/battery/todayUsage/ringPercent total=100
+Text usage_value bind=/battery/todayUsage/valueText
+Text usage_label text=今日
+Progress battery_ring value=/battery/current/levelPercent total=100
+Text battery_value bind=/battery/current/levelText
+Text battery_label text=电量
+Progress remain_ring value=/battery/remaining/ringPercent total=100
+Text remain_value bind=/battery/remaining/timeText
+Text remain_label text=剩余
+Text status_text bind=/battery/current/statusText

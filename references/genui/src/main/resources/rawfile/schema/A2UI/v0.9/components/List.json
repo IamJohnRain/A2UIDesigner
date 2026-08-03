@@ -1,0 +1,43 @@
+{
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../common_types.json#/$defs/ComponentCommon"
+    },
+    {
+      "$ref": "../common_types.json#/$defs/CatalogComponentCommon"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "component": {
+          "const": "List"
+        },
+        "children": {
+          "description": "Defines the children. Use an array of strings for a fixed set of children, or a template object to generate children from a data list.",
+          "$ref": "../common_types.json#/$defs/ChildList"
+        },
+        "direction": {
+          "type": "string",
+          "description": "The direction in which the list items are laid out. Values: `vertical` stacks items from top to bottom; `horizontal` lays items out from left to right.",
+          "enum": [
+            "vertical",
+            "horizontal"
+          ],
+          "default": "vertical"
+        },
+        "align": {
+          "type": "string",
+          "description": "Defines the alignment of list items along the cross axis. Values: `start` aligns items to the cross-axis start edge; `center` centers items on the cross axis; `end` aligns items to the cross-axis end edge.",
+          "enum": ["start", "center", "end"],
+          "default": "start"
+        }
+      },
+      "required": [
+        "component",
+        "children"
+      ]
+    }
+  ],
+  "unevaluatedProperties": false
+}

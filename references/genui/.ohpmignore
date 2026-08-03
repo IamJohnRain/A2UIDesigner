@@ -1,0 +1,22 @@
+# Test code
+src/test/
+src/ohosTest/
+
+# Build artifacts
+build/
+.cxx/
+
+# IDE and OS files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Mock infrastructure
+src/mock/
+
+# Logs
+*.log

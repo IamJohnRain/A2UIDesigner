@@ -1,0 +1,50 @@
+{
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../common_types.json#/$defs/ComponentCommon"
+    },
+    {
+      "$ref": "../common_types.json#/$defs/CatalogComponentCommon"
+    },
+    {
+      "$ref": "../common_types.json#/$defs/Checkable"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "component": {
+          "const": "TextField"
+        },
+        "label": {
+          "$ref": "../common_types.json#/$defs/DynamicString",
+          "description": "The text label for the input field."
+        },
+        "value": {
+          "$ref": "../common_types.json#/$defs/DynamicString",
+          "description": "The value of the text field."
+        },
+        "variant": {
+          "type": "string",
+          "description": "The type of input field to display. Values: `shortText` is a single-line text input; `longText` is a multi-line text input for longer content; `number` is a numeric input; `obscured` hides typed characters for passwords or other sensitive values.",
+          "enum": [
+            "longText",
+            "number",
+            "shortText",
+            "obscured"
+          ],
+          "default": "shortText"
+        },
+        "validationRegexp": {
+          "type": "string",
+          "description": "A regular expression used for client-side validation of the input."
+        }
+      },
+      "required": [
+        "component",
+        "label"
+      ]
+    }
+  ],
+  "unevaluatedProperties": false
+}

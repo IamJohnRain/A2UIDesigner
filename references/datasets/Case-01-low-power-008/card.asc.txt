@@ -1,0 +1,14 @@
+Image battery_icon asset=0
+Text title_text bind=/status/title
+Text battery_value bind=/battery/levelText
+Progress battery_progress value=/battery/levelPercent total=/battery/progressTotal
+Text battery_caption bind=/battery/timeLeftText
+Image charge_icon asset=1
+Text alert_text bind=/status/alertText
+Column schedule_box event=1
+Image schedule_icon asset=2
+Text schedule_label text=下一日程
+Text schedule_title bind=/data/calendar/items/0/title
+Text schedule_time expr="{{ ${/data/calendar/items/0/dtStart} + '-' + ${/data/calendar/items/0/dtEnd} }}"
+Text power_hint bind=/status/powerHint
+Button action_button event=0 label=电池

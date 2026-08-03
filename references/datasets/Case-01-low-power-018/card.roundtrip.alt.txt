@@ -1,0 +1,20 @@
+Column root box=300x140 pad=12 gap=8 radius=22 gradient={"direction":"RightBottom","colors":[["#564af7",0],["#634794",1]]} clip role=shell
+  Row mode_row box=276x42 gap=12 main=start cross=center role=group
+    Row saving_panel box=132x42 pad=6 gap=4 main=start cross=center radius=14 bg=#fff1f3f5 role=group
+      Image saving_icon size=16 fit=contain role=asset
+      Text saving_text box=72x18 font=12/700 lines=1 fg=#ffe84026 role=text
+      Checkbox saving_switch box=20x20 shape=rounded_square selected=#ff64bb5c unselected=#33000000 mark=10/2/#ffffffff role=selection
+    Row dnd_panel box=132x42 pad=6 gap=4 main=start cross=center radius=14 bg=#fff1f3f5 role=group
+      Image dnd_icon size=16 fit=contain role=asset
+      Text dnd_text box=72x18 font=12/700 lines=1 fg=#e5000000 role=text
+      Checkbox dnd_switch box=20x20 shape=rounded_square selected=#ff64bb5c unselected=#33000000 mark=10/2/#ffffffff role=selection
+  Row metric_row box=276x66 gap=12 main=start cross=center role=group
+    Column battery_tile box=84x66 pad=6 gap=4 main=center cross=center radius=14 bg=#fff1f3f5 role=group
+      Progress battery_ring size=34 type=ring role=metric
+      Text battery_label box=72x16 font=12/700 lines=1 text=center role=text
+    Column temperature_tile box=84x66 pad=6 gap=4 main=center cross=center radius=14 bg=#fff1f3f5 role=group
+      Progress temperature_ring size=34 type=ring role=metric
+      Text temperature_label box=72x16 font=12/700 lines=1 text=center fg=#e5000000 role=text
+    Column usage_tile box=84x66 pad=6 gap=4 main=center cross=center radius=14 bg=#fff1f3f5 role=group
+      Progress usage_ring size=34 type=ring role=metric
+      Text usage_label box=72x16 font=12/700 lines=1 text=center fg=#e5000000 role=text

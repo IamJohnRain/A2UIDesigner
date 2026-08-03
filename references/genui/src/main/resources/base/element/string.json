@@ -1,0 +1,56 @@
+{
+  "string": [
+    {
+      "name": "page_show",
+      "value": "page from package"
+    },
+    {
+      "name": "custom_date_time_input_cancel",
+      "value": "取消"
+    },
+    {
+      "name": "custom_date_time_input_confirm",
+      "value": "确定"
+    },
+    {
+      "name": "custom_date_time_input_dialog_title_date_time",
+      "value": "选择日期时间"
+    },
+    {
+      "name": "custom_date_time_input_dialog_title_date",
+      "value": "选择日期"
+    },
+    {
+      "name": "custom_date_time_input_dialog_title_time",
+      "value": "选择时间"
+    },
+    {
+      "name": "custom_date_time_input_dialog_title_default",
+      "value": "日期时间选择"
+    },
+    {
+      "name": "custom_date_time_input_placeholder_date_time",
+      "value": "请选择日期时间"
+    },
+    {
+      "name": "custom_date_time_input_placeholder_date",
+      "value": "请选择日期"
+    },
+    {
+      "name": "custom_date_time_input_placeholder_time",
+      "value": "请选择时间"
+    },
+    {
+      "name": "custom_date_time_input_placeholder_disabled",
+      "value": "未启用日期时间选择"
+    },
+    {
+      "name": "custom_choice_picker_search_placeholder",
+      "value": "Search option"
+    },
+    {
+      "name": "custom_choice_picker_empty_text",
+      "value": "No matched options"
+    }
+  ]
+}

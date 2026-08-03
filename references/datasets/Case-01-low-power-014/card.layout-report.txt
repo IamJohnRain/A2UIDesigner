@@ -1,0 +1,70 @@
+{
+  "case": "Case-01-low-power-014",
+  "size": "2x4",
+  "sourceAlt": "card.alt.txt",
+  "generatedDsl": "card.dsl.jsonl",
+  "status": "issues",
+  "summary": {
+    "total": 8,
+    "errors": 8,
+    "warnings": 0
+  },
+  "issues": [
+    {
+      "code": "container_overflow",
+      "severity": "error",
+      "nodeId": "event_row_1",
+      "component": "Row",
+      "message": "Row requires 114vp horizontally but only 96vp is available"
+    },
+    {
+      "code": "container_overflow",
+      "severity": "error",
+      "nodeId": "event_row_1",
+      "component": "Row",
+      "message": "Row requires 48vp vertically but only 18vp is available"
+    },
+    {
+      "code": "checkbox_intrinsic_overflow",
+      "severity": "error",
+      "nodeId": "event_check_1",
+      "component": "Checkbox",
+      "message": "Checkbox outer height 18 is smaller than intrinsic 48vp"
+    },
+    {
+      "code": "checkbox_intrinsic_overflow",
+      "severity": "error",
+      "nodeId": "event_check_1",
+      "component": "Checkbox",
+      "message": "Checkbox width 18 cannot contain the fixed 20vp control and 16vp margins/gap"
+    },
+    {
+      "code": "container_overflow",
+      "severity": "error",
+      "nodeId": "event_row_2",
+      "component": "Row",
+      "message": "Row requires 114vp horizontally but only 96vp is available"
+    },
+    {
+      "code": "container_overflow",
+      "severity": "error",
+      "nodeId": "event_row_2",
+      "component": "Row",
+      "message": "Row requires 48vp vertically but only 18vp is available"
+    },
+    {
+      "code": "checkbox_intrinsic_overflow",
+      "severity": "error",
+      "nodeId": "event_check_2",
+      "component": "Checkbox",
+      "message": "Checkbox outer height 18 is smaller than intrinsic 48vp"
+    },
+    {
+      "code": "checkbox_intrinsic_overflow",
+      "severity": "error",
+      "nodeId": "event_check_2",
+      "component": "Checkbox",
+      "message": "Checkbox width 18 cannot contain the fixed 20vp control and 16vp margins/gap"
+    }
+  ]
+}

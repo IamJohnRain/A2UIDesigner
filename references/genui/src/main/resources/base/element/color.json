@@ -1,0 +1,116 @@
+{
+  "color": [
+    {
+      "name": "custom_text_primary",
+      "value": "#182431"
+    },
+    {
+      "name": "custom_text_placeholder",
+      "value": "#999999"
+    },
+    {
+      "name": "custom_text_inverse",
+      "value": "#FFFFFF"
+    },
+    {
+      "name": "custom_error_text",
+      "value": "#D93025"
+    },
+    {
+      "name": "custom_background",
+      "value": "#FFFFFF"
+    },
+    {
+      "name": "custom_darkBackground",
+      "value": "#000000"
+    },
+    {
+      "name": "custom_button_cancel_background",
+      "value": "#F2F3F5"
+    },
+    {
+      "name": "custom_button_confirm_background",
+      "value": "#007DFF"
+    },
+    {
+      "name": "custom_border_enabled",
+      "value": "#D0D5DD"
+    },
+    {
+      "name": "custom_border_disabled",
+      "value": "#E5E7EB"
+    },
+    {
+      "name": "custom_choice_picker_unselected_background",
+      "value": "#F1F3F5"
+    },
+    {
+      "name": "custom_choice_dark_picker_unselected_background",
+      "value": "#1A1A1A"
+    },
+    {
+      "name": "custom_audio_player_loading",
+      "value": "#0A59F7"
+    },
+    {
+      "name": "custom_audio_player_loading_dark",
+      "value": "#F5A608"
+    },
+    {
+      "name": "custom_audio_player_icon_light",
+      "value": "#E5000000"
+    },
+    {
+      "name": "custom_audio_player_icon_dark",
+      "value": "#E5FFFFFF"
+    },
+    {
+      "name": "custom_icon_placeholder",
+      "value": "#E5E5EA"
+    },
+    {
+      "name": "custom_icon_dark_placeholder",
+      "value": "#1A1A15"
+    },
+    {
+      "name": "custom_icon_light",
+      "value": "#E5000000"
+    },
+    {
+      "name": "custom_icon_dark",
+      "value": "#E5FFFFFF"
+    },
+    {
+      "name": "custom_select_font_color",
+      "value": "#E5000000"
+    },
+    {
+      "name": "custom_select_font_color_dark",
+      "value": "#E5FFFFFF"
+    },
+    {
+      "name": "custom_select_selected_option_bg_color",
+      "value": "#33007DFF"
+    },
+    {
+      "name": "custom_select_selected_option_bg_color_dark",
+      "value": "#33317AF7"
+    },
+    {
+      "name": "custom_select_selected_option_font_color",
+      "value": "#FF007DFF"
+    },
+    {
+      "name": "custom_select_selected_option_font_color_dark",
+      "value": "#FF3F97E9"
+    },
+    {
+      "name": "custom_select_option_font_color",
+      "value": "#FF182431"
+    },
+    {
+      "name": "custom_select_option_font_color_dark",
+      "value": "#DBFFFFFF"
+    }
+  ]
+}

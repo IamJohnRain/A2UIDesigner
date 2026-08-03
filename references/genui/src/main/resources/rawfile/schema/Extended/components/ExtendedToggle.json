@@ -1,0 +1,49 @@
+{
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../common_types.json#/$defs/ComponentCommon"
+    },
+    {
+      "$ref": "../common_types.json#/$defs/CatalogComponentCommon"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "component": {
+          "const": "Toggle"
+        },
+        "isOn": {
+          "type": "boolean",
+          "description": "Whether the toggle is on. Type: boolean. Default: false. true means on, false means off.",
+          "default": false
+        },
+        "enabled": {
+          "type": "boolean",
+          "description": "Whether the toggle can switch state. Type: boolean. Default: true. true means switchable, false means disabled.",
+          "default": true
+        },
+        "selectedColor": {
+          "type": "string",
+          "description": "Background color in the on state. Hex color string. Default follows the theme emphasis color. Dark theme: #33317AF7. Light theme: #330A59F7."
+        },
+        "unSelectedColor": {
+          "type": "string",
+          "description": "Background color in the off state. Hex color string. Default is about 0x337F7F7F. Dark theme: #19FFFFFF. Light theme: #0C000000."
+        },
+        "switchPointColor": {
+          "type": "string",
+          "description": "Round slider color. Hex color string. Default follows the contrary foreground theme color."
+        },
+        "label": {
+          "type": "string",
+          "description": "Text displayed next to the toggle. Type: string. Default is an empty string."
+        }
+      },
+      "required": [
+        "component"
+      ]
+    }
+  ],
+  "additionalProperties": true
+}

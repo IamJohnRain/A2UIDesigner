@@ -1,0 +1,30 @@
+{
+  "type": "object",
+  "description": "Returns the value text of the selected Radio component in the target group. If the group has no selected item or the group does not exist, returns an empty string (\"\"). If args.group is omitted, the functionCall is invalid.",
+  "properties": {
+    "call": {
+      "const": "getRadioValue"
+    },
+    "args": {
+      "type": "object",
+      "properties": {
+        "group": {
+          "$ref": "../common_types.json#/$defs/DynamicString",
+          "description": "The target Radio group name."
+        }
+      },
+      "required": [
+        "group"
+      ],
+      "additionalProperties": false
+    },
+    "returnType": {
+      "const": "string"
+    }
+  },
+  "required": [
+    "call",
+    "args"
+  ],
+  "unevaluatedProperties": false
+}

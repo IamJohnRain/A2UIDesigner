@@ -1,0 +1,5 @@
+Image schedule_icon asset=0
+Text title_text text=今日安排
+Text event_title bind=/data/calendar/items/0/title
+Text time_text expr="{{ ${/data/calendar/items/0/dtStart} + '-' + ${/data/calendar/items/0/dtEnd} }}"
+Button action_button event=0 label=充电地图

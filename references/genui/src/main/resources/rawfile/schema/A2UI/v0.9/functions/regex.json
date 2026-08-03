@@ -1,0 +1,34 @@
+{
+  "type": "object",
+  "description": "Checks that the value matches a regular expression string.",
+  "properties": {
+    "call": {
+      "const": "regex"
+    },
+    "args": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "$ref": "../common_types.json#/$defs/DynamicString"
+        },
+        "pattern": {
+          "type": "string",
+          "description": "The regex pattern to match against."
+        }
+      },
+      "required": [
+        "value",
+        "pattern"
+      ],
+      "unevaluatedProperties": false
+    },
+    "returnType": {
+      "const": "boolean"
+    }
+  },
+  "required": [
+    "call",
+    "args"
+  ],
+  "unevaluatedProperties": false
+}

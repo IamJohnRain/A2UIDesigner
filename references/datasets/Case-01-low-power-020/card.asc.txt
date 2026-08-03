@@ -1,0 +1,12 @@
+Image power_icon asset=0
+Text status_text bind=/device/batteryStatus
+Progress battery_ring value=/device/batteryPercent total=100
+Text battery_value bind=/device/batteryText
+Image schedule_icon asset=1
+Text schedule_title text=今日剩余
+Text event_time expr="{{ ${/data/calendar/items/0/dtStart} + '-' + ${/data/calendar/items/0/dtEnd} }}"
+Text event_title bind=/data/calendar/items/0/title
+Text remain_text bind=/data/calendar/remainingText
+Button save_power_button event=0 label=开省电
+Button bluetooth_button event=1 label=关蓝牙
+Button location_button event=2 label=关定位

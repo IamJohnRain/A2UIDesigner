@@ -1,0 +1,30 @@
+{
+  "type": "object",
+  "description": "Performs a logical NOT operation on a boolean value.",
+  "properties": {
+    "call": {
+      "const": "not"
+    },
+    "args": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "$ref": "../common_types.json#/$defs/DynamicBoolean",
+          "description": "The boolean value to negate."
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "unevaluatedProperties": false
+    },
+    "returnType": {
+      "const": "boolean"
+    }
+  },
+  "required": [
+    "call",
+    "args"
+  ],
+  "unevaluatedProperties": false
+}

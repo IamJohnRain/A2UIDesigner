@@ -1,0 +1,47 @@
+{
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../common_types.json#/$defs/ComponentCommon"
+    },
+    {
+      "$ref": "../common_types.json#/$defs/CatalogComponentCommon"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "component": {
+          "const": "Tabs"
+        },
+        "tabs": {
+          "type": "array",
+          "description": "An array of objects, where each object defines a tab with a title and a child component. At least one tab is required. Each item defines a tab with a `title` and the `child` component to render when that tab is active.",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "description": "The tab title.",
+                "$ref": "../common_types.json#/$defs/DynamicString"
+              },
+              "child": {
+                "$ref": "../common_types.json#/$defs/ComponentId",
+                "description": "The ID of the child component. Do NOT define the component inline."
+              }
+            },
+            "required": [
+              "title",
+              "child"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "component",
+        "tabs"
+      ]
+    }
+  ],
+  "unevaluatedProperties": false
+}

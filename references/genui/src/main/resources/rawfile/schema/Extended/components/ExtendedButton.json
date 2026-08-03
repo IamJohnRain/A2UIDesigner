@@ -1,0 +1,106 @@
+{
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../common_types.json#/$defs/ComponentCommon"
+    },
+    {
+      "$ref": "../common_types.json#/$defs/CatalogComponentCommon"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "component": {
+          "const": "Button"
+        },
+        "label": {
+          "description": "Button text label",
+          "oneOf": [
+            {
+              "type": "string"
+            },
+            {
+              "$ref": "../common_types.json#/$defs/DynamicString"
+            }
+          ]
+        },
+        "enabled": {
+          "description": "Whether the button is enabled",
+          "oneOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "$ref": "../common_types.json#/$defs/DynamicBoolean"
+            }
+          ],
+          "default": true
+        },
+        "fontSize": {
+          "type": "number",
+          "description": "Set the font size, with the unit being fp. Default is about 16fp."
+        },
+        "fontWeight": {
+          "description": "Font weight of the text. Supports number, default 500, or string enum: normal/regular=400, medium=500, bold=700, bolder=900.",
+          "oneOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string",
+              "enum": [
+                "normal",
+                "regular",
+                "medium",
+                "bold",
+                "bolder"
+              ]
+            }
+          ]
+        },
+        "maxFontSize": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Maximum text display size in fp. If maxFontSize <= 0 or maxFontSize < minFontSize, adaptive font sizing is disabled and fontSize, or its default value, is used."
+        },
+        "minFontSize": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Minimum text display size in fp. If minFontSize <= 0, adaptive font sizing is disabled and fontSize, or its default value, is used."
+        },
+        "fontScaleMode": {
+          "type": "string",
+          "description": "Font scaling mode. followSystem follows the system font scale. custom uses the configured custom font scale range.",
+          "enum": [
+            "followSystem",
+            "custom"
+          ]
+        },
+        "minFontScale": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Minimum font zoom ratio. Value range: [0, 1]. Values less than 0 are clamped to 0, values greater than 1 are clamped to 1, and non-number values do not take effect."
+        },
+        "maxFontScale": {
+          "type": "number",
+          "minimum": 1,
+          "description": "Maximum font zoom ratio. Value range: [1, inf). Values less than 1 are clamped to 1, and non-number values do not take effect."
+        },
+        "action": {
+          "$ref": "../common_types.json#/$defs/Action",
+          "description": "Click response action. Supports server events in the form { event: { name, context } } and client functions in the form { functionCall: FunctionCall }. Default is an empty object."
+        },
+        "fontColor": {
+          "type": "string",
+          "description": "Set font color. Hex color string."
+        }
+      },
+      "required": [
+        "component",
+        "label"
+      ]
+    }
+  ],
+  "additionalProperties": true
+}

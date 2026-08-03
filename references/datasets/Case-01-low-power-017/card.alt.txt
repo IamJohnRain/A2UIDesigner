@@ -1,0 +1,17 @@
+Column root box=300x140 pad=12 gap=8 radius=22 gradient={"direction":"RightBottom","colors":[["#92C48D",0],["#64BB5C",1]]} clip role=shell
+  Row main_row box=276x76 gap=8 cross=center role=group
+    Stack hero_panel box=78x76 align=center radius=18 bg=#FFFFFFFF role=primary protect
+      Image battery_icon size=62 fit=contain role=asset
+    Column content_col box=190x76 gap=8 main=start role=group
+      Text title_text box=190x22 font=18/700 lines=1 overflow=none fg=#E5000000 role=title protect
+      Row metrics_row box=190x46 gap=6 cross=center role=group
+        Column weather_item box=58x46 pad=6 gap=2 radius=10 bg=#FFFFFFFF role=group
+          Text weather_label box=46x14 font=10 lines=1 fg=#99000000 role=text
+          Text weather_value box=46x18 font=14/700 lines=1 overflow=none fg=#E5000000 role=text protect
+        Column temp_item box=58x46 pad=6 gap=2 radius=10 bg=#FFFFFFFF role=group
+          Text temp_label box=46x14 font=10 lines=1 fg=#99000000 role=text
+          Text temp_value box=46x18 font=14/700 lines=1 overflow=none fg=#E5000000 role=text protect
+        Column humidity_item box=58x46 pad=6 gap=2 radius=10 bg=#FFFFFFFF role=group
+          Text humidity_label box=46x14 font=10 lines=1 fg=#99000000 role=text
+          Text humidity_value box=46x18 font=14/700 lines=1 overflow=none fg=#E5000000 role=text protect
+  Button action_button box=276x32 font=14/500 chars=18 radius=16 bg=#64BB5C fg=#FFFFFFFF role=action protect

@@ -1,0 +1,11 @@
+Image power_icon asset=0
+Checkbox status_checkbox event=0 bind=/power/savingEnabled value=powerSaving
+Text mode_text bind=/power/modeText
+Text alert_badge bind=/power/alertText
+Progress meter_track value=100 total=100
+Progress meter_progress value=/power/batteryPercent total=/power/batteryTotal
+Text battery_value bind=/power/batteryPercentText
+Text schedule_label text=下一日程
+Text schedule_time bind=/data/calendar/items/0/dtStart
+Text schedule_title bind=/data/calendar/items/0/title
+Button action_button event=0 label=找充电宝

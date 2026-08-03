@@ -1,0 +1,11 @@
+Text title_text bind=/ui/title
+Text battery_text bind=/data/device/batteryText
+Progress battery_progress value=/data/device/batteryPercent total=/data/device/progressTotal
+Text countdown_text bind=/data/meeting/countdownText
+Text alert_badge bind=/data/device/batteryStatusText
+Text schedule_title bind=/ui/scheduleTitle
+Checkbox event_check_1 bind=/data/calendar/items/0/checked value=event-001 group=today_schedule
+Text event_text_1 expr="{{ ${/data/calendar/items/0/dtStart} + ' ' + ${/data/calendar/items/0/title} }}"
+Checkbox event_check_2 bind=/data/calendar/items/1/checked value=event-002 group=today_schedule
+Text event_text_2 expr="{{ ${/data/calendar/items/1/dtStart} + ' ' + ${/data/calendar/items/1/title} }}"
+Button action_button event=0 label="{{ ${/ui/actionLabel} }}"

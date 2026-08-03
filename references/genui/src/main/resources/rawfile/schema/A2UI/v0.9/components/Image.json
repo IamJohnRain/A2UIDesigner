@@ -1,0 +1,57 @@
+{
+  "type": "object",
+  "allOf": [
+    {
+      "$ref": "../common_types.json#/$defs/ComponentCommon"
+    },
+    {
+      "$ref": "../common_types.json#/$defs/CatalogComponentCommon"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "component": {
+          "const": "Image"
+        },
+        "url": {
+          "$ref": "../common_types.json#/$defs/DynamicString",
+          "description": "The URL of the image to display."
+        },
+        "description": {
+          "$ref": "../common_types.json#/$defs/DynamicString",
+          "description": "Accessibility text for the image."
+        },
+        "fit": {
+          "type": "string",
+          "description": "Specifies how the image should be resized to fit its container. This corresponds to the CSS `object-fit` property. Values: `contain` preserves the image aspect ratio and fits the whole image inside the container; `cover` preserves aspect ratio and fills the container, cropping if needed; `fill` stretches the image to fill the container; `none` keeps the intrinsic image size; `scaleDown` uses the smaller result of `none` or `contain`. When `variant` is `header` and `fit` is omitted or invalid, the runtime falls back to `contain`; otherwise the default is `fill`.",
+          "enum": [
+            "contain",
+            "cover",
+            "fill",
+            "none",
+            "scaleDown"
+          ],
+          "default": "fill"
+        },
+        "variant": {
+          "type": "string",
+          "description": "A hint for the image size and style. Values: `icon` is a small symbolic image; `avatar` is a compact circular user or entity image; `smallFeature` is a small thumbnail or supporting image; `mediumFeature` is the default feature image size; `largeFeature` is a prominent large image; `header` is a wide banner-style image.",
+          "enum": [
+            "icon",
+            "avatar",
+            "smallFeature",
+            "mediumFeature",
+            "largeFeature",
+            "header"
+          ],
+          "default": "mediumFeature"
+        }
+      },
+      "required": [
+        "component",
+        "url"
+      ]
+    }
+  ],
+  "unevaluatedProperties": false
+}
