@@ -1,7 +1,0 @@
-Image hero_image asset=0
-Text title_text bind=/power/title
-Text primary_value bind=/power/batteryPercentText
-Text status_text bind=/power/statusText
-Text estimate_text bind=/power/estimateText
-Progress battery_progress value=/power/batteryPercentValue total=/power/batteryTotal
-Button action_button event=0 label="{{ ${/power/actionLabel} }}"

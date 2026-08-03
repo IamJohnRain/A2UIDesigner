@@ -1,8 +1,0 @@
-Image mode_icon asset=0
-Text title_text bind=/mode/title
-Text status_text bind=/mode/status
-Text summary_text bind=/mode/summary
-Text item_0 bind=/items/0/label
-Text item_1 bind=/items/1/label
-Text item_2 bind=/items/2/label
-Button action_button event=0 label="{{ ${/mode/actionLabel} }}"

@@ -1,7 +1,0 @@
-Column root box=140x140 pad=12 gap=6 main=start cross=center radius=18 gradient={"direction":"RightBottom","colors":[["#9e644f",0],["#db6b42",0.58],["#ed955f",1]]} clip role=shell
-  Row header_row box=116x20 gap=6 main=start cross=center role=group
-    Image schedule_icon size=18 fit=contain role=asset
-    Text title_text box=92x18 font=12/600 lines=1 overflow=none text=start fg=#99ffffff role=title protect
-  Text event_title box=116x22 font=16/800 lines=1 overflow=none text=center fg=#ffffffff role=title protect
-  Text time_text box=116x18 font=12/600 lines=1 overflow=none text=center fg=#99ffffff role=support protect
-  Button action_button box=116x34 font=14/700 radius=17 bg=#33ffffff fg=#ffffffff role=action protect

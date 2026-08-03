@@ -1,5 +1,0 @@
-Column root box=140x140 pad=12 gap=6 main=start cross=start radius=18 bg=#ff191a1c clip role=shell
-  Text title_text box=116x18 font=14/600 lines=1 overflow=none fg=#e5ffffff role=title protect
-  Text primary_value box=116x24 font=20/700 lines=1 overflow=none fg=#ffd94838 role=primary protect
-  Text weather_text box=116x18 font=12/500 lines=1 overflow=none fg=#99ffffff role=text
-  Button action_button box=92x32 font=14/medium radius=16 bg=#ff317af7 fg=#ffffffff role=action protect

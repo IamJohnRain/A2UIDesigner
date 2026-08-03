@@ -1,4 +1,0 @@
-Text title_text text=低电提醒
-Text primary_value bind=/state/battery/alertText
-Text weather_text expr="{{ ${/data/weather/current/condition} + ' ' + ${/data/weather/current/temperatureText} }}"
-Button action_button event=0 label=找充电宝
