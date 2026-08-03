@@ -1,0 +1,6 @@
+[submodule "references/CreateMyCard"]
+	path = references/CreateMyCard
+	url = https://github.com/InnovationTea/CreateMyCard.git
+[submodule "references/arkui_ace_engine"]
+	path = references/arkui_ace_engine
+	url = https://gitee.com/openharmony/arkui_ace_engine.git
