@@ -81,7 +81,7 @@ TaskSpec 是本卡的完整事实源：阅读其中的用户需求、数据字�
 - 自动生成只允许 Text、Image、Divider、Progress、Button、Row、Column。禁止 Stack、Checkbox、List 和 Repeat；Checkbox 的原生尺寸不可控，List 的集合模板暂不进入训练输出。
 - 节点 ID 必须唯一并匹配 [A-Za-z_][A-Za-z0-9_-]*；优先使用 presentationSlots 的 key。
 - 所有叶节点必须声明 role。推荐 role：title、primary、status、metric、support、meta、action、asset、selection、separator、item。
-- 只允许一个 role=primary；普通 Row/Column 最多三个直接子节点；禁止空容器和未挂载节点。
+- 只允许一个 role=primary；包括根节点在内的每个 Row/Column 最多三个直接子节点；禁止空容器和未挂载节点。
 - 2x2 的根节点固定采用 Column；Button 必须是某个 Column 的直接子节点，不能放进 Row。Row 只放最多两个短 Text 或一个 Image 加一个短 Text。
 - primary 只承载短数值、短状态或不超过 4 个中文等价单位的文本；较长的动态字段使用 status 或 support。2x2 title 不超过 6 个中文等价单位，2x4 title 不超过 10 个。
 - Button 标签必须短：2x2 不超过 4 个中文等价单位，2x4 不超过 6 个；放不下时改用更短的动作词，不要生成长标签、第二行或缩小字体。
@@ -100,11 +100,11 @@ TaskSpec 是本卡的完整事实源：阅读其中的用户需求、数据字�
 - SVG 尺寸、objectFit 和 fillColor 全部由编译器按主题和角色生成。
 
 ASC：
-- 使用 Component node_id key=value 单行语法，只列有语义补充的节点，并严格遵循 ALT 前序顺序。
-- Text：text=静态文案、bind=/路径，复杂表达式才用 expr。bind 必须逐字符等于 CASE_CONTEXT.bindableFields 中的一个 path；绝不能绑定对象、数组、父路径、猜测路径或路径前缀。
+- 使用 Component node_id key=value 单行语法，只列有语义补充的节点，并严格遵循 ALT 前序顺序。ASC 属性按空白分隔；任何包含空格、制表符或换行的静态字符串，必须作为一个 JSON 双引号字符串 token，并按 JSON 规则转义。
+- Text：text=静态文案、bind=/路径，复杂表达式才用 expr。bind 必须逐字符等于 CASE_CONTEXT.bindableFields 中的一个 path；绝不能绑定对象、数组、父路径、猜测路径或路径前缀。含空格的文案必须写成例如 text="今日已用 42 分钟"。
 - Image：只用 asset=N。
 - Progress：value=/路径、total=/路径。
-- Button：label=短文案 event=N；Checkbox：label、value、group、bind、event=N。
+- Button：label=短文案 event=N；含空格的标签必须写成例如 label="Open calendar" event=0。Checkbox：label、value、group、bind、event=N。
 - event=N 和 asset=N 只引用 CASE_CONTEXT 中的索引，不复制事件、素材路径或颜色。
 - Progress 的 value 和 total 也必须逐字符等于 CASE_CONTEXT.bindableFields 中的标量叶子 path；缺少两个合法数值字段时不要生成 Progress。
 - ASC 禁止 id、component、children、styles、尺寸、字体、颜色、圆角、间距、DataModel 和操作符。
