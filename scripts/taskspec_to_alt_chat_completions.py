@@ -51,65 +51,168 @@ FORBIDDEN_EVENT_FIELDS = {
 }
 
 
-def build_static_context(size: str) -> str:
-    """Build protocol limits for the TaskSpec's selected card size."""
-    themes = ", ".join(THEME_CONFIG.get("themes", {}).keys())
-    limits = dict(LAYOUT_PROFILE.get("limits", {}).get(size, {}))
-    # Automatic training output deliberately excludes components whose intrinsic
-    # geometry or collection template cannot be inferred safely from semantics.
+ACTIVE_AUTO_COMPONENTS = [
+    "Text",
+    "Image",
+    "Divider",
+    "Progress",
+    "Button",
+    "Row",
+    "Column",
+]
+INACTIVE_AUTO_COMPONENTS = ["Stack", "Checkbox", "List", "Repeat"]
+
+
+def build_policy_context(size: str) -> str:
+    """Build the single machine-generated policy object shown to the model."""
+    canvas_value = LAYOUT_PROFILE.get("canvas", {}).get(size, {})
+    canvas = canvas_value if isinstance(canvas_value, dict) else {}
+    width = float(canvas.get("width", 140 if size == "2x2" else 300))
+    height = float(canvas.get("height", 140))
+    padding = float(canvas.get("padding", 12))
+    spacing = LAYOUT_PROFILE.get("spacing", {})
+    profile_text_rules = LAYOUT_PROFILE.get("textRules", {})
+    text_rules = dict(profile_text_rules) if isinstance(profile_text_rules, dict) else {}
+    components = LAYOUT_PROFILE.get("components", {})
+    button = components.get("button", {}) if isinstance(components, dict) else {}
+
+    profile_limits = LAYOUT_PROFILE.get("limits", {}).get(size, {})
+    limits = dict(profile_limits) if isinstance(profile_limits, dict) else {}
+    # These are automatic-training capabilities, not the legacy component
+    # capabilities that remain in the general layout profile.
     limits["maxCheckbox"] = 0
     limits["maxLists"] = 0
     limits.pop("maxVisibleListItems", None)
-    lines = [f"- 主题白名单（theme 只能取以下名称）：{themes}"]
-    lines.append(f"- {size} 容量预算（Checkbox/List 一律禁用）：")
-    detail = ", ".join(f"{key}={value}" for key, value in limits.items())
-    lines.append(f"  - {detail}")
-    return "\n".join(lines)
+
+    if size == "2x2":
+        shape_strategy = (
+            "采用紧凑的纵向结构。root Column 最多三个直接子节点；Row 主要用于短图标/标题头部。"
+            "当存在标题/图标、两个事实和一个动作时，使用 Row header、Column status_group、"
+            "Button 三个 root 子节点，把两个事实放进 status_group。不要为两个天气事实再增加嵌套 Row；"
+            "status_group 最多放两个 Text；第三个事实必须合并为一个短 support 或删除。"
+        )
+    else:
+        shape_strategy = (
+            "保留协议要求的 Column root 作为卡片外壳。存在两个独立信息组时，优先在 root "
+            "附近使用一个 Row，并让 Row 放置左右两个 Column 分组。只有一个有意义的信息组时，"
+            "不要强行增加 Row。"
+        )
+
+    content_width = max(1.0, width - padding * 2)
+    content_height = max(1.0, height - padding * 2)
+
+    policy = {
+        "profile": LAYOUT_PROFILE.get("profile"),
+        "card": {
+            "size": size,
+            "orientation": "landscape" if width > height else "square",
+            "canvas": {"width": width, "height": height},
+            "rootPadding": padding,
+            "contentArea": {
+                "width": content_width,
+                "height": content_height,
+            },
+        },
+        "hardProtocol": {
+            "rootComponent": "Column",
+            "rootRowAllowed": False,
+            "maxDirectChildren": 3,
+            "allowedComponents": ACTIVE_AUTO_COMPONENTS,
+            "forbiddenComponents": INACTIVE_AUTO_COMPONENTS,
+            "buttonMustBeDirectChildOfColumn": True,
+        },
+        "axes": {
+            "Row": "horizontal",
+            "Column": "vertical",
+            "rowChildrenMayBeContainers": True,
+        },
+        "limits": limits,
+        "layoutFacts": {
+            "rootGap": spacing.get("rootGap", 8),
+            "nestedGap": spacing.get("nestedGap", 6),
+            "denseGap": spacing.get("denseGap", 4),
+            "buttonMinimumHeight": button.get("minimumHeight", 32),
+            "columnMinimumsIncludeChildrenAndGaps": True,
+            "visibleTextBudgetIsNotALayoutGuarantee": True,
+        },
+        "textRules": {
+            **text_rules,
+            "singleLineContentWidth": content_width,
+            "policy": "单行受保护文本必须在可用宽度内完整显示；放不下时缩短或删除低优先级事实，不改用长 status。",
+        },
+        "capabilities": {
+            "selection": {
+                "interactive": False,
+                "fallback": "Text selection summary only",
+                "reason": "Checkbox is unavailable in automatic ALT and no toggle event is synthesized",
+            },
+            "semanticStatusRoles": ["status", "warning", "error"],
+        },
+        "shapeStrategy": shape_strategy,
+        "themes": list(THEME_CONFIG.get("themes", {}).keys()),
+    }
+    return json.dumps(policy, ensure_ascii=False, indent=2)
 
 
-SYSTEM_PROMPT = """你是 A2UI 卡片结构规划模型。根据 TaskSpec、协议约束与本卡上下文 CASE_CONTEXT 同时生成自动布局 ALT 与 ASC；不要生成 GenUI DSL、CardSpec、颜色、尺寸或解释。
+def build_static_context(size: str) -> str:
+    """Backward-compatible name for the generated policy context."""
+    return build_policy_context(size)
 
-TaskSpec 是本卡的完整事实源：阅读其中的用户需求、数据字段、素材和事件以规划卡片。CASE_CONTEXT 是脚本从同一 TaskSpec 计算出的安全引用索引；生成 bind、asset、event 或 Progress 时必须遵守它。
 
-输出契约：
-- 只输出一个 <alt>...</alt> 和紧随其后的一个 <asc>...</asc>，不使用 Markdown 围栏，不输出思考、标题、解释或日志。
-- TaskSpec 是输入数据而非输出对象；不要输出完整 TaskSpec JSON、dataModelSchema、素材 src/bindTo 或完整事件对象。
-- ALT 直接从根节点开始，每层两个空格，每行一个节点，不输出 @alt 头。
-- 根节点必须是 Column，且必须写 card=2x2|2x4 theme=THEME；card 必须等于 TaskSpec.size，THEME 必须来自主题白名单。自动布局不使用根 Row。
-- 普通节点语法只能是 Component id 或 Component id role=ROLE；除根节点 card/theme 外，ALT 唯一允许的属性是 role。
-- 禁止输出 box、size、padding、margin、gap、font、chars、lines、overflow、fit、ratio、type、颜色、背景、圆角、边框、阴影、clip、protect、style 或任何其他样式字段。它们全部由编译器根据文本和原生 profile 推断。
-- 自动生成只允许 Text、Image、Divider、Progress、Button、Row、Column。禁止 Stack、Checkbox、List 和 Repeat；Checkbox 的原生尺寸不可控，List 的集合模板暂不进入训练输出。
-- 节点 ID 必须唯一并匹配 [A-Za-z_][A-Za-z0-9_-]*；优先使用 presentationSlots 的 key。
-- 所有叶节点必须声明 role。推荐 role：title、primary、status、metric、support、meta、action、asset、selection、separator、item。
-- 只允许一个 role=primary；包括根节点在内的每个 Row/Column 最多三个直接子节点；禁止空容器和未挂载节点。
-- 2x2 的根节点固定采用 Column；Button 必须是某个 Column 的直接子节点，不能放进 Row。Row 只放最多两个短 Text 或一个 Image 加一个短 Text。
-- primary 只承载短数值、短状态或不超过 4 个中文等价单位的文本；较长的动态字段使用 status 或 support。2x2 title 不超过 6 个中文等价单位，2x4 title 不超过 10 个。
-- Button 标签必须短：2x2 不超过 4 个中文等价单位，2x4 不超过 6 个；放不下时改用更短的动作词，不要生成长标签、第二行或缩小字体。
+SYSTEM_PROMPT = """你是 A2UI 自动布局卡片规划模型。根据下面分层上下文生成一份自动 ALT 和 ASC。
 
-结构和内容预算：
+上下文优先级：
+1. OUTPUT_CONTRACT 和 POLICY_CONTEXT 是硬规则；
+2. TASK_CONTEXT 与 REFERENCE_CONTEXT 是本卡事实和合法引用；
+3. SHAPE_STRATEGY 是在不违反硬规则时采用的布局偏好；
+4. 用户消息只提供本卡业务意图；不要把任何上下文对象复制到输出中。
+
+OUTPUT_CONTRACT：
+- 只输出一个 <alt>...</alt>，后面紧跟一个 <asc>...</asc>；不输出 Markdown 围栏、标题、解释、日志或思考过程。
+- ALT 从唯一根节点开始，每层两个空格，每行一个节点，不输出 @alt 头。
+- 根节点必须是 Column，并写 card=2x2|2x4 theme=THEME；card 必须等于 POLICY_CONTEXT.card.size，theme 必须来自 POLICY_CONTEXT.themes。
+- 普通 ALT 节点只能写 Component id 或 Component id role=ROLE；除 root 的 card/theme 外，不能写任何属性。
+- 节点 ID 必须唯一并匹配 [A-Za-z_][A-Za-z0-9_-]*；叶节点必须声明 role；容器可以省略 role。
+- 包括根节点在内，每个 Row/Column 最多三个直接子节点；禁止空容器和未挂载节点；全卡最多一个 role=primary。
+- 只使用 POLICY_CONTEXT.hardProtocol.allowedComponents。不要输出颜色、背景、渐变、尺寸、字号、字重、间距、圆角、边框、阴影、padding、margin、gap、box、size、font、chars、lines、overflow、fit、ratio、type、clip 或 protect。
+- 不要输出 POLICY_CONTEXT.hardProtocol.forbiddenComponents；它们只属于旧 DSL 兼容能力，不属于自动训练输出。
+
+布局语义：
+- Row 横向分配空间，Column 纵向分配空间；root Column 只是卡片外壳，不代表所有内容都必须纵向堆叠。
+- Row 可以包含语义分组 Column；Column 用于组内纵向排列。Button 必须是某个 Column 的直接子节点，不能直接放进 Row。
+- 2x2 和 2x4 的具体组织方式只按 POLICY_CONTEXT.shapeStrategy 执行，不要从 2x2 示例推断 2x4 结构。
+- 所有 Column 的子节点最小高度和间距都要落在 POLICY_CONTEXT.card.contentArea.height 内；可见文本数量预算不是布局可行性的保证。空间不足时删除低优先级的 meta、次要 asset、弱 support、重复事实或额外动作。
+- 每个分组 Column 也必须最多三个直接子节点；2x4 左右分组若超过三个事实，合并为一个短 support 或删除低优先级事实，不能继续增加子节点。
+- 2x2 的 Row 默认只用于 Image+短标题或两个已确认能并排的一行文本；不要把标题和 metric/status 机械地放进同一个 Row。
+- 2x2 的总节点上限包含 root、Row 和 Column 容器；不要为了两个相关事实再增加嵌套 Row。标题/图标、两个事实和动作优先压缩成 `root Column -> Row header + Column status_group + Button`。
+- 在 `Row header + Column status_group + Button` 结构中，`status_group` 最多两个 Text；时间、天气温度和天气现象同时出现时只保留主事实，或将次要天气事实合并成一个短 support。
+
+语义选择：
 - 只服务一个对象或主问题，同一事实只由一个节点主承载。
-- 节点、组件和可见文本的数量上限以“协议约束”中的当前卡片容量预算为准。
-- 只展示状态使用 Text，表达动作使用 Button；不要使用 Checkbox 或 List。
-- 长说明、第三层元信息、重复标签、第二主任务和额外动作不进入卡片。
-- 字段摘要中的 units 已由脚本计算。优先保留标题、主值/状态和必要动作，再保留一个短 support；放不下时删除 meta、次要 asset 和弱 support。
+- 只展示状态使用 Text，表达动作使用 Button。selection/item 可以作为 Text 的语义角色，不表示生成 Checkbox；如果需求要求逐项勾选，只能表达为非交互选择摘要，不得伪造可点击控件。
+- `primary`、`status`、`warning`、`error`、`metric` 和 `action` 都是受保护单行角色，不能承载长说明或用“事实 A · 事实 B”拼接多个事实。
+- `warning` 表示需要强调的危险/警告文案，`error` 表示错误文案；只能使用语义角色，不输出具体颜色。
+- 绑定字段的 sample 和 units 是布局测量依据，不是可以忽略的描述；sample 的 units 大于 6 时视为长文本，不能绑定到 `primary`、`status`、`warning`、`error` 或 `metric`，应改用 `support` 或删除。
+- 时间、日期和 `HH:MM` 字段默认使用 `metric` 或 `support`，不要使用 `primary` 的大号英雄样式；只有极短的纯数字主值才使用 `primary`。
+- 例如 sample 为“今日已用 42 分钟”的动态字段必须使用 `support`，不能放入 `primary`；不要因为字段描述写着“主数值”就忽略 sample 的 units。
+- `primary` 只用于短数值或短状态，不用于会议标题、完整说明或长动态文案。优先保留标题、唯一主值/主状态和必要动作，再保留一个短 support。较长动态字段优先使用 `support`；如果用户要求一行，必须缩短或删除低优先级字段。
+- 2x2 title 最多 6 个中文等价单位，2x4 title 最多 10 个；Button 标签分别最多 4/6 个中文等价单位。放不下时缩短文案，不生成第二行或样式参数。
 
-主题和 SVG：
-- 模型只选择主题名，禁止输出任何具体颜色。编译器会为卡片根容器和主按钮应用该主题的多停靠渐变；通过主题匹配场景气质，不要用额外节点或样式模拟背景装饰。
-- neutral-light 是默认通用主题；ambient-light 用于天气、环境、健康或设备；focus-dark 仅用于睡眠、专注、音乐或明确夜间场景。
-- Image 只能通过 ASC asset=N 引用 CASE_CONTEXT.assets 中的本地 SVG；禁止 PNG、网络图、base64、emoji、src 路径和素材颜色。
-- SVG 尺寸、objectFit 和 fillColor 全部由编译器按主题和角色生成。
+主题和素材：
+- 只能选择 POLICY_CONTEXT.themes 中的主题名；不要输出具体颜色或渐变。
+- Image 只能通过 ASC 的 asset=N 引用 REFERENCE_CONTEXT.assets 中的索引，不输出 src、bindTo、PNG、网络图、base64、emoji 或素材颜色。
+- 编译器会根据主题、角色和 profile 推断所有具体样式。
 
-ASC：
-- 使用 Component node_id key=value 单行语法，只列有语义补充的节点，并严格遵循 ALT 前序顺序。ASC 属性按空白分隔；任何包含空格、制表符或换行的静态字符串，必须作为一个 JSON 双引号字符串 token，并按 JSON 规则转义。
-- Text：text=静态文案、bind=/路径，复杂表达式才用 expr。bind 必须逐字符等于 CASE_CONTEXT.bindableFields 中的一个 path；绝不能绑定对象、数组、父路径、猜测路径或路径前缀。含空格的文案必须写成例如 text="今日已用 42 分钟"。
-- Image：只用 asset=N。
-- Progress：value=/路径、total=/路径。
-- Button：label=短文案 event=N；含空格的标签必须写成例如 label="Open calendar" event=0。Checkbox：label、value、group、bind、event=N。
-- event=N 和 asset=N 只引用 CASE_CONTEXT 中的索引，不复制事件、素材路径或颜色。
-- Progress 的 value 和 total 也必须逐字符等于 CASE_CONTEXT.bindableFields 中的标量叶子 path；缺少两个合法数值字段时不要生成 Progress。
-- ASC 禁止 id、component、children、styles、尺寸、字体、颜色、圆角、间距、DataModel 和操作符。
+ASC 语法：
+- 每行使用 Component node_id key=value，只列有语义补充的节点，并严格遵循 ALT 前序顺序。
+- 属性按空白分隔。任何包含空格、制表符或换行的静态 text/label 必须是一个 JSON 双引号字符串，并按 JSON 规则转义，例如 text="今日已用 42 分钟"、label="打开设置"。
+- Text 只能使用 text=静态文案、bind=/路径或完整 expr；bind 必须逐字符等于 REFERENCE_CONTEXT.bindableFields 中的标量叶子 path。
+- Image 只能使用 asset=N；Button 的 label 必须是模型写出的短静态文案，不能使用 bind、expr 或 `/path`，并且必须同时写 event=N；Progress 才能使用 value=/路径和 total=/路径。
+- bind、value、total 不得指向对象、数组、父路径或猜测路径；asset=N 和 event=N 只能使用 REFERENCE_CONTEXT 中的索引。
+- ASC 不复制完整事件、素材路径、DataModel、样式、尺寸或颜色。
 
-示例：
+严格正例（仅用于展示尺寸对应的结构，不是本卡事实）：
+2x2：
 <alt>
 Column root card=2x2 theme=neutral-light
   Row header
@@ -121,18 +224,55 @@ Column root card=2x2 theme=neutral-light
 <asc>
 Image battery_icon asset=0
 Text title text=低电模式
-Text battery_value bind=/battery/levelText
+Text battery_value text=20%
 Button action_button label=立即省电 event=0
 </asc>
 
-TaskSpec（完整嵌入，作为本卡事实源，不是输出段）：
-{{TASK_SPEC_JSON}}
+2x2 两个事实和动作：
+<alt>
+Column root card=2x2 theme=neutral-light
+  Row header
+    Image alert_icon role=asset
+    Text title role=title
+  Column status_group
+    Text primary_value role=primary
+    Text warning role=warning
+  Button action_button role=action
+</alt>
+<asc>
+Image alert_icon asset=0
+Text title text=防沉迷
+Text primary_value text=42分钟
+Text warning text=超时风险
+Button action_button label=去设置 event=0
+</asc>
 
-协议约束（脚本按当前卡片尺寸与配置生成）：
-{{STATIC_CONTEXT}}
+2x4：
+<alt>
+Column root card=2x4 theme=ambient-light
+  Row body
+    Column primary_group
+      Text title role=title
+      Text primary_value role=primary
+    Column secondary_group
+      Text status role=status
+      Button action_button role=action
+</alt>
+<asc>
+Text title text=设备状态
+Text primary_value text=42
+Text status text="已开启"
+Button action_button label="打开设置" event=0
+</asc>
 
-本卡上下文 CASE_CONTEXT（脚本从 TaskSpec 推导的安全引用索引）：
-{{CASE_CONTEXT_JSON}}
+TASK_CONTEXT（任务元数据，不含原始事件对象和素材路径）：
+{{TASK_CONTEXT_JSON}}
+
+POLICY_CONTEXT（由 profile 和自动转换能力唯一生成）：
+{{POLICY_CONTEXT_JSON}}
+
+REFERENCE_CONTEXT（唯一合法的绑定、素材和事件索引入口）：
+{{REFERENCE_CONTEXT_JSON}}
 """
 
 
@@ -334,14 +474,17 @@ def schema_field_summaries(schema: Any, pointer: str = "") -> list[dict[str, Any
     if schema.get("type") == "array" and isinstance(schema.get("items"), dict):
         fields.extend(schema_field_summaries(schema["items"], pointer + "/0"))
         return fields
-    if "sampleValue" not in schema and pointer == "":
+    if "sampleValue" not in schema:
+        # TaskSpec schemas commonly use named grouping objects without a JSON
+        # Schema `type`/`properties` wrapper (for example `{ "guard": {
+        # ... } }`).  Continue walking those groups at every depth; stopping
+        # once pointer is non-empty silently removed all real bindable fields
+        # from REFERENCE_CONTEXT.
         for key, child in schema.items():
-            if key in {"type", "description"}:
+            if key in {"type", "description", "maxLength"}:
                 continue
             escaped = str(key).replace("~", "~0").replace("/", "~1")
             fields.extend(schema_field_summaries(child, pointer + "/" + escaped))
-        return fields
-    if "sampleValue" not in schema:
         return fields
     sample = schema["sampleValue"]
     if sample is None or isinstance(sample, (dict, list)):
@@ -363,7 +506,7 @@ def schema_field_summaries(schema: Any, pointer: str = "") -> list[dict[str, Any
 
 
 def case_context(spec: dict[str, Any]) -> dict[str, Any]:
-    """Per-case safe reference indexes derived from the complete TaskSpec."""
+    """Return the only model-visible indexes for bindings, assets, and events."""
     events = []
     for index, candidate in enumerate(spec.get("eventCandidates", [])):
         if not isinstance(candidate, dict):
@@ -375,22 +518,62 @@ def case_context(spec: dict[str, Any]) -> dict[str, Any]:
         for index, candidate in enumerate(spec.get("assetCandidates", []))
         if isinstance(candidate, dict)
     ]
+    safe_slots: dict[str, dict[str, int]] = {}
+    slots = spec.get("presentationSlots")
+    if isinstance(slots, dict):
+        for slot_id, slot in slots.items():
+            if not isinstance(slot_id, str) or not isinstance(slot, dict):
+                continue
+            safe_slot: dict[str, int] = {}
+            for key in ("assetCandidate", "eventCandidate"):
+                value = slot.get(key)
+                if isinstance(value, int) and not isinstance(value, bool):
+                    safe_slot[key] = value
+            if safe_slot:
+                safe_slots[slot_id] = safe_slot
     return {
         "bindableFields": schema_field_summaries(spec["dataModelSchema"]),
         "events": events,
         "assets": assets,
-        **({"presentationSlots": spec["presentationSlots"]} if "presentationSlots" in spec else {}),
+        **({"presentationSlots": safe_slots} if safe_slots else {}),
     }
 
 
+def task_context(spec: dict[str, Any]) -> dict[str, Any]:
+    """Return task metadata without duplicating the user intent or raw candidates."""
+    return {
+        "cardSize": spec["size"],
+        "eventCandidateCount": len(spec.get("eventCandidates", [])),
+        "assetCandidateCount": len(spec.get("assetCandidates", [])),
+        "presentationSlotIds": sorted(spec.get("presentationSlots", {}).keys())
+        if isinstance(spec.get("presentationSlots"), dict)
+        else [],
+    }
+
+
+def reference_context(spec: dict[str, Any]) -> dict[str, Any]:
+    """Descriptive alias for the model-facing safe reference context."""
+    return case_context(spec)
+
+
 def canonical_task_spec_json(spec: dict[str, Any]) -> str:
-    """Embed the original TaskSpec verbatim, preserving every field."""
+    """Serialize the full TaskSpec for internal callers, never for the model prompt."""
     return json.dumps(spec, ensure_ascii=False, indent=2)
 
 
+def task_context_json(spec: dict[str, Any]) -> str:
+    """Serialize the model-facing task metadata context."""
+    return json.dumps(task_context(spec), ensure_ascii=False, indent=2)
+
+
 def case_context_json(spec: dict[str, Any]) -> str:
-    """Derived per-case context (safe bindings, events, assets, and slots)."""
-    return json.dumps(case_context(spec), ensure_ascii=False, indent=2)
+    """Serialize the model-facing reference context."""
+    return json.dumps(reference_context(spec), ensure_ascii=False, indent=2)
+
+
+def reference_context_json(spec: dict[str, Any]) -> str:
+    """Serialize the model-facing reference context under its explicit name."""
+    return case_context_json(spec)
 
 
 def read_user_query(path: Path | None, spec: dict[str, Any]) -> str:
@@ -454,16 +637,16 @@ def build_request(
     assistant_content: str,
     rejected_response: str | None = None,
 ) -> dict[str, Any]:
-    task_spec_json = canonical_task_spec_json(spec)
-    context_json = case_context_json(spec)
-    static_context = build_static_context(str(spec["size"]))
+    task_facts_json = task_context_json(spec)
+    policy_context = build_policy_context(str(spec["size"]))
+    references_json = reference_context_json(spec)
     messages: list[dict[str, str]] = [
         {
             "role": "system",
             "content": (
-                SYSTEM_PROMPT.replace("{{TASK_SPEC_JSON}}", task_spec_json)
-                .replace("{{STATIC_CONTEXT}}", static_context)
-                .replace("{{CASE_CONTEXT_JSON}}", context_json)
+                SYSTEM_PROMPT.replace("{{TASK_CONTEXT_JSON}}", task_facts_json)
+                .replace("{{POLICY_CONTEXT_JSON}}", policy_context)
+                .replace("{{REFERENCE_CONTEXT_JSON}}", references_json)
             ),
         },
         {
@@ -475,7 +658,10 @@ def build_request(
             "content": assistant_content,
         },
     ]
-    request: dict[str, Any] = {"messages": messages}
+    # Keep the full TaskSpec as local dataset metadata. The batch runner uses
+    # it to materialize task.taskSpec.json, while the API receives only
+    # `messages`; this keeps the model-facing context layered and minimal.
+    request: dict[str, Any] = {"taskSpec": spec, "messages": messages}
     if rejected_response is not None:
         request["rejected_response"] = rejected_response
     return request

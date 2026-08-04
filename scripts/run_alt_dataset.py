@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """按 JSONL 数据集批量调用大模型 chat/completions API 并解析 ALT/ASC 输出。
 
-每个 JSONL 行形如 ``{"messages":[system, user, assistant]}`，脚本会：
+每个 JSONL 行形如 ``{"taskSpec": {...}, "messages":[system, user, assistant]}`，脚本会：
 
 1. 解析 messages，剥离 assistant 后构造请求体（仅保留 system + user）。
-2. 从 system content 末尾提取嵌入的 TaskSpec JSON，落盘为 ``task.taskSpec.json``。
+2. 优先从顶层 ``taskSpec`` 元数据读取完整 TaskSpec；旧 JSONL 没有该字段时，
+   再从 system content 兼容提取，落盘为 ``task.taskSpec.json``。
 3. 取 user content 作为 query，落盘为 ``query.txt``。
 4. 用 .env.toml 中指定段位的模型配置调用 chat/completions，失败时按指数退避重试。
 5. 解析响应中的 ``<alt>...</alt>`` 与 ``<asc>...</asc>``，落盘为 ``card.alt.txt`` / ``card.asc.txt``。
@@ -105,6 +106,7 @@ class CaseItem:
     query: str
     system_content: str
     messages: list[dict]
+    task_spec: dict[str, Any] | None = None
 
     @property
     def directory_name(self) -> str:
@@ -351,6 +353,13 @@ def load_cases(
                 raise ValueError(f"{jsonl_path}:{line_no} 缺少 system content")
             if not user_content:
                 raise ValueError(f"{jsonl_path}:{line_no} 缺少 user content")
+            has_task_spec = "taskSpec" in payload
+            task_spec = payload.get("taskSpec")
+            if has_task_spec and not _is_full_taskspec(task_spec):
+                raise ValueError(
+                    f"{jsonl_path}:{line_no} 的顶层 taskSpec 不是完整 TaskSpec，"
+                    "必须包含 userQuery/size/dataModelSchema/eventCandidates/assetCandidates"
+                )
             stripped = strip_assistant(messages)
             if not any(m["role"] == "system" for m in stripped):
                 raise ValueError(f"{jsonl_path}:{line_no} 缺少 system 消息")
@@ -363,6 +372,7 @@ def load_cases(
                     query=user_content,
                     system_content=system_content,
                     messages=stripped,
+                    task_spec=task_spec,
                 )
             )
     if start is not None or end is not None or (limit is not None and limit > 0):
@@ -533,7 +543,11 @@ async def run_case(
             case_dir.mkdir(parents=True, exist_ok=True)
 
             try:
-                taskspec = extract_taskspec_from_system(case.system_content)
+                taskspec = (
+                    case.task_spec
+                    if case.task_spec is not None
+                    else extract_taskspec_from_system(case.system_content)
+                )
             except Exception as exc:
                 elapsed = time.perf_counter() - started_at
                 if args.debug:

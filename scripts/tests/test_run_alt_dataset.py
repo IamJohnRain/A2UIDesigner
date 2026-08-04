@@ -70,7 +70,7 @@ def make_args(force: bool) -> argparse.Namespace:
     )
 
 
-def make_case(index: int = 1) -> runner.CaseItem:
+def make_case(index: int = 1, include_task_spec: bool = True) -> runner.CaseItem:
     spec = make_spec()
     system = new_style_system(spec)
     return runner.CaseItem(
@@ -82,6 +82,7 @@ def make_case(index: int = 1) -> runner.CaseItem:
             {"role": "system", "content": system},
             {"role": "user", "content": "显示低电状态并提供省电操作"},
         ],
+        task_spec=spec if include_task_spec else None,
     )
 
 
@@ -106,6 +107,41 @@ async def _run_case(case, args, output_dir):
     tracker = runner._InFlight()
     tracker.configure(1, 1)
     return await runner.run_case(case, args, env, output_dir, sem, tracker)
+
+
+class LoadCasesTaskSpecTest(unittest.TestCase):
+    def test_load_cases_prefers_top_level_task_spec_metadata(self) -> None:
+        spec = make_spec()
+        payload = {
+            "taskSpec": spec,
+            "messages": [
+                {"role": "system", "content": "分层上下文，不含完整 TaskSpec"},
+                {"role": "user", "content": spec["userQuery"]},
+                {"role": "assistant", "content": "<alt>old</alt><asc>old</asc>"},
+            ],
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "requests.jsonl"
+            path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
+            cases = runner.load_cases(path, None, None, None)
+
+        self.assertEqual(len(cases), 1)
+        self.assertEqual(cases[0].task_spec, spec)
+        self.assertEqual([message["role"] for message in cases[0].messages], ["system", "user"])
+
+    def test_load_cases_rejects_incomplete_top_level_task_spec(self) -> None:
+        payload = {
+            "taskSpec": {"userQuery": "q", "size": "2x2"},
+            "messages": [
+                {"role": "system", "content": "system"},
+                {"role": "user", "content": "q"},
+            ],
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "requests.jsonl"
+            path.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "完整 TaskSpec"):
+                runner.load_cases(path, None, None, None)
 
 
 class ExtractTaskSpecTest(unittest.TestCase):
@@ -150,6 +186,20 @@ class ExtractTaskSpecTest(unittest.TestCase):
 
 
 class RunCaseTaskSpecTest(unittest.TestCase):
+    def test_run_case_falls_back_to_legacy_system_taskspec(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            output_dir = Path(temporary)
+            case = make_case(include_task_spec=False)
+            with mock.patch.object(runner, "call_model", new=_fake_call_model):
+                result = asyncio.run(_run_case(case, make_args(force=False), output_dir))
+            self.assertTrue(result.ok, result.error)
+            saved = json.loads(
+                (output_dir / case.directory_name / runner.TASKSPEC_FILE_NAME).read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(saved, make_spec())
+
     def test_run_case_preserves_existing_taskspec(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             output_dir = Path(temporary)

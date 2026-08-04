@@ -264,6 +264,119 @@ class AutomaticAltTest(unittest.TestCase):
             any("visible text budget" in issue.message and issue.severity == "error" for issue in issues)
         )
 
+    def test_nested_named_groups_are_exposed_as_bindable_fields(self) -> None:
+        spec = task_spec()
+        spec["dataModelSchema"] = {
+            "guard": {
+                "title": {
+                    "type": "string",
+                    "description": "卡片标题",
+                    "sampleValue": "防沉迷",
+                }
+            }
+        }
+
+        fields = request_builder.case_context(spec)["bindableFields"]
+
+        self.assertEqual([field["path"] for field in fields], ["/guard/title"])
+
+    def test_2x4_row_rounding_preserves_integer_width_budget(self) -> None:
+        document = converter.AltDocument(
+            converter.AltNode(
+                "Column",
+                "root",
+                {"card": "2x4", "theme": "focus-dark"},
+            )
+        )
+        body = converter.AltNode("Row", "body", {})
+        left = converter.AltNode("Column", "left_group", {})
+        left.children = [
+            converter.AltNode("Text", "title", {"role": "title"}),
+            converter.AltNode("Column", "items", {}),
+        ]
+        left.children[1].children = [
+            converter.AltNode("Text", "item_one", {"role": "selection"}),
+            converter.AltNode("Text", "item_two", {"role": "selection"}),
+            converter.AltNode("Text", "item_three", {"role": "selection"}),
+        ]
+        right = converter.AltNode("Column", "right_group", {})
+        right.children = [
+            converter.AltNode("Text", "warning", {"role": "warning"}),
+            converter.AltNode("Text", "count", {"role": "primary"}),
+            converter.AltNode("Button", "open_app", {"role": "action"}),
+        ]
+        body.children = [left, right]
+        document.root.children = [body]
+        spec = task_spec(size="2x4")
+        asc = {
+            "title": {"text": "请选择项目"},
+            "item_one": {"text": "项目一"},
+            "item_two": {"text": "项目二"},
+            "item_three": {"text": "项目三"},
+            "warning": {"text": "危险提示"},
+            "count": {"text": "数量变化"},
+            "open_app": {"label": "打开应用", "event": 0},
+        }
+
+        compiled, issues = converter.auto_layout_document(document, spec, asc)
+        issues += converter.validate_layout(compiled, "2x4")
+
+        self.assertFalse(
+            [issue for issue in issues if issue.severity == "error"],
+            [issue.message for issue in issues],
+        )
+        row = next(node for node in converter.alt_nodes(compiled) if node.node_id == "body")
+        child_widths = [converter.parse_box(child.attrs["box"])[0] for child in row.children]
+        self.assertLessEqual(sum(child_widths) + int(row.attrs["gap"]), 276)
+
+    def test_warning_role_uses_theme_warning_color(self) -> None:
+        document = converter.AltDocument(
+            converter.AltNode(
+                "Column",
+                "root",
+                {"card": "2x2", "theme": "focus-dark"},
+            )
+        )
+        document.root.children = [
+            converter.AltNode("Text", "warning", {"role": "warning"}),
+            converter.AltNode("Button", "action_button", {"role": "action"}),
+        ]
+        spec = task_spec()
+        asc = {
+            "warning": {"text": "超时风险"},
+            "action_button": {"label": "去设置", "event": 0},
+        }
+
+        compiled, issues = converter.auto_layout_document(document, spec, asc)
+        issues += converter.validate_layout(compiled, "2x2")
+
+        self.assertFalse([issue for issue in issues if issue.severity == "error"])
+        warning = next(node for node in converter.alt_nodes(compiled) if node.node_id == "warning")
+        self.assertEqual(
+            warning.attrs["fg"],
+            converter.THEME_CONFIG["themes"]["focus-dark"]["status"]["warning"],
+        )
+
+    def test_button_label_rejects_data_model_binding(self) -> None:
+        document = converter.AltDocument(
+            converter.AltNode(
+                "Column",
+                "root",
+                {"card": "2x2", "theme": "neutral-light"},
+            )
+        )
+        document.root.children = [
+            converter.AltNode("Button", "action_button", {"role": "action"})
+        ]
+        with self.assertRaisesRegex(
+            converter.ConversionError, "Button label must be a short static string"
+        ):
+            converter.validate_auto_asc(
+                document,
+                task_spec(),
+                {"action_button": {"label": "/mode/actionLabel", "event": 0}},
+            )
+
     def test_legacy_geometry_document_remains_readable_but_is_not_auto(self) -> None:
         root = converter.AltNode(
             "Column",
@@ -414,20 +527,36 @@ class AutomaticAltTest(unittest.TestCase):
             )
 
             system = request["messages"][0]["content"]
+            user = request["messages"][1]["content"]
             assistant = request["messages"][2]["content"]
-            # The original TaskSpec remains the complete source of truth in the
-            # prompt, including fields intentionally omitted from CASE_CONTEXT.
-            self.assertIn('"dataModelSchema"', system)
-            self.assertIn(spec["assetCandidates"][0]["src"], system)
-            self.assertIn('"intentName"', system)
-            marker = "TaskSpec（完整嵌入，作为本卡事实源，不是输出段）："
-            task_spec_start = system.index(marker) + len(marker)
-            embedded_spec, _ = json.JSONDecoder().raw_decode(
-                system[system.index("{", task_spec_start) :]
-            )
-            self.assertEqual(embedded_spec, spec)
+            self.assertEqual(request["taskSpec"], spec)
+            self.assertEqual(user, spec["userQuery"])
 
-            # CASE_CONTEXT is a safe reference index, not a second TaskSpec.
+            # TASK_CONTEXT contains metadata only; raw candidate objects stay
+            # outside the model prompt.
+            task_marker = "TASK_CONTEXT（任务元数据，不含原始事件对象和素材路径）："
+            task_start = system.index(task_marker) + len(task_marker)
+            task_context, _ = json.JSONDecoder().raw_decode(
+                system[system.index("{", task_start) :]
+            )
+            self.assertEqual(task_context["cardSize"], "2x2")
+            self.assertNotIn(spec["userQuery"], system)
+            self.assertNotIn(spec["assetCandidates"][0]["src"], system)
+            self.assertNotIn('"intentName"', system)
+
+            policy_marker = "POLICY_CONTEXT（由 profile 和自动转换能力唯一生成）："
+            policy_start = system.index(policy_marker) + len(policy_marker)
+            policy, _ = json.JSONDecoder().raw_decode(
+                system[system.index("{", policy_start) :]
+            )
+            self.assertEqual(policy["card"]["orientation"], "square")
+            self.assertEqual(policy["hardProtocol"]["rootComponent"], "Column")
+            self.assertFalse(policy["hardProtocol"]["rootRowAllowed"])
+            self.assertEqual(policy["axes"]["Row"], "horizontal")
+            self.assertFalse(policy["limits"]["maxCheckbox"])
+            self.assertFalse(policy["limits"]["maxLists"])
+
+            # REFERENCE_CONTEXT is the only model-facing reference index.
             context = request_builder.case_context(loaded)
             fields = context["bindableFields"]
             self.assertEqual(len(fields), 1)
@@ -435,12 +564,13 @@ class AutomaticAltTest(unittest.TestCase):
             self.assertEqual(fields[0]["description"], "当前剩余电量文案")
             self.assertNotIn("args", context["events"][0])
             self.assertNotIn("format", context["assets"][0])
+            self.assertIn("REFERENCE_CONTEXT（唯一合法的绑定、素材和事件索引入口）：", system)
             self.assertIn('"bindableFields": [', system)
             self.assertIn("neutral-light", system)
-            self.assertNotIn('"themes": [', system)
-            self.assertNotIn('"limits": {', system)
-            self.assertIn("- 2x2 容量预算", system)
-            self.assertNotIn("- 2x4 容量预算", system)
+            self.assertIn("严格正例", system)
+            self.assertIn('"orientation": "square"', system)
+            self.assertIn("Row 横向分配空间", system)
+            self.assertNotIn("Checkbox：label", system)
             self.assertNotIn("maxVisibleListItems", system)
             self.assertNotIn("{{", system)
             self.assertNotIn("<think>", assistant)
@@ -448,8 +578,34 @@ class AutomaticAltTest(unittest.TestCase):
             self.assertIn("<alt>\nColumn root card=2x2 theme=neutral-light", assistant)
             self.assertIn("<asc>\nImage battery_icon asset=0", assistant)
 
+    def test_2x4_policy_uses_horizontal_groups_without_changing_root_protocol(self) -> None:
+        spec = task_spec(size="2x4")
+        request = request_builder.build_request(spec, "展示横向设备状态卡片", "")
+        system = request["messages"][0]["content"]
+        marker = "POLICY_CONTEXT（由 profile 和自动转换能力唯一生成）："
+        start = system.index(marker) + len(marker)
+        policy, _ = json.JSONDecoder().raw_decode(system[system.index("{", start) :])
+
+        self.assertEqual(policy["card"]["orientation"], "landscape")
+        self.assertEqual(policy["card"]["canvas"], {"width": 300.0, "height": 140.0})
+        self.assertEqual(policy["hardProtocol"]["rootComponent"], "Column")
+        self.assertTrue(policy["axes"]["rowChildrenMayBeContainers"])
+        self.assertIn("Row", policy["hardProtocol"]["allowedComponents"])
+        self.assertIn("Column", policy["hardProtocol"]["allowedComponents"])
+        self.assertIn("两个独立信息组", policy["shapeStrategy"])
+        self.assertIn("Column primary_group", system)
+        self.assertEqual(policy["textRules"]["maxLines"]["status"], 1)
+        self.assertIn("status", policy["textRules"]["protectedSingleLineRoles"])
+        self.assertFalse(policy["capabilities"]["selection"]["interactive"])
+
     def test_case_context_excludes_null_and_non_scalar_bindings(self) -> None:
         spec = task_spec()
+        spec["presentationSlots"] = {
+            "battery_icon": {
+                "source": "resources/base/media/battery_leaf_fill.svg",
+                "assetCandidate": 0,
+            }
+        }
         spec["dataModelSchema"]["properties"]["pending"] = {
             "type": "string",
             "description": "尚未提供的状态文案",
@@ -470,6 +626,10 @@ class AutomaticAltTest(unittest.TestCase):
         self.assertTrue(
             all("bindable" not in field for field in context["bindableFields"])
         )
+        self.assertEqual(
+            context["presentationSlots"], {"battery_icon": {"assetCandidate": 0}}
+        )
+        self.assertNotIn("source", json.dumps(context, ensure_ascii=False))
 
     def test_task_spec_rejects_out_of_range_presentation_slot_reference(self) -> None:
         spec = task_spec()

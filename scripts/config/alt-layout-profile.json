@@ -45,11 +45,35 @@
     "denseGap": 4,
     "allowed": [2, 4, 6, 8, 10, 12, 14, 16]
   },
+  "textRules": {
+    "maxLines": {
+      "title": 2,
+      "primary": 1,
+      "status": 1,
+      "warning": 1,
+      "error": 1,
+      "metric": 1,
+      "support": 2,
+      "meta": 2,
+      "action": 1,
+      "default": 1
+    },
+    "protectedSingleLineRoles": [
+      "primary",
+      "status",
+      "warning",
+      "error",
+      "metric",
+      "action"
+    ]
+  },
   "typography": {
     "regular": {
       "title": [14, 600],
       "primary": [32, 500],
       "status": [14, 500],
+      "warning": [14, 500],
+      "error": [14, 500],
       "metric": [20, 500],
       "support": [12, 400],
       "meta": [10, 400],
@@ -60,6 +84,8 @@
       "title": [14, 600],
       "primary": [20, 500],
       "status": [14, 500],
+      "warning": [14, 500],
+      "error": [14, 500],
       "metric": [18, 500],
       "support": [12, 400],
       "meta": [10, 400],

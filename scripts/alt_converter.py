@@ -538,6 +538,10 @@ def node_role(node_id: str, component: str) -> str:
         return "title"
     if any(token in lowered for token in ("primary", "hero", "main_value")):
         return "primary"
+    if any(token in lowered for token in ("warning", "alert", "risk")):
+        return "warning"
+    if any(token in lowered for token in ("error", "failure")):
+        return "error"
     if any(token in lowered for token in ("status", "badge")):
         return "status"
     if any(token in lowered for token in ("support", "caption", "subtitle", "hint", "meta", "time", "date")):
@@ -548,7 +552,7 @@ def node_role(node_id: str, component: str) -> str:
 
 
 def should_protect(node_id: str, component: str, role: str) -> bool:
-    if component == "Button" or role in {"title", "primary", "status", "action"}:
+    if component == "Button" or role == "title" or role in configured_single_line_roles():
         return True
     lowered = node_id.lower()
     return any(token in lowered for token in ("time", "date", "price", "count", "total", "value"))
@@ -1087,6 +1091,12 @@ def validate_auto_asc(
             raise ConversionError(f"{node.node_id}: auto ASC Progress requires value and total")
         if node.component == "Button" and not all(key in attrs for key in ("label", "event")):
             raise ConversionError(f"{node.node_id}: auto ASC Button requires label and event=N")
+        if node.component == "Button":
+            label = attrs.get("label")
+            if not isinstance(label, str) or label.startswith("/") or is_dynamic(label):
+                raise ConversionError(
+                    f"{node.node_id}: auto ASC Button label must be a short static string, not a binding"
+                )
 
         for key in ("text", "label", "value", "group"):
             if key in attrs and not isinstance(attrs[key], str):
@@ -1416,8 +1426,6 @@ def validate_auto_protocol(document: AltDocument, task_size: str | None = None) 
     visit(root, 1, True)
     if primary_count > 1:
         issues.append(ValidationIssue("error", root.node_id, "auto ALT allows only one role=primary node"))
-    if primary_count == 0:
-        issues.append(ValidationIssue("warning", root.node_id, "auto ALT has no role=primary node"))
     return issues
 
 
@@ -1912,6 +1920,27 @@ def auto_role(node: AltNode) -> str:
     return role if isinstance(role, str) and role else node_role(node.node_id, node.component)
 
 
+def configured_single_line_roles() -> set[str]:
+    rules = LAYOUT_PROFILE.get("textRules", {})
+    roles = rules.get("protectedSingleLineRoles", []) if isinstance(rules, dict) else []
+    return {role for role in roles if isinstance(role, str)}
+
+
+def configured_text_max_lines(role: str, content: str) -> int:
+    rules = LAYOUT_PROFILE.get("textRules", {})
+    max_lines = rules.get("maxLines", {}) if isinstance(rules, dict) else {}
+    configured = (
+        max_lines.get(role, max_lines.get("default", 1))
+        if isinstance(max_lines, dict)
+        else 1
+    )
+    try:
+        configured = max(1, int(configured))
+    except (TypeError, ValueError):
+        configured = 1
+    return configured if configured > 1 and text_units(content) > 6 else 1
+
+
 def auto_semantic_text(
     node: AltNode,
     asc: dict[str, dict[str, Any]],
@@ -2000,6 +2029,13 @@ def auto_font(role: str, content: str, density: str) -> tuple[int, int]:
             font_size = 18
         elif units > 3:
             font_size = 20
+        elif ":" in content or any(token in content for token in ("分钟", "小时", "天")):
+            # A compact time/duration is still a primary-sized fact, but the
+            # 32fp hero treatment would consume 36vp of vertical space in a
+            # 2x2 status group.  Keep the semantic role while using the safe
+            # metric size; the model is still instructed to prefer metric or
+            # support for time fields.
+            font_size = 20
     return font_size, font_weight
 
 
@@ -2039,6 +2075,43 @@ def allocate_axis(preferred: list[float], minimum: list[float], available: float
         pref - shrink_needed * room / capacity_total
         for pref, room in zip(preferred, capacity)
     ]
+
+
+def round_axis_dimensions(
+    values: list[float], minimum: list[float], available: float
+) -> list[int]:
+    """Round sibling dimensions while preserving the parent's integer budget.
+
+    Automatic layout is measured in floats but exported boxes use integer vp.
+    Independently applying ceil() to every Row child can therefore add one vp
+    per child and make an otherwise feasible row fail validation.  Start by
+    rounding up, then take the excess from children that have slack above their
+    own rounded minimum.  The final fallback keeps the parent budget intact
+    when the minimums themselves cannot all be represented as integers.
+    """
+    if not values:
+        return []
+    target = max(len(values), int(math.floor(available + 1e-9)))
+    rounded = [max(1, rounded_dimension(value)) for value in values]
+    minimum_rounded = [max(1, rounded_dimension(value)) for value in minimum]
+    excess = sum(rounded) - target
+    while excess > 0:
+        candidates = [
+            index
+            for index, value in enumerate(rounded)
+            if value > minimum_rounded[index]
+        ]
+        if not candidates:
+            candidates = [index for index, value in enumerate(rounded) if value > 1]
+        if not candidates:
+            break
+        index = max(candidates, key=lambda item: rounded[item] - minimum_rounded[item])
+        rounded[index] -= 1
+        excess -= 1
+    if sum(rounded) < target:
+        # Preserve the preferred distribution's last-child fill behavior.
+        rounded[-1] += target - sum(rounded)
+    return rounded
 
 
 def auto_layout_document(
@@ -2110,7 +2183,7 @@ def auto_layout_document(
         if node.component == "Text":
             content = semantic_text.get(node.node_id, "信息")
             font_size, font_weight = auto_font(role, content, density)
-            maximum_lines = 2 if role in {"title", "support", "default"} and text_units(content) > 6 else 1
+            maximum_lines = configured_text_max_lines(role, content)
             preferred_width = estimated_text_width(content, font_size, font_weight, 1.10)
             line_height = font_size + 4
             minimum_width = max(font_size * 2.0, preferred_width / maximum_lines)
@@ -2228,7 +2301,9 @@ def auto_layout_document(
             if required_lines > measure_value.max_lines:
                 diagnostics.append(
                     ValidationIssue(
-                        "error" if role in {"title", "primary", "status", "action"} else "warning",
+                        "error"
+                        if role == "title" or role in configured_single_line_roles()
+                        else "warning",
                         node.node_id,
                         f"text {measure_value.content!r} needs {required_lines} lines but role={role} allows {measure_value.max_lines}",
                     )
@@ -2249,10 +2324,20 @@ def auto_layout_document(
                     "font": f"{int(measure_value.font_size)}/{measure_value.font_weight}",
                     "lines": lines,
                     "overflow": "none",
-                    "fg": theme["text"]["primary" if role in {"title", "primary", "status", "metric"} else "secondary" if role == "support" else "tertiary"],
+                    "fg": (
+                        theme["status"][role]
+                        if role in {"warning", "error"}
+                        else theme["text"][
+                            "primary"
+                            if role in {"title", "primary", "status", "metric"}
+                            else "secondary"
+                            if role == "support"
+                            else "tertiary"
+                        ]
+                    ),
                 }
             )
-            if role in {"title", "primary", "status"} or should_protect(node.node_id, node.component, role):
+            if should_protect(node.node_id, node.component, role):
                 node.attrs["protect"] = True
         elif node.component == "Button":
             width_value = measure_value.preferred_width
@@ -2375,6 +2460,11 @@ def auto_layout_document(
                 [item.minimum_width for item in child_measures],
                 max(1.0, content_width - gap_total),
             )
+            child_widths = round_axis_dimensions(
+                child_widths,
+                [item.minimum_width for item in child_measures],
+                max(1.0, content_width - gap_total),
+            )
             if sum(item.minimum_width for item in child_measures) + gap_total > content_width + 0.01:
                 diagnostics.append(
                     ValidationIssue(
@@ -2412,6 +2502,11 @@ def auto_layout_document(
                     minimum_heights.append(item.minimum_height)
             child_heights = allocate_axis(
                 preferred_heights,
+                minimum_heights,
+                max(1.0, content_height - gap_total),
+            )
+            child_heights = round_axis_dimensions(
+                child_heights,
                 minimum_heights,
                 max(1.0, content_height - gap_total),
             )
