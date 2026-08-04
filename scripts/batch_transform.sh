@@ -13,6 +13,7 @@ DEFAULT_REJECTED_ASC_NAME="card.MiniMax-M3.asc.txt"
 BASE_DIR_ARG=""
 HFRL_MODE=false
 ALT_MODE=false
+DISABLE_LABEL=false
 ACCEPTED_DSL_NAME=""
 REJECTED_DSL_NAME=""
 ACCEPTED_ALT_NAME=""
@@ -32,6 +33,10 @@ Options:
   --alt                     Enable ALT+ASC request generation with
                             scripts/taskspec_to_alt_chat_completions.py.
                             Without it, the legacy DSL request workflow is unchanged.
+  --disable_label           Do not require label files. Cases missing accepted
+                            ALT/ASC (or accepted/rejected DSL in --hfrl mode)
+                            still get a request file, with the Assistant message
+                            (or rejected_response) left empty/omitted.
   --accepted-alt-name NAME  Accepted ALT filename in --alt mode.
                             Default: ${DEFAULT_ACCEPTED_ALT_NAME}
   --accepted-asc-name NAME  Accepted ASC filename in --alt mode.
@@ -95,6 +100,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     --alt)
       ALT_MODE=true
+      shift
+      ;;
+    --disable_label|--disable-label)
+      DISABLE_LABEL=true
       shift
       ;;
     --accepted-dsl-name)
@@ -226,6 +235,14 @@ fi
 if [ "${HFRL_MODE}" = true ]; then
   echo "HFRL 模式: ON | accepted DSL: ${ACCEPTED_DSL_NAME} | rejected DSL: ${REJECTED_DSL_NAME}"
 fi
+if [ "${DISABLE_LABEL}" = true ]; then
+  echo "--disable_label: ON | missing label files fall back to empty Assistant content"
+fi
+
+DISABLE_LABEL_ARGS=()
+if [ "${DISABLE_LABEL}" = true ]; then
+  DISABLE_LABEL_ARGS=(--disable_label)
+fi
 
 total=0
 ok=0
@@ -250,17 +267,25 @@ for CASE_DIR in "${BASE_DIR}"/*/; do
     ACCEPTED_ALT_PATH="${CASE_DIR}/${ACCEPTED_ALT_NAME}"
     ACCEPTED_ASC_PATH="${CASE_DIR}/${ACCEPTED_ASC_NAME}"
     if [ ! -f "${ACCEPTED_ALT_PATH}" ] || [ ! -f "${ACCEPTED_ASC_PATH}" ]; then
-      echo "skip: ${BASE_DIR}/${CASE_NAME} (missing ${ACCEPTED_ALT_NAME} or ${ACCEPTED_ASC_NAME})"
-      skip=$((skip + 1))
-      continue
+      if [ "${DISABLE_LABEL}" = true ]; then
+        echo "note: ${BASE_DIR}/${CASE_NAME} (missing ${ACCEPTED_ALT_NAME} or ${ACCEPTED_ASC_NAME}; --disable_label, Assistant will be empty)"
+      else
+        echo "skip: ${BASE_DIR}/${CASE_NAME} (missing ${ACCEPTED_ALT_NAME} or ${ACCEPTED_ASC_NAME})"
+        skip=$((skip + 1))
+        continue
+      fi
     fi
     if [ "${HFRL_MODE}" = true ]; then
       REJECTED_ALT_PATH="${CASE_DIR}/${REJECTED_ALT_NAME}"
       REJECTED_ASC_PATH="${CASE_DIR}/${REJECTED_ASC_NAME}"
       if [ ! -f "${REJECTED_ALT_PATH}" ] || [ ! -f "${REJECTED_ASC_PATH}" ]; then
-        echo "skip: ${BASE_DIR}/${CASE_NAME} (missing ${REJECTED_ALT_NAME} or ${REJECTED_ASC_NAME})"
-        skip=$((skip + 1))
-        continue
+        if [ "${DISABLE_LABEL}" = true ]; then
+          echo "note: ${BASE_DIR}/${CASE_NAME} (missing ${REJECTED_ALT_NAME} or ${REJECTED_ASC_NAME}; --disable_label, rejected_response omitted)"
+        else
+          echo "skip: ${BASE_DIR}/${CASE_NAME} (missing ${REJECTED_ALT_NAME} or ${REJECTED_ASC_NAME})"
+          skip=$((skip + 1))
+          continue
+        fi
       fi
     fi
 
@@ -272,6 +297,7 @@ for CASE_DIR in "${BASE_DIR}"/*/; do
           -q "${CASE_DIR}/query.txt" \
           -a "${ACCEPTED_ALT_PATH}" \
           -s "${ACCEPTED_ASC_PATH}" \
+          "${DISABLE_LABEL_ARGS[@]}" \
           --hfrl \
           --rejected-alt "${REJECTED_ALT_PATH}" \
           --rejected-asc "${REJECTED_ASC_PATH}" \
@@ -287,6 +313,7 @@ for CASE_DIR in "${BASE_DIR}"/*/; do
           -q "${CASE_DIR}/query.txt" \
           -a "${ACCEPTED_ALT_PATH}" \
           -s "${ACCEPTED_ASC_PATH}" \
+          "${DISABLE_LABEL_ARGS[@]}" \
           -o "${CASE_DIR}/task.request.json" \
         && ok=$((ok + 1)) \
         || {
@@ -301,14 +328,22 @@ for CASE_DIR in "${BASE_DIR}"/*/; do
     ACCEPTED_DSL_PATH="${CASE_DIR}/${ACCEPTED_DSL_NAME}"
     REJECTED_DSL_PATH="${CASE_DIR}/${REJECTED_DSL_NAME}"
     if [ ! -f "${ACCEPTED_DSL_PATH}" ]; then
-      echo "skip: ${BASE_DIR}/${CASE_NAME} (no ${ACCEPTED_DSL_NAME})"
-      skip=$((skip + 1))
-      continue
+      if [ "${DISABLE_LABEL}" = true ]; then
+        echo "note: ${BASE_DIR}/${CASE_NAME} (no ${ACCEPTED_DSL_NAME}; --disable_label, Assistant will be empty)"
+      else
+        echo "skip: ${BASE_DIR}/${CASE_NAME} (no ${ACCEPTED_DSL_NAME})"
+        skip=$((skip + 1))
+        continue
+      fi
     fi
     if [ ! -f "${REJECTED_DSL_PATH}" ]; then
-      echo "skip: ${BASE_DIR}/${CASE_NAME} (no ${REJECTED_DSL_NAME})"
-      skip=$((skip + 1))
-      continue
+      if [ "${DISABLE_LABEL}" = true ]; then
+        echo "note: ${BASE_DIR}/${CASE_NAME} (no ${REJECTED_DSL_NAME}; --disable_label, rejected_response omitted)"
+      else
+        echo "skip: ${BASE_DIR}/${CASE_NAME} (no ${REJECTED_DSL_NAME})"
+        skip=$((skip + 1))
+        continue
+      fi
     fi
   fi
 
@@ -323,6 +358,7 @@ for CASE_DIR in "${BASE_DIR}"/*/; do
         "${CASE_DIR}/task.taskSpec.json" \
         -q "${CASE_DIR}/query.txt" \
         --genui_dsl "${ACCEPTED_DSL_PATH}" \
+        "${DISABLE_LABEL_ARGS[@]}" \
         --hfrl \
         --rejected-dsl "${REJECTED_DSL_PATH}" \
         -o "${OUTPUT_FILE}" \
@@ -336,6 +372,7 @@ for CASE_DIR in "${BASE_DIR}"/*/; do
         "${CASE_DIR}/task.taskSpec.json" \
         -q "${CASE_DIR}/query.txt" \
         --genui_dsl "${CASE_DIR}/card.dsl.jsonl" \
+        "${DISABLE_LABEL_ARGS[@]}" \
         -o "${CASE_DIR}/task.request.json" \
       && ok=$((ok + 1)) \
       || {

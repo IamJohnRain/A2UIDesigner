@@ -208,6 +208,16 @@ def load_json_config(path: Path) -> dict[str, Any]:
 THEME_CONFIG = load_json_config(THEMES_PATH)
 LAYOUT_PROFILE = load_json_config(LAYOUT_PROFILE_PATH)
 AUTO_THEMES = set(THEME_CONFIG.get("themes", {}))
+GRADIENT_DIRECTIONS = {
+    "RightBottom",
+    "LeftBottom",
+    "RightTop",
+    "LeftTop",
+    "Right",
+    "Left",
+    "Bottom",
+    "Top",
+}
 
 
 def validate_configuration() -> None:
@@ -245,11 +255,51 @@ def validate_configuration() -> None:
         divider = theme.get("divider")
         if not isinstance(divider, str) or not re.fullmatch(r"#[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?", divider):
             raise ConversionError(f"theme {theme_name!r} divider must be #RRGGBB or #AARRGGBB")
+        surface = theme["surface"]
+        for field_name in ("gradient", "border"):
+            if field_name not in surface:
+                raise ConversionError(f"theme {theme_name!r} surface is missing {field_name!r}")
+        validate_theme_gradient(surface["gradient"], f"theme {theme_name!r} surface.gradient")
+        border = surface["border"]
+        if not isinstance(border, str) or not re.fullmatch(
+            r"(?:\d+(?:\.\d+)?)(?:vp|fp|px)?/#[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?",
+            border,
+        ):
+            raise ConversionError(f"theme {theme_name!r} surface.border must be WIDTH/#COLOR")
+        action = theme["action"]
+        if "primaryGradient" not in action:
+            raise ConversionError(f"theme {theme_name!r} action is missing 'primaryGradient'")
+        validate_theme_gradient(
+            action["primaryGradient"], f"theme {theme_name!r} action.primaryGradient"
+        )
 
     for size, expected in {"2x2": (140, 140), "2x4": (300, 140)}.items():
         canvas = LAYOUT_PROFILE.get("canvas", {}).get(size)
         if not isinstance(canvas, dict) or (canvas.get("width"), canvas.get("height")) != expected:
             raise ConversionError(f"layout profile canvas {size} must be {expected[0]}x{expected[1]}")
+
+
+def validate_theme_gradient(value: Any, label: str) -> None:
+    if not isinstance(value, dict):
+        raise ConversionError(f"{label} must be an object")
+    if value.get("direction") not in GRADIENT_DIRECTIONS:
+        raise ConversionError(f"{label}.direction must be a supported gradient direction")
+    colors = value.get("colors")
+    if not isinstance(colors, list) or len(colors) < 2:
+        raise ConversionError(f"{label}.colors must contain at least two stops")
+    previous_stop = -1.0
+    for index, stop in enumerate(colors):
+        if not (
+            isinstance(stop, list)
+            and len(stop) == 2
+            and isinstance(stop[0], str)
+            and re.fullmatch(r"#[0-9A-Fa-f]{6}(?:[0-9A-Fa-f]{2})?", stop[0])
+            and isinstance(stop[1], (int, float))
+            and 0 <= float(stop[1]) <= 1
+            and float(stop[1]) >= previous_stop
+        ):
+            raise ConversionError(f"{label}.colors[{index}] must be an ordered [#COLOR, 0..1] stop")
+        previous_stop = float(stop[1])
 
 
 validate_configuration()
@@ -1006,6 +1056,20 @@ def validate_auto_asc(
 ) -> None:
     events = task_spec.get("eventCandidates", [])
     assets = task_spec.get("assetCandidates", [])
+    data_model = sample_data_model(task_spec["dataModelSchema"])
+
+    def require_scalar_pointer(node_id: str, key: str, pointer: Any) -> None:
+        if not isinstance(pointer, str) or not pointer.startswith("/"):
+            raise ConversionError(f"{node_id}: auto ASC {key} must be a JSON Pointer")
+        try:
+            value = pointer_get(data_model, pointer)
+        except ConversionError:
+            value = None
+        if isinstance(value, (dict, list)) or value is None:
+            raise ConversionError(
+                f"{node_id}: auto ASC {key} must reference a scalar TaskSpec sampleValue, not {pointer!r}"
+            )
+
     for node in alt_nodes(document):
         attrs = asc.get(node.node_id, {})
         allowed = AUTO_ASC_FIELDS.get(node.component, set())
@@ -1030,10 +1094,15 @@ def validate_auto_asc(
         for key in ("bind",):
             if key in attrs and (not isinstance(attrs[key], str) or not attrs[key].startswith("/")):
                 raise ConversionError(f"{node.node_id}: auto ASC {key} must be a JSON Pointer")
+        if node.component == "Text" and "bind" in attrs:
+            require_scalar_pointer(node.node_id, "bind", attrs["bind"])
+        if node.component == "Checkbox" and "bind" in attrs:
+            require_scalar_pointer(node.node_id, "bind", attrs["bind"])
         if node.component == "Progress":
             for key in ("value", "total"):
                 if not isinstance(attrs[key], str) or not attrs[key].startswith("/"):
                     raise ConversionError(f"{node.node_id}: auto ASC {key} must be a JSON Pointer")
+                require_scalar_pointer(node.node_id, key, attrs[key])
         if "expr" in attrs and not is_dynamic(attrs["expr"]):
             raise ConversionError(f"{node.node_id}: auto ASC expr must be a complete {{ ... }} expression")
         if "asset" in attrs:
@@ -1274,8 +1343,8 @@ def validate_auto_protocol(document: AltDocument, task_size: str | None = None) 
                 "auto ALT theme must be one of: " + ", ".join(sorted(AUTO_THEMES)),
             )
         )
-    if root.component not in {"Row", "Column"}:
-        issues.append(ValidationIssue("error", root.node_id, "auto ALT root must be Row or Column"))
+    if root.component != "Column":
+        issues.append(ValidationIssue("error", root.node_id, "auto ALT root must be Column"))
 
     limits_value = LAYOUT_PROFILE.get("limits", {}).get(str(size), {})
     limits = limits_value if isinstance(limits_value, dict) else {}
@@ -2206,6 +2275,7 @@ def auto_layout_document(
                     "chars": chars,
                     "radius": rounded_dimension(height_value / 2),
                     "bg": theme["action"]["primaryBackground"],
+                    "gradient": copy.deepcopy(theme["action"]["primaryGradient"]),
                     "fg": theme["action"]["primaryText"],
                     "protect": True,
                 }
@@ -2313,7 +2383,16 @@ def auto_layout_document(
                         f"auto Row minimum width exceeds the available {content_width:g}vp",
                     )
                 )
-            node.attrs.update({"gap": gap, "main": "start", "cross": "center"})
+            centered_compact_header = (
+                size == "2x2"
+                and parent is result.root
+                and len(children) <= 2
+                and all(child.component in {"Image", "Text"} for child in children)
+                and all(auto_role(child) in {"asset", "title", "status", "support", "meta"} for child in children)
+            )
+            node.attrs.update(
+                {"gap": gap, "main": "center" if centered_compact_header else "start", "cross": "center"}
+            )
             for child, child_width in zip(children, child_widths):
                 child_height = content_height if child.component in CONTAINERS | VIRTUAL_COMPONENTS else min(
                     content_height, measures[child.node_id].preferred_height
@@ -2345,7 +2424,8 @@ def auto_layout_document(
                     )
                 )
             has_bottom_action = children[-1].component == "Button"
-            if sum(preferred_heights) + gap_total < content_height - 18 and has_bottom_action:
+            anchor_action = has_bottom_action and len(children) >= 3
+            if sum(preferred_heights) + gap_total < content_height - 18 and anchor_action:
                 node.attrs.update({"main": "between", "cross": "center"})
                 node.attrs.pop("gap", None)
             else:
@@ -2372,6 +2452,8 @@ def auto_layout_document(
             "radius": int(canvas.get("radius", 18 if size == "2x2" else 22)),
             "clip": True,
             "bg": theme["surface"]["root"],
+            "gradient": copy.deepcopy(theme["surface"]["gradient"]),
+            "border": theme["surface"]["border"],
         }
     )
     return result, diagnostics
@@ -2819,6 +2901,17 @@ def parse_args() -> argparse.Namespace:
             "automatic-layout ALT. t2d always auto-detects both forms."
         ),
     )
+    parser.add_argument(
+        "--allow_layout_issues",
+        "--allow-layout-issues",
+        dest="allow_layout_issues",
+        action="store_true",
+        help=(
+            "During d2t, keep an automatic ALT even when the source structure is not "
+            "currently feasible; emit diagnostics for later model/evaluation use. "
+            "t2d still refuses hard layout errors."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -2882,27 +2975,46 @@ def main() -> int:
                     for issue in protocol_issues:
                         LOGGER.warning("%s auto ALT [%s] %s", prefix, issue.node_id, issue.message)
                     protocol_errors = [issue for issue in protocol_issues if issue.severity == "error"]
-                    if protocol_errors:
+                    if protocol_errors and not args.allow_layout_issues:
                         detail = "; ".join(
                             f"{issue.node_id}: {issue.message}" for issue in protocol_errors
                         )
                         raise ConversionError(f"migrated automatic ALT is invalid: {detail}")
-                    migrated_asc = parse_asc_text(asc_text, output_document)
-                    validate_auto_asc(output_document, task_spec, migrated_asc)
-                    compiled_migration, migration_issues = auto_layout_document(
-                        output_document,
-                        task_spec,
-                        migrated_asc,
-                    )
-                    migration_issues += validate_layout(compiled_migration, task_spec["size"])
-                    migration_errors = [issue for issue in migration_issues if issue.severity == "error"]
-                    if migration_errors:
-                        detail = "; ".join(
-                            f"{issue.node_id}: {issue.message}" for issue in migration_errors
+                    migration_issues: list[ValidationIssue] = []
+                    if args.allow_layout_issues:
+                        LOGGER.warning(
+                            "%s keeping automatic ALT with diagnostics; strict t2d remains unchanged",
+                            prefix,
                         )
-                        raise ConversionError(f"migrated automatic ALT is infeasible: {detail}")
+                    else:
+                        migrated_asc = parse_asc_text(asc_text, output_document)
+                        validate_auto_asc(output_document, task_spec, migrated_asc)
+                        compiled_migration, migration_issues = auto_layout_document(
+                            output_document,
+                            task_spec,
+                            migrated_asc,
+                        )
+                        migration_issues += validate_layout(compiled_migration, task_spec["size"])
+                        migration_errors = [issue for issue in migration_issues if issue.severity == "error"]
+                        if migration_errors:
+                            detail = "; ".join(
+                                f"{issue.node_id}: {issue.message}" for issue in migration_errors
+                            )
+                            raise ConversionError(f"migrated automatic ALT is infeasible: {detail}")
                 atomic_write(alt_path, serialize_alt(output_document))
                 atomic_write(asc_path, asc_text)
+                if not args.legacy_alt and args.allow_layout_issues:
+                    atomic_write(
+                        layout_report_path,
+                        build_layout_report(
+                            case_dir.name,
+                            task_spec["size"],
+                            alt_path.name,
+                            dsl_path.name,
+                            output_document,
+                            protocol_issues + migration_issues,
+                        ),
+                    )
                 LOGGER.info(
                     "%s DONE dsl=%s alt=%s asc=%s protocol=%s nodes=%d",
                     prefix,

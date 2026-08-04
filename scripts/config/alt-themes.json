@@ -4,8 +4,17 @@
     "neutral-light": {
       "mode": "light",
       "surface": {
-        "root": "#FFFFFFFF",
-        "panel": "#FFF1F3F5"
+        "root": "#FFF7FAFF",
+        "panel": "#FFF1F5FA",
+        "gradient": {
+          "direction": "RightBottom",
+          "colors": [
+            ["#FFFFFFFF", 0],
+            ["#FFF4F8FF", 0.56],
+            ["#FFE4EDFF", 1]
+          ]
+        },
+        "border": "1/#1A3B6FC4"
       },
       "text": {
         "primary": "#E5000000",
@@ -21,6 +30,13 @@
       "action": {
         "primaryBackground": "#FF0A59F7",
         "primaryText": "#FFFFFFFF",
+        "primaryGradient": {
+          "direction": "RightBottom",
+          "colors": [
+            ["#FF347BF7", 0],
+            ["#FF0753E6", 1]
+          ]
+        },
         "secondaryBackground": "#0C000000",
         "secondaryText": "#FF0A59F7"
       },
@@ -43,8 +59,17 @@
     "ambient-light": {
       "mode": "light",
       "surface": {
-        "root": "#FFF1F3F5",
-        "panel": "#FFFFFFFF"
+        "root": "#FFF2F8F8",
+        "panel": "#FFFFFFFF",
+        "gradient": {
+          "direction": "RightBottom",
+          "colors": [
+            ["#FFF9FCFC", 0],
+            ["#FFEAF5F3", 0.54],
+            ["#FFDCECED", 1]
+          ]
+        },
+        "border": "1/#1A2A8693"
       },
       "text": {
         "primary": "#E5000000",
@@ -60,6 +85,13 @@
       "action": {
         "primaryBackground": "#FF0A59F7",
         "primaryText": "#FFFFFFFF",
+        "primaryGradient": {
+          "direction": "RightBottom",
+          "colors": [
+            ["#FF39B8EC", 0],
+            ["#FF1767DD", 1]
+          ]
+        },
         "secondaryBackground": "#19000000",
         "secondaryText": "#E5000000"
       },
@@ -82,8 +114,17 @@
     "focus-dark": {
       "mode": "dark",
       "surface": {
-        "root": "#FF191A1C",
-        "panel": "#FF202224"
+        "root": "#FF15161E",
+        "panel": "#FF20212B",
+        "gradient": {
+          "direction": "RightBottom",
+          "colors": [
+            ["#FF292641", 0],
+            ["#FF1B1C2A", 0.54],
+            ["#FF111218", 1]
+          ]
+        },
+        "border": "1/#337A74D7"
       },
       "text": {
         "primary": "#E5FFFFFF",
@@ -99,6 +140,13 @@
       "action": {
         "primaryBackground": "#5F58C7",
         "primaryText": "#FFFFFFFF",
+        "primaryGradient": {
+          "direction": "RightBottom",
+          "colors": [
+            ["#FF7C73EF", 0],
+            ["#FF514BBE", 1]
+          ]
+        },
         "secondaryBackground": "#19FFFFFF",
         "secondaryText": "#317AF7"
       },

@@ -104,9 +104,20 @@ class AutomaticAltTest(unittest.TestCase):
             converter.THEME_CONFIG["themes"]["neutral-light"]["icon"]["primary"],
         )
 
+        root = components["root"]
+        self.assertEqual(
+            root["styles"]["linearGradient"],
+            converter.THEME_CONFIG["themes"]["neutral-light"]["surface"]["gradient"],
+        )
+        self.assertEqual(root["styles"]["borderWidth"], 1)
+
         button = components["action_button"]
         styles = button["styles"]
         self.assertNotIn("padding", styles)
+        self.assertEqual(
+            styles["linearGradient"],
+            converter.THEME_CONFIG["themes"]["neutral-light"]["action"]["primaryGradient"],
+        )
         self.assertGreaterEqual(styles["height"], 32)
         required_width = converter.estimated_text_width(
             button["label"], styles["fontSize"], styles["fontWeight"], 1.08
@@ -397,7 +408,9 @@ class AutomaticAltTest(unittest.TestCase):
             alt_text, document = request_builder.read_alt(alt_path, loaded)
             asc_text = request_builder.read_asc(asc_path, document, loaded)
             request = request_builder.build_request(
-                loaded, loaded["userQuery"], alt_text, asc_text
+                loaded,
+                loaded["userQuery"],
+                request_builder.format_assistant_answer(alt_text, asc_text),
             )
 
             system = request["messages"][0]["content"]
@@ -408,6 +421,32 @@ class AutomaticAltTest(unittest.TestCase):
             self.assertTrue(assistant.startswith("<alt>\n"))
             self.assertIn("<alt>\nColumn root card=2x2 theme=neutral-light", assistant)
             self.assertIn("<asc>\nImage battery_icon asset=0", assistant)
+
+    def test_training_request_with_disable_label_and_missing_files_writes_empty_assistant(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            case = Path(temporary)
+            spec = task_spec()
+            task_path = case / "task.taskSpec.json"
+            output_path = case / "task.request.json"
+            task_path.write_text(
+                json.dumps(spec, ensure_ascii=False), encoding="utf-8"
+            )
+
+            argv = [
+                "taskspec_to_alt_chat_completions.py",
+                str(task_path),
+                "-o",
+                str(output_path),
+                "--disable_label",
+            ]
+            with mock.patch.object(sys, "argv", argv):
+                result = request_builder.main()
+
+            self.assertEqual(result, 0)
+            request = json.loads(output_path.read_text(encoding="utf-8"))
+            assistant = request["messages"][2]
+            self.assertEqual(assistant["role"], "assistant")
+            self.assertEqual(assistant["content"], "")
 
 
 if __name__ == "__main__":
