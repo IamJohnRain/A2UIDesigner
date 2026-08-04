@@ -415,12 +415,68 @@ class AutomaticAltTest(unittest.TestCase):
 
             system = request["messages"][0]["content"]
             assistant = request["messages"][2]["content"]
-            self.assertIn('"themes": [', system)
-            self.assertNotIn(spec["assetCandidates"][0]["src"], system)
+            # The original TaskSpec remains the complete source of truth in the
+            # prompt, including fields intentionally omitted from CASE_CONTEXT.
+            self.assertIn('"dataModelSchema"', system)
+            self.assertIn(spec["assetCandidates"][0]["src"], system)
+            self.assertIn('"intentName"', system)
+            marker = "TaskSpec（完整嵌入，作为本卡事实源，不是输出段）："
+            task_spec_start = system.index(marker) + len(marker)
+            embedded_spec, _ = json.JSONDecoder().raw_decode(
+                system[system.index("{", task_spec_start) :]
+            )
+            self.assertEqual(embedded_spec, spec)
+
+            # CASE_CONTEXT is a safe reference index, not a second TaskSpec.
+            context = request_builder.case_context(loaded)
+            fields = context["bindableFields"]
+            self.assertEqual(len(fields), 1)
+            self.assertEqual(fields[0]["path"], "/battery/levelText")
+            self.assertEqual(fields[0]["description"], "当前剩余电量文案")
+            self.assertNotIn("args", context["events"][0])
+            self.assertNotIn("format", context["assets"][0])
+            self.assertIn('"bindableFields": [', system)
+            self.assertIn("neutral-light", system)
+            self.assertNotIn('"themes": [', system)
+            self.assertNotIn('"limits": {', system)
+            self.assertIn("- 2x2 容量预算", system)
+            self.assertNotIn("- 2x4 容量预算", system)
+            self.assertNotIn("maxVisibleListItems", system)
+            self.assertNotIn("{{", system)
             self.assertNotIn("<think>", assistant)
             self.assertTrue(assistant.startswith("<alt>\n"))
             self.assertIn("<alt>\nColumn root card=2x2 theme=neutral-light", assistant)
             self.assertIn("<asc>\nImage battery_icon asset=0", assistant)
+
+    def test_case_context_excludes_null_and_non_scalar_bindings(self) -> None:
+        spec = task_spec()
+        spec["dataModelSchema"]["properties"]["pending"] = {
+            "type": "string",
+            "description": "尚未提供的状态文案",
+            "sampleValue": None,
+        }
+        spec["dataModelSchema"]["properties"]["summary"] = {
+            "type": "object",
+            "description": "不允许整体绑定的摘要对象",
+            "sampleValue": {"text": "剩余 20%"},
+        }
+
+        context = request_builder.case_context(spec)
+
+        self.assertEqual(
+            [field["path"] for field in context["bindableFields"]],
+            ["/battery/levelText"],
+        )
+        self.assertTrue(
+            all("bindable" not in field for field in context["bindableFields"])
+        )
+
+    def test_task_spec_rejects_out_of_range_presentation_slot_reference(self) -> None:
+        spec = task_spec()
+        spec["presentationSlots"] = {"missing_asset": {"assetCandidate": 1}}
+
+        with self.assertRaisesRegex(ValueError, "must reference an existing candidate"):
+            request_builder.validate_task_spec(spec)
 
     def test_training_request_with_disable_label_and_missing_files_writes_empty_assistant(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

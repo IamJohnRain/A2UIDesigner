@@ -51,12 +51,31 @@ FORBIDDEN_EVENT_FIELDS = {
 }
 
 
-SYSTEM_PROMPT = """你是 A2UI 卡片结构规划模型。根据 PlanningSpec 同时生成自动布局 ALT 与 ASC；不要生成 GenUI DSL、CardSpec、颜色、尺寸或解释。
+def build_static_context(size: str) -> str:
+    """Build protocol limits for the TaskSpec's selected card size."""
+    themes = ", ".join(THEME_CONFIG.get("themes", {}).keys())
+    limits = dict(LAYOUT_PROFILE.get("limits", {}).get(size, {}))
+    # Automatic training output deliberately excludes components whose intrinsic
+    # geometry or collection template cannot be inferred safely from semantics.
+    limits["maxCheckbox"] = 0
+    limits["maxLists"] = 0
+    limits.pop("maxVisibleListItems", None)
+    lines = [f"- 主题白名单（theme 只能取以下名称）：{themes}"]
+    lines.append(f"- {size} 容量预算（Checkbox/List 一律禁用）：")
+    detail = ", ".join(f"{key}={value}" for key, value in limits.items())
+    lines.append(f"  - {detail}")
+    return "\n".join(lines)
+
+
+SYSTEM_PROMPT = """你是 A2UI 卡片结构规划模型。根据 TaskSpec、协议约束与本卡上下文 CASE_CONTEXT 同时生成自动布局 ALT 与 ASC；不要生成 GenUI DSL、CardSpec、颜色、尺寸或解释。
+
+TaskSpec 是本卡的完整事实源：阅读其中的用户需求、数据字段、素材和事件以规划卡片。CASE_CONTEXT 是脚本从同一 TaskSpec 计算出的安全引用索引；生成 bind、asset、event 或 Progress 时必须遵守它。
 
 输出契约：
 - 只输出一个 <alt>...</alt> 和紧随其后的一个 <asc>...</asc>，不使用 Markdown 围栏，不输出思考、标题、解释或日志。
+- TaskSpec 是输入数据而非输出对象；不要输出完整 TaskSpec JSON、dataModelSchema、素材 src/bindTo 或完整事件对象。
 - ALT 直接从根节点开始，每层两个空格，每行一个节点，不输出 @alt 头。
-- 根节点必须是 Column，且必须写 card=2x2|2x4 theme=THEME；card 必须等于 PlanningSpec.size，THEME 必须来自 PlanningSpec.themes。自动布局不使用根 Row。
+- 根节点必须是 Column，且必须写 card=2x2|2x4 theme=THEME；card 必须等于 TaskSpec.size，THEME 必须来自主题白名单。自动布局不使用根 Row。
 - 普通节点语法只能是 Component id 或 Component id role=ROLE；除根节点 card/theme 外，ALT 唯一允许的属性是 role。
 - 禁止输出 box、size、padding、margin、gap、font、chars、lines、overflow、fit、ratio、type、颜色、背景、圆角、边框、阴影、clip、protect、style 或任何其他样式字段。它们全部由编译器根据文本和原生 profile 推断。
 - 自动生成只允许 Text、Image、Divider、Progress、Button、Row、Column。禁止 Stack、Checkbox、List 和 Repeat；Checkbox 的原生尺寸不可控，List 的集合模板暂不进入训练输出。
@@ -69,8 +88,7 @@ SYSTEM_PROMPT = """你是 A2UI 卡片结构规划模型。根据 PlanningSpec �
 
 结构和内容预算：
 - 只服务一个对象或主问题，同一事实只由一个节点主承载。
-- 2x2：最多 4 层、10 个节点、4 个 Text、1 个 Button、2 个 Image、1 个 Progress；禁止 Checkbox 和 List；可见文本总预算 32 个中文等价单位。
-- 2x4：最多 5 层、18 个节点、8 个 Text、2 个 Button、3 个 Image、2 个 Progress；可见文本总预算 72 个中文等价单位。
+- 节点、组件和可见文本的数量上限以“协议约束”中的当前卡片容量预算为准。
 - 只展示状态使用 Text，表达动作使用 Button；不要使用 Checkbox 或 List。
 - 长说明、第三层元信息、重复标签、第二主任务和额外动作不进入卡片。
 - 字段摘要中的 units 已由脚本计算。优先保留标题、主值/状态和必要动作，再保留一个短 support；放不下时删除 meta、次要 asset 和弱 support。
@@ -78,17 +96,17 @@ SYSTEM_PROMPT = """你是 A2UI 卡片结构规划模型。根据 PlanningSpec �
 主题和 SVG：
 - 模型只选择主题名，禁止输出任何具体颜色。编译器会为卡片根容器和主按钮应用该主题的多停靠渐变；通过主题匹配场景气质，不要用额外节点或样式模拟背景装饰。
 - neutral-light 是默认通用主题；ambient-light 用于天气、环境、健康或设备；focus-dark 仅用于睡眠、专注、音乐或明确夜间场景。
-- Image 只能通过 ASC asset=N 引用 PlanningSpec.assets 中的本地 SVG；禁止 PNG、网络图、base64、emoji、src 路径和素材颜色。
+- Image 只能通过 ASC asset=N 引用 CASE_CONTEXT.assets 中的本地 SVG；禁止 PNG、网络图、base64、emoji、src 路径和素材颜色。
 - SVG 尺寸、objectFit 和 fillColor 全部由编译器按主题和角色生成。
 
 ASC：
 - 使用 Component node_id key=value 单行语法，只列有语义补充的节点，并严格遵循 ALT 前序顺序。
-- Text：text=静态文案、bind=/路径，复杂表达式才用 expr。bind 必须逐字符等于 PlanningSpec.fields 中一个 bindable=true 的标量叶子 path；绝不能绑定对象、数组、父路径、猜测路径或路径前缀。
+- Text：text=静态文案、bind=/路径，复杂表达式才用 expr。bind 必须逐字符等于 CASE_CONTEXT.bindableFields 中的一个 path；绝不能绑定对象、数组、父路径、猜测路径或路径前缀。
 - Image：只用 asset=N。
 - Progress：value=/路径、total=/路径。
 - Button：label=短文案 event=N；Checkbox：label、value、group、bind、event=N。
-- event=N 和 asset=N 只引用 PlanningSpec 中的索引，不复制事件、素材路径或颜色。
-- Progress 的 value 和 total 也必须逐字符等于 PlanningSpec.fields 中的标量叶子 path；缺少两个合法数值字段时不要生成 Progress。
+- event=N 和 asset=N 只引用 CASE_CONTEXT 中的索引，不复制事件、素材路径或颜色。
+- Progress 的 value 和 total 也必须逐字符等于 CASE_CONTEXT.bindableFields 中的标量叶子 path；缺少两个合法数值字段时不要生成 Progress。
 - ASC 禁止 id、component、children、styles、尺寸、字体、颜色、圆角、间距、DataModel 和操作符。
 
 示例：
@@ -107,8 +125,14 @@ Text battery_value bind=/battery/levelText
 Button action_button label=立即省电 event=0
 </asc>
 
-PlanningSpec：
+TaskSpec（完整嵌入，作为本卡事实源，不是输出段）：
 {{TASK_SPEC_JSON}}
+
+协议约束（脚本按当前卡片尺寸与配置生成）：
+{{STATIC_CONTEXT}}
+
+本卡上下文 CASE_CONTEXT（脚本从 TaskSpec 推导的安全引用索引）：
+{{CASE_CONTEXT_JSON}}
 """
 
 
@@ -146,7 +170,11 @@ def validate_task_spec(spec: dict[str, Any]) -> None:
     validate_asset_candidates(spec["assetCandidates"], spec["dataModelSchema"])
     slots = spec.get("presentationSlots")
     if slots is not None:
-        validate_presentation_slots(slots)
+        validate_presentation_slots(
+            slots,
+            asset_count=len(spec["assetCandidates"]),
+            event_count=len(spec["eventCandidates"]),
+        )
 
 
 def validate_data_model_schema(value: Any, location: str) -> None:
@@ -225,7 +253,9 @@ def validate_asset_candidates(value: Any, data_model_schema: dict[str, Any]) -> 
                 raise ValueError(f"{location}.bindTo must resolve to the same src in dataModelSchema")
 
 
-def validate_presentation_slots(value: Any) -> None:
+def validate_presentation_slots(
+    value: Any, *, asset_count: int, event_count: int
+) -> None:
     if not isinstance(value, dict):
         raise ValueError("TaskSpec.presentationSlots must be an object")
     for slot_id, slot in value.items():
@@ -240,6 +270,12 @@ def validate_presentation_slots(value: Any) -> None:
             index = slot.get(index_key)
             if index is not None and (not isinstance(index, int) or index < 0):
                 raise ValueError(f"presentationSlots.{slot_id}.{index_key} must be a non-negative integer")
+            if index is not None:
+                limit = asset_count if index_key == "assetCandidate" else event_count
+                if index >= limit:
+                    raise ValueError(
+                        f"presentationSlots.{slot_id}.{index_key} must reference an existing candidate"
+                    )
 
 
 def read_schema_sample(schema: Any, pointer: str) -> Any:
@@ -285,6 +321,7 @@ def equivalent_text_units(value: str) -> float:
 
 
 def schema_field_summaries(schema: Any, pointer: str = "") -> list[dict[str, Any]]:
+    """Return only scalar TaskSpec sample values that the compiler can bind."""
     fields: list[dict[str, Any]] = []
     if not isinstance(schema, dict):
         return fields
@@ -295,62 +332,51 @@ def schema_field_summaries(schema: Any, pointer: str = "") -> list[dict[str, Any
             fields.extend(schema_field_summaries(child, pointer + "/" + escaped))
         return fields
     if schema.get("type") == "array" and isinstance(schema.get("items"), dict):
-        entry: dict[str, Any] = {"path": pointer, "type": "array", "bindable": False}
-        sample = schema.get("sampleValue")
-        if isinstance(sample, list):
-            entry["sampleCount"] = len(sample)
-        fields.append(entry)
         fields.extend(schema_field_summaries(schema["items"], pointer + "/0"))
         return fields
-    sample = schema.get("sampleValue")
-    if sample is None and pointer == "":
+    if "sampleValue" not in schema and pointer == "":
         for key, child in schema.items():
             if key in {"type", "description"}:
                 continue
             escaped = str(key).replace("~", "~0").replace("/", "~1")
             fields.extend(schema_field_summaries(child, pointer + "/" + escaped))
         return fields
+    if "sampleValue" not in schema:
+        return fields
+    sample = schema["sampleValue"]
+    if sample is None or isinstance(sample, (dict, list)):
+        return fields
     entry = {
         "path": pointer or "/",
         "type": schema.get("type", type(sample).__name__),
-        "bindable": not isinstance(sample, (dict, list)),
+        "sample": sample,
     }
-    if sample is not None:
-        entry["sample"] = sample
-        if isinstance(sample, str):
-            entry["units"] = equivalent_text_units(sample)
+    description = schema.get("description")
+    if isinstance(description, str) and description.strip():
+        entry["description"] = description
+    if isinstance(sample, str):
+        entry["units"] = equivalent_text_units(sample)
     if isinstance(schema.get("maxLength"), int):
         entry["maxLength"] = schema["maxLength"]
     fields.append(entry)
     return fields
 
 
-def planning_task_spec(spec: dict[str, Any]) -> dict[str, Any]:
+def case_context(spec: dict[str, Any]) -> dict[str, Any]:
+    """Per-case safe reference indexes derived from the complete TaskSpec."""
     events = []
     for index, candidate in enumerate(spec.get("eventCandidates", [])):
         if not isinstance(candidate, dict):
             continue
         event: dict[str, Any] = {"index": index, "call": candidate.get("call")}
-        if isinstance(candidate.get("args"), dict) and candidate["args"]:
-            event["args"] = candidate["args"]
         events.append(event)
     assets = [
-        {"index": index, "description": candidate.get("description"), "format": "svg"}
+        {"index": index, "description": candidate.get("description")}
         for index, candidate in enumerate(spec.get("assetCandidates", []))
         if isinstance(candidate, dict)
     ]
-    size = str(spec["size"])
-    limits = dict(LAYOUT_PROFILE.get("limits", {}).get(size, {}))
-    # Automatic training output deliberately excludes components whose intrinsic
-    # geometry or collection template cannot be inferred safely from semantics.
-    limits["maxCheckbox"] = 0
-    limits["maxLists"] = 0
     return {
-        "userQuery": spec["userQuery"],
-        "size": size,
-        "themes": list(THEME_CONFIG.get("themes", {}).keys()),
-        "limits": limits,
-        "fields": schema_field_summaries(spec["dataModelSchema"]),
+        "bindableFields": schema_field_summaries(spec["dataModelSchema"]),
         "events": events,
         "assets": assets,
         **({"presentationSlots": spec["presentationSlots"]} if "presentationSlots" in spec else {}),
@@ -358,7 +384,13 @@ def planning_task_spec(spec: dict[str, Any]) -> dict[str, Any]:
 
 
 def canonical_task_spec_json(spec: dict[str, Any]) -> str:
-    return json.dumps(planning_task_spec(spec), ensure_ascii=False, indent=2)
+    """Embed the original TaskSpec verbatim, preserving every field."""
+    return json.dumps(spec, ensure_ascii=False, indent=2)
+
+
+def case_context_json(spec: dict[str, Any]) -> str:
+    """Derived per-case context (safe bindings, events, assets, and slots)."""
+    return json.dumps(case_context(spec), ensure_ascii=False, indent=2)
 
 
 def read_user_query(path: Path | None, spec: dict[str, Any]) -> str:
@@ -423,10 +455,16 @@ def build_request(
     rejected_response: str | None = None,
 ) -> dict[str, Any]:
     task_spec_json = canonical_task_spec_json(spec)
+    context_json = case_context_json(spec)
+    static_context = build_static_context(str(spec["size"]))
     messages: list[dict[str, str]] = [
         {
             "role": "system",
-            "content": SYSTEM_PROMPT.replace("{{TASK_SPEC_JSON}}", task_spec_json),
+            "content": (
+                SYSTEM_PROMPT.replace("{{TASK_SPEC_JSON}}", task_spec_json)
+                .replace("{{STATIC_CONTEXT}}", static_context)
+                .replace("{{CASE_CONTEXT_JSON}}", context_json)
+            ),
         },
         {
             "role": "user",

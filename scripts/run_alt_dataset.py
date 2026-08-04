@@ -62,6 +62,15 @@ ALT_RE = re.compile(r"<alt>(.*?)</alt>", re.DOTALL)
 ASC_RE = re.compile(r"<asc>(.*?)</asc>", re.DOTALL)
 FENCE_RE = re.compile(r"```(?:[A-Za-z0-9_+\-]*)\s*|\s*```", re.MULTILINE)
 
+TASKSPEC_MARKER = "TaskSpec（原样嵌入"
+REQUIRED_EXTRACTED_KEYS = (
+    "userQuery",
+    "size",
+    "dataModelSchema",
+    "eventCandidates",
+    "assetCandidates",
+)
+
 
 LOG_PATH: Path | None = None
 
@@ -260,12 +269,33 @@ def strip_assistant(messages: list[dict]) -> list[dict]:
     return stripped
 
 
+def _is_full_taskspec(value: Any) -> bool:
+    return isinstance(value, dict) and all(
+        key in value for key in REQUIRED_EXTRACTED_KEYS
+    )
+
+
 def extract_taskspec_from_system(system_content: str) -> dict[str, Any]:
-    """扫描 system content 中所有顶层 JSON 对象, 挑出含 userQuery/size 的最后一个。
+    """从 system content 中提取原始 TaskSpec。
+
+    优先定位 ``TaskSpec（原样嵌入`` 标记后的第一个 JSON 对象（新格式 prompt，
+    后面还有 CASE_CONTEXT，不能靠“最后一个”判断）；失败时回退到旧逻辑：
+    扫描所有顶层 JSON 对象, 挑出含 userQuery/size 的最后一个。
 
     顶层对象的判断: raw_decode 顺序扫描, 每解析成功一次就跳到 ``end``, 因此不会
     把嵌套在已解析对象里的字典再拆出来。
     """
+    marker_index = system_content.find(TASKSPEC_MARKER)
+    if marker_index >= 0:
+        cursor = system_content.find("{", marker_index)
+        if cursor >= 0:
+            try:
+                obj, _ = json.JSONDecoder().raw_decode(system_content, cursor)
+            except json.JSONDecodeError:
+                obj = None
+            if _is_full_taskspec(obj):
+                return obj
+
     decoder = json.JSONDecoder()
     candidates: list[dict[str, Any]] = []
     i = 0
@@ -285,7 +315,13 @@ def extract_taskspec_from_system(system_content: str) -> dict[str, Any]:
         i = max(end, i + 1)
     if not candidates:
         raise ValueError("在 system content 中未找到含 userQuery/size 的 TaskSpec JSON 对象")
-    return candidates[-1]
+    taskspec = candidates[-1]
+    if not _is_full_taskspec(taskspec):
+        raise ValueError(
+            "提取到的 JSON 不是完整 TaskSpec（缺少 dataModelSchema/eventCandidates/"
+            "assetCandidates 等必需字段），请确认 JSONL 的 system 中嵌入的是原始 TaskSpec"
+        )
+    return taskspec
 
 
 def load_cases(
@@ -518,10 +554,21 @@ async def run_case(
                 )
 
             _write_text(case_dir / QUERY_FILE_NAME, case.query + "\n")
-            _write_text(
-                case_dir / TASKSPEC_FILE_NAME,
-                json.dumps(taskspec, ensure_ascii=False, indent=2) + "\n",
-            )
+            taskspec_path = case_dir / TASKSPEC_FILE_NAME
+            if taskspec_path.is_file() and not args.force:
+                log(
+                    f"PREP  line={case.line_no} case={case.directory_name} "
+                    f"taskspec=preserved path={taskspec_path}"
+                )
+            else:
+                _write_text(
+                    taskspec_path,
+                    json.dumps(taskspec, ensure_ascii=False, indent=2) + "\n",
+                )
+                log(
+                    f"PREP  line={case.line_no} case={case.directory_name} "
+                    f"taskspec=extracted path={taskspec_path}"
+                )
 
             last_error = ""
             retries_used = 0
@@ -723,7 +770,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--force",
         action="store_true",
-        help="已存在完整输出的 case 目录仍强制重跑, 不跳过。",
+        help="已存在完整输出的 case 目录仍强制重跑（并重新提取/覆盖 task.taskSpec.json）, 不跳过。",
     )
     parser.add_argument(
         "--debug",
