@@ -576,5 +576,42 @@ export default function PublicSurfaceControllerErrorCallbackUnitTest() {
       expect(errors[0].message).assertEqual('createSurface.catalogId is invalid');
       controller.destroy();
     });
+
+    it('should_forward_surface_policy_error_code_to_public_error_callback', 0, () => {
+      const scenarios: ErrorRecord[] = [{
+        code: SurfaceErrorCode.MULTI_SURFACE_DISABLED,
+        message: 'SurfaceController only supports one surface. Active surface: main'
+      }, {
+        code: SurfaceErrorCode.MULTI_SURFACE_MAX_SURFACE_LIMIT_REACHED,
+        message: 'SurfaceController supports at most 15 surfaces.'
+      }, {
+        code: SurfaceErrorCode.MULTI_SURFACE_ALREADY_EXISTS,
+        message: 'Surface already exists: main'
+      }];
+
+      scenarios.forEach((scenario: ErrorRecord): void => {
+        const controller: SurfaceController = createSurfaceController();
+        const errors: ErrorRecord[] = [];
+        processResultOverride = {
+          success: false,
+          errorCode: `SURFACE_POLICY_${scenario.code}`,
+          errorMessage: scenario.message,
+          surfaceResultCode: scenario.code
+        };
+
+        controller.registerErrorCallback((errorType: SurfaceErrorCode, errorMessage: string): void => {
+          errors.push({
+            code: errorType,
+            message: errorMessage
+          });
+        });
+        controller.handleMessage('{"version":"v0.9","createSurface":{"surfaceId":"main"}}');
+
+        expect(errors.length).assertEqual(1);
+        expect(errors[0].code).assertEqual(scenario.code);
+        expect(errors[0].message).assertEqual(scenario.message);
+        controller.destroy();
+      });
+    });
   });
 }

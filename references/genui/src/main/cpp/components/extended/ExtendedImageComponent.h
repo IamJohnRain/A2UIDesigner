@@ -41,24 +41,19 @@ public:
         return altValue_;
     }
 
-    float GetAspectRatioForTest() const
-    {
-        return aspectRatio_;
-    }
-
     int32_t GetObjectFitForTest() const
     {
         return static_cast<int32_t>(objectFit_);
     }
 
-    bool HasFillColorForTest() const
-    {
-        return hasFillColor_;
-    }
-
     uint32_t GetFillColorForTest() const
     {
         return fillColor_;
+    }
+
+    bool HasFillColorForTest() const
+    {
+        return hasFillColor_;
     }
 
     PropertyDeclaration GetPrivatePropertyDeclarationForTest(const std::string& propertyName)
@@ -97,22 +92,23 @@ protected:
     void ApplyPrivateAttributes(const JsonValue& descriptor) override;
     PropertyDeclaration GetPrivatePropertyDeclaration(const std::string& propertyName) override;
     void ApplyComponentSpecificStyles(const JsonValue& styles, ArkUINodeApiAdapter& applier) override;
+    void ValidateComponentSpecificStylesSchema(const JsonValue& styles) override;
 
 private:
     void ReportStyleWarning(const std::string& code, const std::string& styleName, const std::string& message) const;
+    void ApplyObjectFitStyle(const JsonValue& styles, bool isDeltaUpdate, const std::string& componentId);
+    void ValidateFillColorSchema(const JsonValue& styles) const;
     void SetSrc(const std::string& src);
     void SetAlt(const std::string& alt);
-    void SetAspectRatio(float ratio);
     void SetObjectFit(A2UIObjectFit objectFit);
     void SetFillColor(uint32_t color);
     void ResetFillColor();
 
     std::string srcValue_;
     std::string altValue_;
-    float aspectRatio_ = 1.0F;
     A2UIObjectFit objectFit_ = A2UIObjectFit::COVER;
-    bool hasFillColor_ = false;
     uint32_t fillColor_ = 0;
+    bool hasFillColor_ = false;
 };
 
 } // namespace NativeModule

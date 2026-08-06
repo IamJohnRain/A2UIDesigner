@@ -219,6 +219,21 @@ TEST_F(ExtendedCheckboxRuntimeStateCoverageTest, should_cover_checkbox_private_p
     EXPECT_EQ(checkbox.GetGroup(), "");
 }
 
+TEST_F(ExtendedCheckboxRuntimeStateCoverageTest, should_not_set_layout_weight_on_checkbox_text_node)
+{
+    ExtendedCheckboxComponent checkbox;
+    ASSERT_NE(checkbox.textNode_, nullptr);
+
+    bool layoutWeightApplied = false;
+    for (const auto& record : mockArkUIPtr_->setAttributeRecords_) {
+        if (record.nodeHandle == checkbox.textNode_ && record.attribute == NODE_LAYOUT_WEIGHT) {
+            layoutWeightApplied = true;
+            break;
+        }
+    }
+    EXPECT_FALSE(layoutWeightApplied);
+}
+
 TEST_F(ExtendedCheckboxRuntimeStateCoverageTest, should_cover_checkbox_events_style_alias_and_binding_guards)
 {
     ExtendedCheckboxComponent checkbox;
@@ -428,9 +443,14 @@ TEST_F(ExtendedCheckboxRuntimeStateCoverageTest, should_cover_template_adapter_r
     descriptors["root"] = emptyIdDescriptor->GetRoot();
     std::string id = "root";
     std::map<std::string, JsonValue> generated;
-    EXPECT_TRUE(
-        TemplateAdapterNode::BuildTemplateInstanceTreeDescriptors(id, "tmpl", "/items", 0, &descriptors, &generated)
-            .empty());
+    TemplateAdapterNode::TemplateInstanceBuildContext context = {
+        .templateComponentId = "tmpl",
+        .arrayPath = "/items",
+        .itemIndex = 0,
+        .allDescriptors = &descriptors,
+        .generatedDescriptors = &generated,
+    };
+    EXPECT_TRUE(TemplateAdapterNode::BuildTemplateInstanceTreeDescriptors(id, context).empty());
 
     RuntimeStateTemplateAdapterNode node;
     auto unknownEvent = reinterpret_cast<ArkUI_NodeAdapterEvent*>(0x930100);

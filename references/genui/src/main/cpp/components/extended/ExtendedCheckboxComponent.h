@@ -131,6 +131,8 @@ private:
     static void NodeEventReceiver(A2UINodeEvent* event);
 
     void ValidateStylesSchema(const JsonValue& styles);
+    void ValidateMarkStylesSchema(const JsonValue& styles);
+    void ReportMarkNumberIssue(const JsonValue& markValue, const char* key);
     std::unique_ptr<JsonAdapter> ResolveMarkDynamicMembers(const JsonValue& markValue) const;
     void ValidateResolvedMarkDfx(const JsonValue& markValue);
     void ApplyStyleColor(const JsonValue& styles, const char* propertyName, const char* aliasName,

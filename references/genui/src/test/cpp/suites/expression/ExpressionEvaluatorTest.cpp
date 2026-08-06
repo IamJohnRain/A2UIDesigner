@@ -436,6 +436,29 @@ TEST_F(LiteralExpressionTest, L0_should_evaluate_logical_operators)
     EXPECT_FALSE(orFalse.boolValue);
 }
 
+TEST_F(LiteralExpressionTest, L0_should_return_actual_operand_values_for_logical_operators)
+{
+    auto truthyAnd = Eval("true && 'Alice'");
+    ASSERT_TRUE(truthyAnd.IsString());
+    EXPECT_EQ(truthyAnd.stringValue, "Alice");
+
+    auto falsyAnd = Eval("false && 'Alice'");
+    ASSERT_TRUE(falsyAnd.IsBoolean());
+    EXPECT_FALSE(falsyAnd.boolValue);
+
+    auto truthyOr = Eval("'Alice' || 'default'");
+    ASSERT_TRUE(truthyOr.IsString());
+    EXPECT_EQ(truthyOr.stringValue, "Alice");
+
+    auto falsyOr = Eval("0 || 42");
+    ASSERT_TRUE(falsyOr.IsNumber());
+    EXPECT_DOUBLE_EQ(falsyOr.numberValue, 42.0);
+
+    auto numericFalsyAnd = Eval("0 && 42");
+    ASSERT_TRUE(numericFalsyAnd.IsNumber());
+    EXPECT_DOUBLE_EQ(numericFalsyAnd.numberValue, 0.0);
+}
+
 TEST_F(LiteralExpressionTest, L0_should_evaluate_ternary_operator)
 {
     auto trueBranch = Eval("true ? 1 : 2");
@@ -593,10 +616,20 @@ TEST_F(ExpressionErrorTest, L0_should_apply_security_limits)
 TEST_F(ExpressionErrorTest, L0_should_return_undefined_for_undefined_variables)
 {
     EXPECT_TRUE(Eval("$name").IsUndefined());
-    EXPECT_TRUE(Eval("user.name").IsUndefined());
-    EXPECT_TRUE(Eval("items[0]").IsUndefined());
     EXPECT_TRUE(Eval("format('x')").IsUndefined());
     EXPECT_TRUE(Eval("`hello`").IsUndefined());
+}
+
+TEST_F(ExpressionErrorTest, L0_should_treat_unquoted_unresolved_identifier_as_illegal_empty_string)
+{
+    EvaluationContext ctx;
+
+    auto result = EvalWithContext("{{ a }}", ctx);
+    ASSERT_TRUE(result.IsDefined());
+    ASSERT_TRUE(result.IsString());
+    EXPECT_EQ(result.AsString(), "");
+    EXPECT_EQ(ctx.lastError, ExpressionError::PARSE_UNEXPECTED_TOKEN);
+    EXPECT_NE(ctx.errorMessage.find("illegal expression"), std::string::npos);
 }
 
 class AstCacheTest : public ::testing::Test {
@@ -736,6 +769,60 @@ TEST_F(NativeExpressionApiTest, L0_should_return_string_and_boolean_results)
     EXPECT_TRUE(GetBoolProperty(boolResult, "success"));
     EXPECT_EQ(GetStringProperty(boolResult, "type"), "boolean");
     EXPECT_TRUE(GetBoolProperty(boolResult, "value"));
+}
+
+TEST_F(NativeExpressionApiTest, L0_should_return_null_result_for_data_model_expression)
+{
+    constexpr int32_t renderId = 9318;
+    const std::string surfaceId = "expression-null-result";
+    RenderSlot& renderSlot = RenderManager::GetInstance().CreateRenderSlot(renderId);
+    SurfaceSlot& surface = renderSlot.GetSurfaceManager()->CreateSurface(surfaceId);
+    std::shared_ptr<DataModel> dataModel = surface.GetOrCreateDataModel();
+    ASSERT_NE(dataModel, nullptr);
+    std::unique_ptr<JsonAdapter> data = JsonAdapter::Parse(R"({"dividerConfig":null})");
+    ASSERT_NE(data, nullptr);
+    dataModel->ReplaceAll(data->GetRoot());
+
+    mockNapiPtr_->SetCallbackArgs(
+        { CreateStringArg("{{ $__dataModel.dividerConfig }}"), CreateInt32Arg(renderId), CreateStringArg(surfaceId) });
+
+    napi_value result = EvaluateExpression(env_, cbInfo_);
+
+    ASSERT_NE(result, nullptr);
+    EXPECT_TRUE(GetBoolProperty(result, "success"));
+    EXPECT_EQ(GetStringProperty(result, "type"), "null");
+    napi_value nullValue = mockNapiPtr_->objectProperties_[result]["value"];
+    ASSERT_NE(nullValue, nullptr);
+    EXPECT_EQ(mockNapiPtr_->valueTypes_[nullValue], napi_null);
+
+    RenderManager::GetInstance().RemoveRenderSlot(renderId);
+}
+
+TEST_F(NativeExpressionApiTest, L0_should_return_object_result_for_data_model_expression)
+{
+    constexpr int32_t renderId = 9317;
+    const std::string surfaceId = "expression-object-result";
+    RenderSlot& renderSlot = RenderManager::GetInstance().CreateRenderSlot(renderId);
+    SurfaceSlot& surface = renderSlot.GetSurfaceManager()->CreateSurface(surfaceId);
+    std::shared_ptr<DataModel> dataModel = surface.GetOrCreateDataModel();
+    ASSERT_NE(dataModel, nullptr);
+    std::unique_ptr<JsonAdapter> data = JsonAdapter::Parse(R"({"menuOffset":{"dx":12,"dy":8}})");
+    ASSERT_NE(data, nullptr);
+    dataModel->ReplaceAll(data->GetRoot());
+
+    mockNapiPtr_->SetCallbackArgs(
+        { CreateStringArg("{{ $__dataModel.menuOffset }}"), CreateInt32Arg(renderId), CreateStringArg(surfaceId) });
+    napi_value result = EvaluateExpression(env_, cbInfo_);
+
+    ASSERT_NE(result, nullptr);
+    EXPECT_TRUE(GetBoolProperty(result, "success"));
+    EXPECT_EQ(GetStringProperty(result, "type"), "object");
+    napi_value objectValue = mockNapiPtr_->objectProperties_[result]["value"];
+    ASSERT_NE(objectValue, nullptr);
+    EXPECT_DOUBLE_EQ(GetNumberProperty(objectValue, "dx"), 12.0);
+    EXPECT_DOUBLE_EQ(GetNumberProperty(objectValue, "dy"), 8.0);
+
+    RenderManager::GetInstance().RemoveRenderSlot(renderId);
 }
 
 TEST_F(NativeExpressionApiTest, L0_should_return_undefined_result_for_invalid_input)
@@ -1645,6 +1732,21 @@ TEST_F(EvaluatorBranchTest, L0_should_short_circuit_or_with_true_left)
     EXPECT_TRUE(result.boolValue);
 }
 
+TEST_F(EvaluatorBranchTest, L0_should_not_evaluate_right_operand_after_logical_short_circuit)
+{
+    EvaluationContext andContext;
+    auto andResult = EvalWithContext("{{ false && $undef }}", andContext);
+    ASSERT_TRUE(andResult.IsBoolean());
+    EXPECT_FALSE(andResult.boolValue);
+    EXPECT_EQ(andContext.lastError, ExpressionError::NONE);
+
+    EvaluationContext orContext;
+    auto orResult = EvalWithContext("{{ 'Alice' || $undef }}", orContext);
+    ASSERT_TRUE(orResult.IsString());
+    EXPECT_EQ(orResult.stringValue, "Alice");
+    EXPECT_EQ(orContext.lastError, ExpressionError::NONE);
+}
+
 TEST_F(EvaluatorBranchTest, L0_should_short_circuit_or_with_undefined_right)
 {
     auto result = Eval("false || $undef");
@@ -1947,6 +2049,18 @@ TEST_F(DynamicValueResolverJsonPointerTest, L0_should_preserve_soft_expression_e
     EXPECT_EQ(illegalExpression.source, ResolveSource::EXPRESSION);
     EXPECT_EQ(illegalExpression.value.GetStringValue(""), "User = ");
     EXPECT_NE(illegalExpression.errorMessage.find("illegal expression"), std::string::npos);
+}
+
+TEST_F(DynamicValueResolverJsonPointerTest, L0_should_degrade_unquoted_unresolved_identifier_to_empty_string)
+{
+    auto expressionAdapter = JsonAdapter::Parse(R"("{{ a }}")");
+    ASSERT_NE(expressionAdapter, nullptr);
+
+    auto resolved = DynamicValueResolver::Resolve(expressionAdapter->GetRoot(), MakeContext());
+    ASSERT_TRUE(resolved.success);
+    EXPECT_EQ(resolved.source, ResolveSource::EXPRESSION);
+    EXPECT_EQ(resolved.value.GetStringValue("fallback"), "");
+    EXPECT_NE(resolved.errorMessage.find("illegal expression"), std::string::npos);
 }
 
 TEST_F(DynamicValueResolverJsonPointerTest, L0_should_resolve_template_local_variables_in_expression_context)
@@ -2521,7 +2635,7 @@ TEST_F(EvaluatorDirectTest, L0_should_handle_unary_missing_operand)
 TEST_F(EvaluatorDirectTest, L0_should_evaluate_function_call_with_undefined_arg)
 {
     auto fc = std::make_shared<FunctionCall>("testFunc");
-    fc->arguments.push_back(std::make_shared<VariableReference>("undef"));
+    fc->arguments.push_back(std::make_shared<VariableReference>("undef", true));
     EvaluationContext ctx;
     auto result = eval_->Evaluate(fc, ctx);
     EXPECT_TRUE(result.IsUndefined());
@@ -2539,7 +2653,7 @@ TEST_F(EvaluatorDirectTest, L0_should_evaluate_function_call_successfully)
 
 TEST_F(EvaluatorDirectTest, L0_should_evaluate_variable_reference_undefined)
 {
-    auto ref = std::make_shared<VariableReference>("x");
+    auto ref = std::make_shared<VariableReference>("x", true);
     EvaluationContext ctx;
     auto result = eval_->Evaluate(ref, ctx);
     EXPECT_TRUE(result.IsUndefined());
@@ -2582,7 +2696,7 @@ TEST_F(EvaluatorDirectTest, L0_should_evaluate_conditional_false)
 TEST_F(EvaluatorDirectTest, L0_should_evaluate_conditional_undefined_condition)
 {
     auto cond = std::make_shared<ConditionalExpression>();
-    cond->condition = std::make_shared<VariableReference>("undef");
+    cond->condition = std::make_shared<VariableReference>("undef", true);
     cond->consequent = std::make_shared<NumberLiteral>(1.0);
     cond->alternate = std::make_shared<NumberLiteral>(2.0);
     EvaluationContext ctx;
@@ -2724,7 +2838,7 @@ TEST_F(EvaluatorDirectTest, L0_should_evaluate_binary_undefined_left)
 {
     auto bin = std::make_shared<BinaryExpression>();
     bin->op = BinaryOp::PLUS;
-    bin->left = std::make_shared<VariableReference>("undef");
+    bin->left = std::make_shared<VariableReference>("undef", true);
     bin->right = std::make_shared<NumberLiteral>(1.0);
     EvaluationContext ctx;
     auto result = eval_->Evaluate(bin, ctx);
@@ -2736,7 +2850,7 @@ TEST_F(EvaluatorDirectTest, L0_should_evaluate_binary_undefined_right)
     auto bin = std::make_shared<BinaryExpression>();
     bin->op = BinaryOp::PLUS;
     bin->left = std::make_shared<NumberLiteral>(1.0);
-    bin->right = std::make_shared<VariableReference>("undef");
+    bin->right = std::make_shared<VariableReference>("undef", true);
     EvaluationContext ctx;
     auto result = eval_->Evaluate(bin, ctx);
     EXPECT_TRUE(result.IsUndefined());
@@ -2746,7 +2860,7 @@ TEST_F(EvaluatorDirectTest, L0_should_evaluate_and_undefined_left)
 {
     auto bin = std::make_shared<BinaryExpression>();
     bin->op = BinaryOp::AND;
-    bin->left = std::make_shared<VariableReference>("undef");
+    bin->left = std::make_shared<VariableReference>("undef", true);
     bin->right = std::make_shared<BooleanLiteral>(true);
     EvaluationContext ctx;
     auto result = eval_->Evaluate(bin, ctx);
@@ -2758,7 +2872,7 @@ TEST_F(EvaluatorDirectTest, L0_should_evaluate_and_undefined_right)
     auto bin = std::make_shared<BinaryExpression>();
     bin->op = BinaryOp::AND;
     bin->left = std::make_shared<BooleanLiteral>(true);
-    bin->right = std::make_shared<VariableReference>("undef");
+    bin->right = std::make_shared<VariableReference>("undef", true);
     EvaluationContext ctx;
     auto result = eval_->Evaluate(bin, ctx);
     EXPECT_TRUE(result.IsUndefined());
@@ -2768,7 +2882,7 @@ TEST_F(EvaluatorDirectTest, L0_should_evaluate_or_undefined_left)
 {
     auto bin = std::make_shared<BinaryExpression>();
     bin->op = BinaryOp::OR;
-    bin->left = std::make_shared<VariableReference>("undef");
+    bin->left = std::make_shared<VariableReference>("undef", true);
     bin->right = std::make_shared<BooleanLiteral>(true);
     EvaluationContext ctx;
     auto result = eval_->Evaluate(bin, ctx);
@@ -2780,7 +2894,7 @@ TEST_F(EvaluatorDirectTest, L0_should_evaluate_or_undefined_right)
     auto bin = std::make_shared<BinaryExpression>();
     bin->op = BinaryOp::OR;
     bin->left = std::make_shared<BooleanLiteral>(false);
-    bin->right = std::make_shared<VariableReference>("undef");
+    bin->right = std::make_shared<VariableReference>("undef", true);
     EvaluationContext ctx;
     auto result = eval_->Evaluate(bin, ctx);
     EXPECT_TRUE(result.IsUndefined());
@@ -2790,7 +2904,7 @@ TEST_F(EvaluatorDirectTest, L0_should_evaluate_unary_undefined_operand)
 {
     auto unary = std::make_shared<UnaryExpression>();
     unary->op = UnaryOp::MINUS;
-    unary->operand = std::make_shared<VariableReference>("undef");
+    unary->operand = std::make_shared<VariableReference>("undef", true);
     EvaluationContext ctx;
     auto result = eval_->Evaluate(unary, ctx);
     EXPECT_TRUE(result.IsUndefined());
@@ -3224,6 +3338,57 @@ TEST(DataModelAccessTest, L0_should_treat_identifier_bracket_data_model_access_a
     EXPECT_NE(ctx.errorMessage.find("__dataModel"), std::string::npos);
 }
 
+TEST(DataModelAccessTest, L0_should_preserve_string_prefix_when_json_pointer_bracket_is_illegal)
+{
+    EvaluationContext ctx;
+
+    auto result = EvalWithContext("{{ 'Wrong root = ' + $__dataModel.user[/user/name] }}", ctx);
+
+    ASSERT_TRUE(result.IsDefined());
+    ASSERT_TRUE(result.IsString());
+    EXPECT_EQ(result.AsString(), "Wrong root = ");
+    EXPECT_EQ(ctx.lastError, ExpressionError::PARSE_UNEXPECTED_TOKEN);
+    EXPECT_NE(ctx.errorMessage.find("illegal expression"), std::string::npos);
+    EXPECT_NE(ctx.errorMessage.find("__dataModel"), std::string::npos);
+}
+
+TEST(DataModelAccessTest, L0_should_not_recover_json_pointer_bracket_for_regular_object)
+{
+    auto parseResult = ExpressionEngine::GetInstance().Parse("regularObject[/user/name]");
+
+    EXPECT_FALSE(parseResult.success);
+    EXPECT_EQ(parseResult.errorMessage, "unexpected token");
+}
+
+TEST(DataModelAccessTest, L0_should_access_nested_array_item_from_data_model_with_dynamic_bracket)
+{
+    EvaluationContext ctx;
+    auto dm = std::make_shared<DataModel>("test_surface");
+    auto adapter = JsonAdapter::Parse(R"({
+        "__exprCases":{
+            "currentUserIndex":1,
+            "currentOrderIndex":0,
+            "currentItemIndex":1,
+            "users":[
+                {"orders":[{"items":[{"value":100}]}]},
+                {"orders":[{"items":[{"value":150},{"value":200}]}]}
+            ]
+        }
+    })");
+    ASSERT_NE(adapter, nullptr);
+    dm->ReplaceAll(adapter->GetRoot());
+    ctx.SetDataModel(dm.get());
+
+    auto result = EvalWithContext(
+        "{{ $__dataModel.__exprCases.users[$__dataModel.__exprCases.currentUserIndex].orders"
+        "[$__dataModel.__exprCases.currentOrderIndex].items[$__dataModel.__exprCases.currentItemIndex].value }}",
+        ctx);
+    ASSERT_TRUE(result.IsDefined()) << static_cast<int32_t>(ctx.lastError) << " " << ctx.errorMessage;
+    ASSERT_TRUE(result.IsNumber());
+    EXPECT_DOUBLE_EQ(result.AsNumber(), 200.0);
+    EXPECT_EQ(ctx.lastError, ExpressionError::NONE);
+}
+
 TEST(DataModelAccessTest, L0_should_treat_empty_bracket_data_model_access_as_parse_error)
 {
     EvaluationContext ctx;
@@ -3474,7 +3639,7 @@ TEST_F(EvaluatorBranchTest, L0_should_preserve_existing_error_when_followup_eval
     EvaluationContext memberCtx;
     memberCtx.SetError(ExpressionError::EVAL_UNDEFINED_VARIABLE, "seed error");
     auto missingMember = std::make_shared<MemberAccess>();
-    missingMember->object = std::make_shared<VariableReference>("missing");
+    missingMember->object = std::make_shared<VariableReference>("missing", true);
     missingMember->property = "name";
     auto missingMemberResult = eval.Evaluate(missingMember, memberCtx);
     EXPECT_TRUE(missingMemberResult.IsUndefined());
@@ -3510,7 +3675,7 @@ TEST_F(EvaluatorBranchTest, L0_should_preserve_existing_error_when_function_argu
     });
 
     auto call = std::make_shared<FunctionCall>("echo");
-    call->arguments.push_back(std::make_shared<VariableReference>("missing"));
+    call->arguments.push_back(std::make_shared<VariableReference>("missing", true));
 
     EvaluationContext ctx;
     ctx.SetError(ExpressionError::EVAL_UNDEFINED_VARIABLE, "seed error");
@@ -3683,13 +3848,15 @@ TEST_F(ExpressionEngineBranchTest, L0_should_rewrite_size_calls_with_quoted_pare
     auto quotedParenthesis = EvalWithContext("{{ size(')') }}", ctx);
     ASSERT_TRUE(quotedParenthesis.IsNumber());
     EXPECT_DOUBLE_EQ(quotedParenthesis.AsNumber(), 0.0);
-    EXPECT_EQ(ctx.lastError, ExpressionError::NONE);
+    EXPECT_EQ(ctx.lastError, ExpressionError::PARSE_UNEXPECTED_TOKEN);
+    EXPECT_NE(ctx.errorMessage.find("Built-in function size() expects an array argument"), std::string::npos);
 
     ctx.ClearError();
     auto escapedQuote = EvalWithContext(R"EXPR({{ size('a\')') }})EXPR", ctx);
     ASSERT_TRUE(escapedQuote.IsNumber());
     EXPECT_DOUBLE_EQ(escapedQuote.AsNumber(), 0.0);
-    EXPECT_EQ(ctx.lastError, ExpressionError::NONE);
+    EXPECT_EQ(ctx.lastError, ExpressionError::PARSE_UNEXPECTED_TOKEN);
+    EXPECT_NE(ctx.errorMessage.find("Built-in function size() expects an array argument"), std::string::npos);
 }
 
 // ==================== size Builtin Tests (issue-76 / TASK-1) ====================
@@ -3718,7 +3885,7 @@ TEST(SizeBuiltinFunctionTest, L0_should_return_array_length_for_local_array_vari
     ctx.PushScope();
     ctx.SetLocalVariable("localItems", EvalResult::FromJson(localItems->GetRoot()));
 
-    auto result = EvalWithContext("{{ size(localItems) }}", ctx);
+    auto result = EvalWithContext("{{ size($localItems) }}", ctx);
     ASSERT_TRUE(result.IsDefined());
     ASSERT_TRUE(result.IsNumber());
     EXPECT_DOUBLE_EQ(result.AsNumber(), 4.0);
@@ -3735,7 +3902,7 @@ TEST(SizeBuiltinFunctionTest, L0_should_return_array_length_for_local_object_mem
     ctx.PushScope();
     ctx.SetLocalVariable("localObject", EvalResult::FromJson(localObject->GetRoot()));
 
-    auto result = EvalWithContext("{{ size(localObject.items) }}", ctx);
+    auto result = EvalWithContext("{{ size($localObject.items) }}", ctx);
     ASSERT_TRUE(result.IsDefined());
     ASSERT_TRUE(result.IsNumber());
     EXPECT_DOUBLE_EQ(result.AsNumber(), 2.0);
@@ -3779,10 +3946,12 @@ TEST(SizeBuiltinFunctionTest, L0_should_return_zero_for_non_array_argument)
     ctx.PushScope();
     ctx.SetLocalVariable("count", EvalResult::FromNumber(42.0));
 
-    auto result = EvalWithContext("{{ size(count) }}", ctx);
+    auto result = EvalWithContext("{{ size($count) }}", ctx);
     ASSERT_TRUE(result.IsDefined());
     ASSERT_TRUE(result.IsNumber());
     EXPECT_DOUBLE_EQ(result.AsNumber(), 0.0);
+    EXPECT_EQ(ctx.lastError, ExpressionError::PARSE_UNEXPECTED_TOKEN);
+    EXPECT_NE(ctx.errorMessage.find("Built-in function size() expects an array argument"), std::string::npos);
 
     ctx.PopScope();
 }
@@ -3823,6 +3992,19 @@ TEST(SizeBuiltinFunctionTest, L0_should_return_zero_when_size_argument_is_undefi
     ASSERT_TRUE(result.IsString());
     EXPECT_EQ(result.AsString(), "size is = 0");
     EXPECT_NE(ctx.lastError, ExpressionError::NONE);
+}
+
+TEST(SizeBuiltinFunctionTest, L0_should_return_zero_when_size_argument_is_unquoted_unresolved_identifier)
+{
+    EvaluationContext ctx;
+
+    auto result = EvalWithContext("{{ size(a) }}", ctx);
+    ASSERT_TRUE(result.IsDefined());
+    ASSERT_TRUE(result.IsNumber());
+    EXPECT_DOUBLE_EQ(result.AsNumber(), 0.0);
+    EXPECT_EQ(ctx.lastError, ExpressionError::PARSE_UNEXPECTED_TOKEN);
+    EXPECT_NE(ctx.errorMessage.find("illegal expression"), std::string::npos);
+    EXPECT_EQ(ctx.errorMessage.find("Built-in function size() expects an array argument"), std::string::npos);
 }
 
 TEST(SizeBuiltinFunctionTest, L0_should_return_zero_when_size_argument_path_is_missing)
@@ -4726,6 +4908,40 @@ TEST_F(ExpressionBindingIntegrationTest, L0_should_apply_expression_property_wit
     (void)surfaceSlot;
 }
 
+TEST_F(ExpressionBindingIntegrationTest, L0_should_preserve_text_prefix_when_json_pointer_bracket_operand_is_illegal)
+{
+    SurfaceSlot& surfaceSlot = CreateSurface(9316, "expr-illegal-json-pointer-bracket-surface");
+    auto component =
+        CreateProbeComponent(9316, "expr-illegal-json-pointer-bracket-surface", "expr-illegal-json-pointer-bracket");
+
+    auto descriptor = ParseJsonForBindingTest(R"({"text":"{{ 'Wrong root = ' + $__dataModel.user[/user/name] }}"})");
+    ASSERT_NE(descriptor, nullptr);
+
+    component->InvokeSetPropertyFromDescriptor("text", descriptor->GetRoot());
+
+    EXPECT_EQ(component->GetStoredString("text"), std::make_optional(std::string("Wrong root = ")));
+    EXPECT_EQ(component->GetApplyCount("text"), 1);
+    (void)surfaceSlot;
+}
+
+TEST_F(ExpressionBindingIntegrationTest, L0_should_not_report_schema_warning_when_expression_property_falls_back)
+{
+    SurfaceSlot& surfaceSlot = CreateSurface(9328, "expr-fallback-without-schema-warning-surface");
+    TestHelpers::RegisterWarningDispatchCallback(mockNapiPtr_);
+    auto component = CreateProbeComponent(
+        9328, "expr-fallback-without-schema-warning-surface", "expr-fallback-without-schema-warning");
+    auto descriptor = ParseJsonForBindingTest(R"({"text":"{{ 1 + }}"})");
+    ASSERT_NE(descriptor, nullptr);
+
+    component->InvokeSetPropertyFromDescriptor("text", descriptor->GetRoot());
+
+    EXPECT_EQ(component->GetStoredString("text"), std::make_optional(std::string("")));
+    EXPECT_EQ(TestHelpers::CountWarningRequests(
+                  mockNapiPtr_, "ERROR_CODE_INVALID_VALUE", "expr-fallback-without-schema-warning.text"),
+        0U);
+    (void)surfaceSlot;
+}
+
 TEST_F(ExpressionBindingIntegrationTest, L0_should_apply_empty_string_for_soft_system_variable_member_access_error)
 {
     SurfaceSlot& surfaceSlot = CreateSurface(9315, "expr-soft-system-member-surface");
@@ -4829,6 +5045,35 @@ TEST_F(ExpressionBindingIntegrationTest, L0_should_refresh_expression_binding_wh
     dataModel->UpdateByPath("/user/name", newName->GetRoot());
 
     EXPECT_EQ(component->GetStoredString("text"), std::make_optional(std::string("Bob")));
+}
+
+TEST_F(ExpressionBindingIntegrationTest, L0_should_recover_property_expression_when_missing_dependency_arrives)
+{
+    SurfaceSlot& surfaceSlot = CreateSurface(9327, "expr-missing-property-surface");
+    auto dataModel = surfaceSlot.GetOrCreateDataModel();
+    ASSERT_NE(dataModel, nullptr);
+
+    auto initialData = ParseJsonForBindingTest(R"({"metrics":{}})");
+    ASSERT_NE(initialData, nullptr);
+    dataModel->ReplaceAll(initialData->GetRoot());
+
+    auto component = CreateProbeComponent(9327, "expr-missing-property-surface", "expr-missing-property");
+    auto descriptor = ParseJsonForBindingTest(R"({"padding":"{{ 10 / $__dataModel.metrics.divisor }}"})");
+    ASSERT_NE(descriptor, nullptr);
+    component->InvokeSetPropertyFromDescriptor("padding", descriptor->GetRoot());
+
+    const auto& bindings = component->GetDataBindings();
+    ASSERT_EQ(bindings.size(), 1U);
+    EXPECT_EQ(bindings[0].propertyName_, "padding");
+    EXPECT_EQ(bindings[0].type_, BindingType::EXPRESSION);
+    EXPECT_EQ(bindings[0].dataPath_, "/metrics/divisor");
+
+    RegisterComponentBinding(surfaceSlot, component);
+    auto divisor = JsonAdapter::CreateNumber(2.0);
+    ASSERT_NE(divisor, nullptr);
+    dataModel->UpdateByPath("/metrics/divisor", divisor->GetRoot());
+
+    EXPECT_EQ(component->GetStoredNumber("padding"), std::make_optional(5.0));
 }
 
 TEST_F(ExpressionBindingIntegrationTest, L0_should_refresh_extended_text_style_expression_when_data_model_path_changes)
@@ -5084,8 +5329,14 @@ TEST_F(ExpressionBindingIntegrationTest, L0_should_collapse_duplicate_expression
     EXPECT_EQ(dataModelDepCount, 1);
 }
 
+/**
+ * @tc.name: ExpressionBindingIntegration_should_apply_declared_string_fallback_for_null_literal
+ * @tc.desc: Verify a null literal reports a type mismatch and applies the declared string fallback.
+ * @tc.type: FUNC
+ */
 TEST_F(ExpressionBindingIntegrationTest, L0_should_apply_declared_string_fallback_for_null_literal)
 {
+    TestHelpers::RegisterWarningDispatchCallback(mockNapiPtr_);
     auto component = CreateProbeComponent(9312, "expr-null-literal-surface", "expr-null-literal");
 
     auto descriptor = ParseJsonForBindingTest(R"({"text":null})");
@@ -5096,6 +5347,8 @@ TEST_F(ExpressionBindingIntegrationTest, L0_should_apply_declared_string_fallbac
     EXPECT_TRUE(component->GetDataBindings().empty());
     EXPECT_EQ(component->GetStoredString("text"), std::make_optional(std::string("")));
     EXPECT_EQ(component->GetApplyCount("text"), 1);
+    EXPECT_EQ(
+        TestHelpers::CountWarningRequests(mockNapiPtr_, "ERROR_CODE_TYPE_MISMATCH", "expr-null-literal.text"), 1U);
 }
 
 TEST_F(ExpressionBindingIntegrationTest, L0_should_unregister_data_model_expression_dependency_when_binding_changes)

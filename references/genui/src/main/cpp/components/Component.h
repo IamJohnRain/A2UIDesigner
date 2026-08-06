@@ -42,6 +42,7 @@ class RenderManager;
 class RenderSlot;
 class ThemeManager;
 class SurfaceSlot;
+struct ResolvedValue;
 
 enum class PropertyValueType { STRING = 0, NUMBER, BOOLEAN, ENUM_STRING, OBJECT };
 
@@ -51,6 +52,7 @@ struct PropertyDeclaration {
     bool allowDynamic = false;
     bool allowExpression = false;
     bool acceptNumberForString = false;
+    bool resetOnTypeMismatch = false;
     bool reportDynamicNumberRange = false;
     double dynamicNumberMin = 0.0;
     bool dynamicNumberMinExclusive = false;
@@ -171,6 +173,10 @@ public:
     }
 
 protected:
+    static size_t CountNativeDescendantViews(const std::shared_ptr<Component>& node);
+    static void CollectNativeDescendantViews(
+        const std::shared_ptr<Component>& node, std::vector<ArkUI_NodeHandle>& nativeViews);
+    size_t ResolveNativeChildIndex(const Component* target, size_t fallback) const;
     virtual void OnAttachToParent();
     virtual void OnAddChild(const std::shared_ptr<Component>& child, size_t index);
     virtual void OnMoveChild(const std::shared_ptr<Component>& child, size_t currentIndex, size_t targetIndex);
@@ -241,6 +247,24 @@ protected:
     std::string ResolveSchemaWarningItemName() const;
 
 private:
+    struct TemplateChildBuildContext {
+        const ChildListDescriptor& childList;
+        SurfaceSlot& surfaceSlot;
+        const JsonValue& arrayValue;
+        const std::map<std::string, JsonValue>& descriptorStore;
+        std::list<std::string>& childIds;
+    };
+
+    struct PropertyBindingState {
+        std::string descriptorKey;
+        std::string declarationKey;
+        std::string resolvedBindingKey;
+        PropertyDeclaration declaration;
+        bool hasDeclaration = false;
+        bool shouldFallbackOnNullOrEmptyObject = false;
+        bool allowExpression = false;
+    };
+
     PropertyDeclaration GetCommonPropertyDeclaration(const std::string& propertyName);
     bool TryGetPropertyDeclaration(const std::string& property, PropertyDeclaration& declaration);
     bool IsKnownDescriptorKey(const std::string& propertyName);
@@ -250,6 +274,27 @@ private:
         const JsonValue& objectValue, const std::string& propertyPath, const std::string& objectName);
     void ResolveAndBindProperty(const std::string& descriptorKey, const std::string& declarationKey,
         const std::string& bindingKey, const JsonValue& valueJson);
+    bool HandleUnsupportedExpression(const PropertyBindingState& state, const JsonValue& valueJson);
+    bool HandleObjectLiteral(const PropertyBindingState& state, const JsonValue& valueJson);
+    void HandleResolvedPathBinding(const PropertyBindingState& state, const ResolvedValue& resolved);
+    void HandleResolvedFunctionCall(
+        const PropertyBindingState& state, const JsonValue& valueJson, const ResolvedValue& resolved);
+    void ApplyFunctionCallMissingPathFallback(const PropertyBindingState& state, const JsonValue& valueJson);
+    void HandleInvalidPathBinding(const PropertyBindingState& state);
+    void HandleResolvedExpression(
+        const PropertyBindingState& state, const JsonValue& valueJson, const ResolvedValue& resolved);
+    void HandleDirectResolvedValue(
+        const PropertyBindingState& state, const JsonValue& valueJson, const ResolvedValue& resolved);
+    void SyncExpressionBindings(const std::string& bindingKey, const JsonValue& valueJson);
+    bool ResolveEagerTemplateArray(
+        const ChildListDescriptor& childList, SurfaceSlot& surfaceSlot, JsonValue& arrayValue);
+    bool BuildEagerTemplateChild(const TemplateChildBuildContext& context, int32_t itemIndex);
+    void ValidateActionEventProperty(const JsonValue& value);
+    void ValidateActionFunctionCallProperty(const JsonValue& value);
+    void ApplyResolvedPathValue(const std::string& declarationKey, const std::string& resolvedBindingKey,
+        const ResolvedValue& resolved, const PropertyDeclaration& declaration, bool shouldFallbackOnNullOrEmptyObject);
+    void ApplyResolvedFunctionCallValue(
+        const std::string& declarationKey, const std::string& resolvedBindingKey, const ResolvedValue& resolved);
     void SyncPathBinding(const std::string& bindingKey, const std::string& path);
     void SyncFunctionCallBindings(const std::string& bindingKey, const JsonValue& descriptor);
     void ApplyResolvedPropertyValue(

@@ -22,7 +22,9 @@
 #include "components/extended/ExtendedListComponent.h"
 #include "components/extended/ExtendedRowComponent.h"
 #include "components/extended/ExtendedTextComponent.h"
+#include "functions/RuntimeErrorDispatchBridge.h"
 #include "functions/WarningDispatchBridge.h"
+#include "theme/ThemeManager.h"
 
 #include "A2UIComponentTddTestHelper.h"
 #include "SurfaceSlot.h"
@@ -34,6 +36,15 @@ namespace {
 constexpr char SCHEMA_ERROR_CODE_REQUIRED_MISS[] = "ERROR_CODE_REQUIRED_MISS";
 constexpr char SCHEMA_ERROR_CODE_INVALID_VALUE[] = "ERROR_CODE_INVALID_VALUE";
 constexpr char SCHEMA_ERROR_CODE_TYPE_MISMATCH[] = "ERROR_CODE_TYPE_MISMATCH";
+
+std::map<ArkUI_NodeHandle, ArkUI_NodeEventCallback> g_breakpointNodeEventReceivers;
+
+int32_t CaptureBreakpointNodeEventReceiver(ArkUI_NodeHandle node, ArkUI_NodeEventCallback callback)
+{
+    TrackAddNodeEventReceiver(node, callback);
+    g_breakpointNodeEventReceivers[node] = callback;
+    return 0;
+}
 
 struct DispatchCallbacks {
     napi_env env = nullptr;
@@ -58,6 +69,18 @@ DispatchCallbacks RegisterDispatchCallbacks(MockNapiProvider* mockNapi)
     mockNapi->lastCallFunctionArgs_.clear();
     mockNapi->callFunctionArgsHistory_.clear();
     return callbacks;
+}
+
+void RegisterRuntimeErrorCallback(MockNapiProvider* mockNapi)
+{
+    if (mockNapi == nullptr) {
+        return;
+    }
+
+    napi_env env = reinterpret_cast<napi_env>(0x1301);
+    napi_value callback = nullptr;
+    mockNapi->CreateFunction(env, "dispatchRuntimeError", NAPI_AUTO_LENGTH, nullptr, nullptr, &callback);
+    RuntimeErrorDispatchBridge::GetInstance().RegisterDispatchRuntimeError(env, callback);
 }
 
 napi_value GetRequestProperty(const MockNapiProvider* mockNapi, napi_value request, const std::string& key)
@@ -284,6 +307,128 @@ TEST_F(SurfaceSlotComponentIntegrationTddTest,
     EXPECT_EQ(mockArkUIPtr_->totalNodeCounts_[adapterHandle], 3U);
 }
 
+/**
+ * @tc.name: L0_should_auto_load_extended_list_template_when_data_arrives_after_components
+ * @tc.desc: 验证扩展 List 先创建空适配器并在后续数据到达时复用适配器加载模板项
+ * @tc.type: FUNC
+ */
+TEST_F(SurfaceSlotComponentIntegrationTddTest,
+    L0_should_auto_load_extended_list_template_when_data_arrives_after_components)
+{
+    RenderSlot& renderSlot = RenderManager::GetInstance().CreateRenderSlot(COMPONENT_TDD_RENDER_ID);
+    std::shared_ptr<SurfaceManager> surfaceManager = renderSlot.GetSurfaceManager();
+    ASSERT_NE(surfaceManager, nullptr);
+    SurfaceSlot& surfaceSlot = surfaceManager->CreateSurface(COMPONENT_TDD_SURFACE_ID, nullptr);
+    surfaceSlot.SetCatalog(CreateExtendedProtocolCatalog({ "List", "Text" }));
+
+    auto listComponent = ParseJson(R"({"components":[{"id":"root","component":"List",)"
+                                   R"("children":{"componentId":"rowTemplate","path":"/items"}}]})");
+    ASSERT_NE(listComponent, nullptr);
+    ASSERT_TRUE(surfaceSlot.UpdateComponents(listComponent->GetRoot()));
+
+    auto templateComponent =
+        ParseJson(R"({"components":[{"id":"rowTemplate","component":"Text","content":{"path":"name"}}]})");
+    ASSERT_NE(templateComponent, nullptr);
+    ASSERT_TRUE(surfaceSlot.UpdateComponents(templateComponent->GetRoot()));
+
+    auto list = std::dynamic_pointer_cast<ExtendedListComponent>(surfaceSlot.FindComponentById("root"));
+    ASSERT_NE(list, nullptr);
+    ASSERT_TRUE(list->IsLazyMode());
+    ASSERT_NE(list->GetAdapterNode(), nullptr);
+    std::shared_ptr<ListAdapterNode> initialAdapter = list->GetAdapterNode();
+    EXPECT_EQ(initialAdapter->GetTemplateId(), "rowTemplate");
+    EXPECT_EQ(initialAdapter->GetDataPath(), "/items");
+    EXPECT_NE(initialAdapter->GetDataModel(), nullptr);
+    ArkUI_NodeAdapterHandle initialAdapterHandle = initialAdapter->GetHandle();
+    EXPECT_EQ(mockArkUIPtr_->totalNodeCounts_[initialAdapterHandle], 0U);
+
+    auto updatedModel = ParseJson(R"({"path":"/items","value":[{"name":"gamma"},{"name":"delta"}]})");
+    ASSERT_NE(updatedModel, nullptr);
+    ASSERT_TRUE(surfaceSlot.UpdateDataModel(updatedModel->GetRoot()));
+
+    list = std::dynamic_pointer_cast<ExtendedListComponent>(surfaceSlot.FindComponentById("root"));
+    ASSERT_NE(list, nullptr);
+    ASSERT_TRUE(list->IsLazyMode());
+    ASSERT_NE(list->GetAdapterNode(), nullptr);
+    ArkUI_NodeAdapterHandle adapterHandle = list->GetAdapterNode()->GetHandle();
+    EXPECT_EQ(adapterHandle, initialAdapterHandle);
+    EXPECT_TRUE(HasAdapterAttribute(list->GetNativeView(), NODE_LIST_NODE_ADAPTER, adapterHandle));
+    EXPECT_EQ(mockArkUIPtr_->totalNodeCounts_[adapterHandle], 2U);
+
+    auto event = reinterpret_cast<ArkUI_NodeAdapterEvent*>(0x3003);
+    mockArkUIPtr_->SetNodeAdapterEventType(event, NODE_ADAPTER_EVENT_ON_ADD_NODE_TO_ADAPTER);
+    mockArkUIPtr_->SetNodeAdapterEventItemIndex(event, 0);
+    ASSERT_TRUE(mockArkUIPtr_->DispatchNodeAdapterEvent(adapterHandle, event));
+
+    ASSERT_EQ(mockArkUIPtr_->nodeAdapterEventItems_.count(event), 1U);
+    std::shared_ptr<Component> firstItem = surfaceSlot.FindComponentById("/itemsrowTemplate:0:rowTemplate");
+    ASSERT_NE(firstItem, nullptr);
+    ExpectStringAttribute(firstItem->GetNativeView(), NODE_TEXT_CONTENT, "gamma");
+}
+
+TEST_F(SurfaceSlotComponentIntegrationTddTest, should_isolate_list_and_grid_component_breakpoint_state)
+{
+    api_->addNodeEventReceiver = CaptureBreakpointNodeEventReceiver;
+    g_breakpointNodeEventReceivers.clear();
+    RenderSlot& renderSlot = RenderManager::GetInstance().CreateRenderSlot(COMPONENT_TDD_RENDER_ID);
+    std::shared_ptr<SurfaceManager> surfaceManager = renderSlot.GetSurfaceManager();
+    surfaceManager->SetApiVersion(21);
+    ASSERT_NE(surfaceManager, nullptr);
+    SurfaceSlot& surfaceSlot = surfaceManager->CreateSurface(COMPONENT_TDD_SURFACE_ID, nullptr);
+    surfaceSlot.SetCatalog(CreateExtendedProtocolCatalog({ "Column", "List", "Grid" }));
+    surfaceManager->UpdateBreakpoint(Breakpoint::XL);
+
+    auto message = ParseJson(R"({"components":[
+        {"id":"root","component":"Column","children":["list","grid"]},
+        {"id":"list","component":"List"},
+        {"id":"grid","component":"Grid","styles":{
+            "columnsTemplate":{"xs":"1fr","md":"1fr 1fr"}
+        }}
+    ]})");
+    ASSERT_NE(message, nullptr);
+    ASSERT_TRUE(surfaceSlot.UpdateComponents(message->GetRoot()));
+
+    auto list = std::dynamic_pointer_cast<ExtendedListComponent>(surfaceSlot.FindComponentById("list"));
+    auto grid = std::dynamic_pointer_cast<ExtendedGridComponent>(surfaceSlot.FindComponentById("grid"));
+    ASSERT_NE(list, nullptr);
+    ASSERT_NE(grid, nullptr);
+    ASSERT_NE(surfaceSlot.GetThemeManager(), nullptr);
+    EXPECT_EQ(surfaceSlot.GetThemeManager()->GetContext().breakpoint, Breakpoint::XL);
+    ASSERT_NE(g_breakpointNodeEventReceivers[list->GetNativeView()], nullptr);
+    ASSERT_NE(g_breakpointNodeEventReceivers[grid->GetNativeView()], nullptr);
+
+    const int32_t gridColumnsBefore = CountAttributeCall(grid->GetNativeView(), NODE_GRID_COLUMN_TEMPLATE);
+    ArkUI_NodeEvent listEvent {};
+    ArkUI_NodeComponentEvent listArea {};
+    listArea.data[0].f32 = 0.0F;
+    listArea.data[2].f32 = 360.0F;
+    mockArkUIPtr_->SetNodeEventHandle(&listEvent, list->GetNativeView());
+    mockArkUIPtr_->SetNodeEventType(&listEvent, NODE_ON_SIZE_CHANGE);
+    mockArkUIPtr_->SetNodeEventComponentEvent(&listEvent, &listArea);
+    g_breakpointNodeEventReceivers[list->GetNativeView()](&listEvent);
+
+    EXPECT_EQ(CountAttributeCall(grid->GetNativeView(), NODE_GRID_COLUMN_TEMPLATE), gridColumnsBefore);
+    ExpectI32Attribute(list->GetNativeView(), NODE_LIST_LANES, 1);
+    list->OnConfigChange(surfaceSlot.GetThemeManager()->GetContext());
+    ExpectI32Attribute(list->GetNativeView(), NODE_LIST_LANES, 1);
+
+    const int32_t listLanesBefore = CountAttributeCall(list->GetNativeView(), NODE_LIST_LANES);
+    ArkUI_NodeEvent gridEvent {};
+    ArkUI_NodeComponentEvent gridArea {};
+    gridArea.data[0].f32 = 500.0F;
+    gridArea.data[2].f32 = 800.0F;
+    mockArkUIPtr_->SetNodeEventHandle(&gridEvent, grid->GetNativeView());
+    mockArkUIPtr_->SetNodeEventType(&gridEvent, NODE_ON_SIZE_CHANGE);
+    mockArkUIPtr_->SetNodeEventComponentEvent(&gridEvent, &gridArea);
+    g_breakpointNodeEventReceivers[grid->GetNativeView()](&gridEvent);
+
+    EXPECT_EQ(CountAttributeCall(list->GetNativeView(), NODE_LIST_LANES), listLanesBefore);
+    ExpectStringAttribute(grid->GetNativeView(), NODE_GRID_COLUMN_TEMPLATE, "1fr 1fr");
+    grid->OnConfigChange(surfaceSlot.GetThemeManager()->GetContext());
+    ExpectStringAttribute(grid->GetNativeView(), NODE_GRID_COLUMN_TEMPLATE, "1fr 1fr");
+    EXPECT_EQ(surfaceSlot.GetThemeManager()->GetContext().breakpoint, Breakpoint::XL);
+}
+
 TEST_F(SurfaceSlotComponentIntegrationTddTest, L0_should_refresh_standard_list_when_update_data_model_path_is_root)
 {
     RenderSlot& renderSlot = RenderManager::GetInstance().CreateRenderSlot(COMPONENT_TDD_RENDER_ID);
@@ -459,6 +604,8 @@ TEST_F(
 TEST_F(SurfaceSlotComponentIntegrationTddTest,
     L0_should_apply_initial_dynamic_current_index_for_nav_container_after_data_model_is_ready)
 {
+    RegisterDispatchCallbacks(mockNapiPtr_);
+
     RenderSlot& renderSlot = RenderManager::GetInstance().CreateRenderSlot(COMPONENT_TDD_RENDER_ID);
     std::shared_ptr<SurfaceManager> surfaceManager = renderSlot.GetSurfaceManager();
     ASSERT_NE(surfaceManager, nullptr);
@@ -485,10 +632,18 @@ TEST_F(SurfaceSlotComponentIntegrationTddTest,
 
     ExpectI32Attribute(pageOne->GetNativeView(), NODE_VISIBILITY, ARKUI_VISIBILITY_NONE);
     ExpectI32Attribute(pageTwo->GetNativeView(), NODE_VISIBILITY, ARKUI_VISIBILITY_VISIBLE);
+
+    auto outOfRangeUpdate = ParseJson(R"({"path":"/navModel/activeIndex","value":2})");
+    ASSERT_NE(outOfRangeUpdate, nullptr);
+    ASSERT_TRUE(surfaceSlot.UpdateDataModel(outOfRangeUpdate->GetRoot()));
+
+    EXPECT_EQ(CountWarningRequests(mockNapiPtr_, SCHEMA_ERROR_CODE_INVALID_VALUE, "root.currentIndex"), 1U);
+    ExpectI32Attribute(pageOne->GetNativeView(), NODE_VISIBILITY, ARKUI_VISIBILITY_NONE);
+    ExpectI32Attribute(pageTwo->GetNativeView(), NODE_VISIBILITY, ARKUI_VISIBILITY_VISIBLE);
 }
 
-TEST_F(SurfaceSlotComponentIntegrationTddTest,
-    L0_should_allow_empty_children_array_for_nav_container_without_schema_warning)
+TEST_F(
+    SurfaceSlotComponentIntegrationTddTest, L0_should_report_invalid_current_index_when_nav_container_children_is_empty)
 {
     RegisterDispatchCallbacks(mockNapiPtr_);
     RenderSlot& renderSlot = RenderManager::GetInstance().CreateRenderSlot(COMPONENT_TDD_RENDER_ID);
@@ -506,7 +661,7 @@ TEST_F(SurfaceSlotComponentIntegrationTddTest,
     ASSERT_NE(message, nullptr);
     ASSERT_TRUE(surfaceSlot.UpdateComponents(message->GetRoot()));
 
-    EXPECT_EQ(mockNapiPtr_->callFunctionCallCount_, 0U);
+    EXPECT_EQ(CountWarningRequests(mockNapiPtr_, SCHEMA_ERROR_CODE_INVALID_VALUE, "navMain.currentIndex"), 1U);
     auto nav = surfaceSlot.FindComponentById("navMain");
     ASSERT_NE(nav, nullptr);
     EXPECT_TRUE(nav->GetChildren().empty());
@@ -684,7 +839,7 @@ TEST_F(SurfaceSlotComponentIntegrationTddTest, L0_should_expand_template_childre
     std::shared_ptr<SurfaceManager> surfaceManager = renderSlot.GetSurfaceManager();
     ASSERT_NE(surfaceManager, nullptr);
     SurfaceSlot& surfaceSlot = surfaceManager->CreateSurface(COMPONENT_TDD_SURFACE_ID, nullptr);
-    surfaceSlot.SetCatalog(CreateExtendedProtocolCatalog({ "Extended.Tabs", "Extended.TabContent", "Text" }));
+    surfaceSlot.SetCatalog(CreateExtendedProtocolCatalog({ "Tabs", "Extended.TabContent", "Text" }));
 
     auto dataModel = ParseJson(R"({"value":{"pages":[)"
                                R"({"title":"首页","body":"欢迎使用 GenUI"},)"
@@ -697,7 +852,7 @@ TEST_F(SurfaceSlotComponentIntegrationTddTest, L0_should_expand_template_childre
 
     auto message = ParseJson(
         R"({"components":[)"
-        R"({"id":"root","component":"Extended.Tabs","children":{"componentId":"tabContentTpl","path":"/pages"}},)"
+        R"({"id":"root","component":"Tabs","children":{"componentId":"tabContentTpl","path":"/pages"}},)"
         R"({"id":"tabContentTpl","component":"Extended.TabContent","title":{"path":"title"},"children":["pageContent"]},)"
         R"({"id":"pageContent","component":"Text","content":{"path":"body"}})"
         R"(]})");
@@ -727,11 +882,11 @@ TEST_F(SurfaceSlotComponentIntegrationTddTest,
     std::shared_ptr<SurfaceManager> surfaceManager = renderSlot.GetSurfaceManager();
     ASSERT_NE(surfaceManager, nullptr);
     SurfaceSlot& surfaceSlot = surfaceManager->CreateSurface(COMPONENT_TDD_SURFACE_ID, nullptr);
-    surfaceSlot.SetCatalog(CreateExtendedProtocolCatalog({ "Extended.Tabs", "Extended.TabContent", "Text" }));
+    surfaceSlot.SetCatalog(CreateExtendedProtocolCatalog({ "Tabs", "Extended.TabContent", "Text" }));
 
     auto message =
         ParseJson(R"({"components":[)"
-                  R"({"id":"root","component":"Extended.Tabs","children":["tabHome","tabOrders"]},)"
+                  R"({"id":"root","component":"Tabs","children":["tabHome","tabOrders"]},)"
                   R"({"id":"tabHome","component":"Extended.TabContent","title":"Home","children":["homePage"]},)"
                   R"({"id":"tabOrders","component":"Extended.TabContent","title":"Orders","children":["ordersPage"]},)"
                   R"({"id":"homePage","component":"Text","content":"欢迎来到首页"},)"
@@ -978,12 +1133,12 @@ TEST_F(SurfaceSlotComponentIntegrationTddTest,
     std::shared_ptr<SurfaceManager> surfaceManager = renderSlot.GetSurfaceManager();
     ASSERT_NE(surfaceManager, nullptr);
     SurfaceSlot& surfaceSlot = surfaceManager->CreateSurface(COMPONENT_TDD_SURFACE_ID, nullptr);
-    surfaceSlot.SetCatalog(CreateExtendedProtocolCatalog({ "Column", "Extended.Tabs", "Extended.TabContent", "Text" }));
+    surfaceSlot.SetCatalog(CreateExtendedProtocolCatalog({ "Column", "Tabs", "Extended.TabContent", "Text" }));
 
     auto message =
         ParseJson(R"({"components":[)"
                   R"({"id":"root","component":"Column","children":["tabsMain"]},)"
-                  R"({"id":"tabsMain","component":"Extended.Tabs","children":{"componentId":"tabTemplate","path":""}},)"
+                  R"({"id":"tabsMain","component":"Tabs","children":{"componentId":"tabTemplate","path":""}},)"
                   R"({"id":"tabTemplate","component":"Extended.TabContent","title":"Home","children":["pageHome"]},)"
                   R"({"id":"pageHome","component":"Text","content":"alpha"})"
                   R"(]})");
@@ -1158,13 +1313,15 @@ TEST_F(SurfaceSlotComponentIntegrationTddTest,
 }
 
 TEST_F(SurfaceSlotComponentIntegrationTddTest,
-    L0_should_not_dispatch_schema_warning_when_template_children_path_is_missing)
+    L0_should_dispatch_missing_path_error_when_template_children_path_is_missing_after_data_update)
 {
     RegisterDispatchCallbacks(mockNapiPtr_);
+    RegisterRuntimeErrorCallback(mockNapiPtr_);
     RenderSlot& renderSlot = RenderManager::GetInstance().CreateRenderSlot(COMPONENT_TDD_RENDER_ID);
     std::shared_ptr<SurfaceManager> surfaceManager = renderSlot.GetSurfaceManager();
     ASSERT_NE(surfaceManager, nullptr);
     SurfaceSlot& surfaceSlot = surfaceManager->CreateSurface(COMPONENT_TDD_SURFACE_ID, nullptr);
+    surfaceSlot.SetRenderId(COMPONENT_TDD_RENDER_ID);
     surfaceSlot.SetCatalog(CreateNativeCatalog({ "Column", "Text" }));
 
     auto model = ParseJson(R"({"value":{"other":[{"name":"alpha"}]}})");
@@ -1182,7 +1339,7 @@ TEST_F(SurfaceSlotComponentIntegrationTddTest,
     std::shared_ptr<Component> root = surfaceSlot.FindComponentById("root");
     ASSERT_NE(root, nullptr);
     EXPECT_EQ(root->GetChildren().size(), 0U);
-    EXPECT_EQ(mockNapiPtr_->callFunctionCallCount_, 0U);
+    EXPECT_EQ(mockNapiPtr_->callFunctionCallCount_, 1U);
 }
 
 TEST_F(SurfaceSlotComponentIntegrationTddTest,
@@ -1432,6 +1589,33 @@ TEST_F(SurfaceSlotComponentIntegrationTddTest, L0_should_build_extended_list_tem
     EXPECT_TRUE(HasAdapterAttribute(root->GetNativeView(), NODE_LIST_NODE_ADAPTER, adapterHandle));
     EXPECT_EQ(mockArkUIPtr_->totalNodeCounts_[adapterHandle], 3U);
     EXPECT_EQ(root->GetChildren().size(), 0U);
+}
+
+TEST_F(SurfaceSlotComponentIntegrationTddTest,
+    L0_should_build_empty_extended_list_lazy_adapter_when_template_path_is_missing)
+{
+    RenderSlot& renderSlot = RenderManager::GetInstance().CreateRenderSlot(COMPONENT_TDD_RENDER_ID);
+    std::shared_ptr<SurfaceManager> surfaceManager = renderSlot.GetSurfaceManager();
+    ASSERT_NE(surfaceManager, nullptr);
+    SurfaceSlot& surfaceSlot = surfaceManager->CreateSurface(COMPONENT_TDD_SURFACE_ID, nullptr);
+    surfaceSlot.SetCatalog(CreateExtendedProtocolCatalog({ "List", "Text" }));
+
+    auto message =
+        ParseJson(R"({"components":[)"
+                  R"({"id":"root","component":"List","children":{"componentId":"labelTemplate","path":"/missing"}},)"
+                  R"({"id":"labelTemplate","component":"Text","content":{"path":"name"}})"
+                  R"(]})");
+    ASSERT_NE(message, nullptr);
+    ASSERT_TRUE(surfaceSlot.UpdateComponents(message->GetRoot()));
+
+    auto extendedList = std::dynamic_pointer_cast<ExtendedListComponent>(surfaceSlot.FindComponentById("root"));
+    ASSERT_NE(extendedList, nullptr);
+    ASSERT_NE(extendedList->GetAdapterNode(), nullptr);
+    EXPECT_TRUE(extendedList->IsLazyMode());
+    EXPECT_EQ(extendedList->GetAdapterNode()->GetTemplateId(), "labelTemplate");
+    EXPECT_EQ(extendedList->GetAdapterNode()->GetDataPath(), "/missing");
+    EXPECT_NE(extendedList->GetAdapterNode()->GetDataModel(), nullptr);
+    EXPECT_EQ(mockArkUIPtr_->totalNodeCounts_[extendedList->GetAdapterNode()->GetHandle()], 0U);
 }
 
 TEST_F(SurfaceSlotComponentIntegrationTddTest, L0_should_build_extended_grid_template_children_in_lazy_mode)
@@ -1689,6 +1873,256 @@ TEST_F(
     EXPECT_EQ(nestedScroll->values[1].i32, ARKUI_SCROLL_NESTED_MODE_SELF_FIRST);
 }
 
+TEST_F(
+    SurfaceSlotComponentIntegrationTddTest, L0_should_recover_private_style_expression_when_missing_dependency_arrives)
+{
+    RenderSlot& renderSlot = RenderManager::GetInstance().CreateRenderSlot(COMPONENT_TDD_RENDER_ID);
+    std::shared_ptr<SurfaceManager> surfaceManager = renderSlot.GetSurfaceManager();
+    ASSERT_NE(surfaceManager, nullptr);
+    SurfaceSlot& surfaceSlot = surfaceManager->CreateSurface(COMPONENT_TDD_SURFACE_ID, nullptr);
+    surfaceSlot.SetCatalog(CreateExtendedProtocolCatalog({ "Stack", "Text" }));
+
+    auto initialData = ParseJson(R"({"value":{"stack":{}}})");
+    ASSERT_NE(initialData, nullptr);
+    ASSERT_TRUE(surfaceSlot.UpdateDataModel(initialData->GetRoot()));
+
+    auto message = ParseJson(R"({"components":[)"
+                             R"({"id":"root","component":"Stack","children":["content"],)"
+                             R"("styles":{"alignContent":)"
+                             R"("{{ (10 / $__dataModel.stack.divisor) > 1 ? 'bottomEnd' : 'center' }}"}},)"
+                             R"({"id":"content","component":"Text","content":"content"})"
+                             R"(]})");
+    ASSERT_NE(message, nullptr);
+    ASSERT_TRUE(surfaceSlot.UpdateComponents(message->GetRoot()));
+
+    std::shared_ptr<Component> stack = surfaceSlot.FindComponentById("root");
+    ASSERT_NE(stack, nullptr);
+    const auto& bindings = stack->GetDataBindings();
+    ASSERT_EQ(bindings.size(), 1U);
+    EXPECT_EQ(bindings[0].propertyName_, "styles.alignContent");
+    EXPECT_EQ(bindings[0].type_, BindingType::EXPRESSION);
+    EXPECT_EQ(bindings[0].dataPath_, "/stack/divisor");
+
+    auto dataUpdate = ParseJson(R"({"path":"/stack/divisor","value":2})");
+    ASSERT_NE(dataUpdate, nullptr);
+    ASSERT_TRUE(surfaceSlot.UpdateDataModel(dataUpdate->GetRoot()));
+
+    const NativeAttributeCall* align = FindLastAttributeCall(stack->GetNativeView(), NODE_STACK_ALIGN_CONTENT);
+    ASSERT_NE(align, nullptr);
+    ASSERT_FALSE(align->values.empty());
+    EXPECT_EQ(align->values[0].i32, ARKUI_ALIGNMENT_BOTTOM_END);
+}
+
+TEST_F(SurfaceSlotComponentIntegrationTddTest, L0_should_refresh_column_item_margin_expression_when_data_model_changes)
+{
+    RenderSlot& renderSlot = RenderManager::GetInstance().CreateRenderSlot(COMPONENT_TDD_RENDER_ID);
+    std::shared_ptr<SurfaceManager> surfaceManager = renderSlot.GetSurfaceManager();
+    ASSERT_NE(surfaceManager, nullptr);
+    SurfaceSlot& surfaceSlot = surfaceManager->CreateSurface(COMPONENT_TDD_SURFACE_ID, nullptr);
+    surfaceSlot.SetCatalog(CreateExtendedProtocolCatalog({ "Column", "Text" }));
+
+    auto initialData = ParseJson(R"({"value":{"spacing":{"column":8}}})");
+    ASSERT_NE(initialData, nullptr);
+    ASSERT_TRUE(surfaceSlot.UpdateDataModel(initialData->GetRoot()));
+
+    auto message = ParseJson(R"({"components":[)"
+                             R"({"id":"root","component":"Column","children":["first","second"],)"
+                             R"("itemMargin":"{{ $__dataModel.spacing.column }}"},)"
+                             R"({"id":"first","component":"Text","content":"first"},)"
+                             R"({"id":"second","component":"Text","content":"second"})"
+                             R"(]})");
+    ASSERT_NE(message, nullptr);
+    ASSERT_TRUE(surfaceSlot.UpdateComponents(message->GetRoot()));
+
+    std::shared_ptr<Component> first = surfaceSlot.FindComponentById("first");
+    ASSERT_NE(first, nullptr);
+    const NativeAttributeCall* initialMargin = FindLastAttributeCall(first->GetNativeView(), NODE_MARGIN);
+    ASSERT_NE(initialMargin, nullptr);
+    ASSERT_EQ(initialMargin->values.size(), 4U);
+    EXPECT_FLOAT_EQ(initialMargin->values[2].f32, 4.0F);
+
+    auto dataUpdate = ParseJson(R"({"path":"/spacing/column","value":20})");
+    ASSERT_NE(dataUpdate, nullptr);
+    ASSERT_TRUE(surfaceSlot.UpdateDataModel(dataUpdate->GetRoot()));
+
+    const NativeAttributeCall* updatedMargin = FindLastAttributeCall(first->GetNativeView(), NODE_MARGIN);
+    ASSERT_NE(updatedMargin, nullptr);
+    ASSERT_EQ(updatedMargin->values.size(), 4U);
+    EXPECT_FLOAT_EQ(updatedMargin->values[2].f32, 10.0F);
+}
+
+TEST_F(SurfaceSlotComponentIntegrationTddTest, L0_should_validate_negative_container_spacing_expression_results)
+{
+    RegisterDispatchCallbacks(mockNapiPtr_);
+
+    RenderSlot& renderSlot = RenderManager::GetInstance().CreateRenderSlot(COMPONENT_TDD_RENDER_ID);
+    std::shared_ptr<SurfaceManager> surfaceManager = renderSlot.GetSurfaceManager();
+    ASSERT_NE(surfaceManager, nullptr);
+    SurfaceSlot& surfaceSlot = surfaceManager->CreateSurface(COMPONENT_TDD_SURFACE_ID, nullptr);
+    surfaceSlot.SetCatalog(CreateExtendedProtocolCatalog({ "Column", "List", "Text" }));
+
+    auto initialData = ParseJson(R"({"value":{"spacing":{"column":-2,"list":-4}}})");
+    ASSERT_NE(initialData, nullptr);
+    ASSERT_TRUE(surfaceSlot.UpdateDataModel(initialData->GetRoot()));
+
+    auto message = ParseJson(R"({"components":[)"
+                             R"({"id":"root","component":"Column","children":["items","tail"],)"
+                             R"("itemMargin":"{{ $__dataModel.spacing.column }}"},)"
+                             R"({"id":"items","component":"List","children":["content"],)"
+                             R"("space":"{{ $__dataModel.spacing.list }}"},)"
+                             R"({"id":"content","component":"Text","content":"content"},)"
+                             R"({"id":"tail","component":"Text","content":"tail"})"
+                             R"(]})");
+    ASSERT_NE(message, nullptr);
+    ASSERT_TRUE(surfaceSlot.UpdateComponents(message->GetRoot()));
+
+    EXPECT_EQ(CountWarningRequests(mockNapiPtr_, SCHEMA_ERROR_CODE_INVALID_VALUE, "root.itemMargin"), 1U);
+    EXPECT_EQ(CountWarningRequests(mockNapiPtr_, SCHEMA_ERROR_CODE_INVALID_VALUE, "items.space"), 1U);
+
+    std::shared_ptr<Component> list = surfaceSlot.FindComponentById("items");
+    ASSERT_NE(list, nullptr);
+    const NativeAttributeCall* margin = FindLastAttributeCall(list->GetNativeView(), NODE_MARGIN);
+    ASSERT_NE(margin, nullptr);
+    ASSERT_EQ(margin->values.size(), 4U);
+    EXPECT_FLOAT_EQ(margin->values[2].f32, 4.0F);
+    const NativeAttributeCall* space = FindLastAttributeCall(list->GetNativeView(), NODE_LIST_SPACE);
+    ASSERT_NE(space, nullptr);
+    ASSERT_FALSE(space->values.empty());
+    EXPECT_FLOAT_EQ(space->values[0].f32, 0.0F);
+}
+
+TEST_F(SurfaceSlotComponentIntegrationTddTest, L0_should_refresh_list_space_expression_when_data_model_changes)
+{
+    RenderSlot& renderSlot = RenderManager::GetInstance().CreateRenderSlot(COMPONENT_TDD_RENDER_ID);
+    std::shared_ptr<SurfaceManager> surfaceManager = renderSlot.GetSurfaceManager();
+    ASSERT_NE(surfaceManager, nullptr);
+    SurfaceSlot& surfaceSlot = surfaceManager->CreateSurface(COMPONENT_TDD_SURFACE_ID, nullptr);
+    surfaceSlot.SetCatalog(CreateExtendedProtocolCatalog({ "List", "Text" }));
+
+    auto initialData = ParseJson(R"({"value":{"spacing":{"list":4}}})");
+    ASSERT_NE(initialData, nullptr);
+    ASSERT_TRUE(surfaceSlot.UpdateDataModel(initialData->GetRoot()));
+
+    auto message = ParseJson(R"({"components":[)"
+                             R"({"id":"root","component":"List","children":["content"],)"
+                             R"("space":"{{ $__dataModel.spacing.list }}"},)"
+                             R"({"id":"content","component":"Text","content":"content"})"
+                             R"(]})");
+    ASSERT_NE(message, nullptr);
+    ASSERT_TRUE(surfaceSlot.UpdateComponents(message->GetRoot()));
+
+    std::shared_ptr<Component> list = surfaceSlot.FindComponentById("root");
+    ASSERT_NE(list, nullptr);
+    const NativeAttributeCall* initialSpace = FindLastAttributeCall(list->GetNativeView(), NODE_LIST_SPACE);
+    ASSERT_NE(initialSpace, nullptr);
+    ASSERT_FALSE(initialSpace->values.empty());
+    EXPECT_FLOAT_EQ(initialSpace->values[0].f32, 4.0F);
+
+    auto dataUpdate = ParseJson(R"({"path":"/spacing/list","value":14})");
+    ASSERT_NE(dataUpdate, nullptr);
+    ASSERT_TRUE(surfaceSlot.UpdateDataModel(dataUpdate->GetRoot()));
+
+    const NativeAttributeCall* updatedSpace = FindLastAttributeCall(list->GetNativeView(), NODE_LIST_SPACE);
+    ASSERT_NE(updatedSpace, nullptr);
+    ASSERT_FALSE(updatedSpace->values.empty());
+    EXPECT_FLOAT_EQ(updatedSpace->values[0].f32, 14.0F);
+}
+
+TEST_F(SurfaceSlotComponentIntegrationTddTest, L0_should_resolve_row_layout_fields_from_top_level_and_prefer_styles)
+{
+    RenderSlot& renderSlot = RenderManager::GetInstance().CreateRenderSlot(COMPONENT_TDD_RENDER_ID);
+    std::shared_ptr<SurfaceManager> surfaceManager = renderSlot.GetSurfaceManager();
+    ASSERT_NE(surfaceManager, nullptr);
+    SurfaceSlot& surfaceSlot = surfaceManager->CreateSurface(COMPONENT_TDD_SURFACE_ID, nullptr);
+    surfaceSlot.SetCatalog(CreateExtendedProtocolCatalog({ "Row" }));
+
+    auto initialData = ParseJson(R"({"value":{"row":{"justify":"end","align":"top","wrap":"noWrap"}}})");
+    ASSERT_NE(initialData, nullptr);
+    ASSERT_TRUE(surfaceSlot.UpdateDataModel(initialData->GetRoot()));
+
+    auto topLevelMessage = ParseJson(R"({"components":[)"
+                                     R"({"id":"root","component":"Row","children":[],)"
+                                     R"("justifyContent":"{{ $__dataModel.row.justify }}",)"
+                                     R"("alignItems":"{{ $__dataModel.row.align }}",)"
+                                     R"("wrap":"{{ $__dataModel.row.wrap }}"})"
+                                     R"(]})");
+    ASSERT_NE(topLevelMessage, nullptr);
+    ASSERT_TRUE(surfaceSlot.UpdateComponents(topLevelMessage->GetRoot()));
+
+    std::shared_ptr<Component> row = surfaceSlot.FindComponentById("root");
+    ASSERT_NE(row, nullptr);
+    const NativeAttributeCall* topLevelOption = FindLastAttributeCall(row->GetNativeView(), NODE_FLEX_OPTION);
+    ASSERT_NE(topLevelOption, nullptr);
+    ASSERT_GE(topLevelOption->values.size(), 4U);
+    EXPECT_EQ(topLevelOption->values[1].i32, ARKUI_FLEX_WRAP_NO_WRAP);
+    EXPECT_EQ(topLevelOption->values[2].i32, ARKUI_FLEX_ALIGNMENT_END);
+    EXPECT_EQ(topLevelOption->values[3].i32, ARKUI_ITEM_ALIGNMENT_START);
+
+    auto styleMessage = ParseJson(R"({"components":[)"
+                                  R"({"id":"root","component":"Row","children":[],)"
+                                  R"("justifyContent":"{{ $__dataModel.row.justify }}",)"
+                                  R"("alignItems":"{{ $__dataModel.row.align }}",)"
+                                  R"("wrap":"{{ $__dataModel.row.wrap }}",)"
+                                  R"("styles":{"justifyContent":"center","alignItems":"bottom","wrap":"wrap"}})"
+                                  R"(]})");
+    ASSERT_NE(styleMessage, nullptr);
+    ASSERT_TRUE(surfaceSlot.UpdateComponents(styleMessage->GetRoot()));
+
+    const NativeAttributeCall* styleOption = FindLastAttributeCall(row->GetNativeView(), NODE_FLEX_OPTION);
+    ASSERT_NE(styleOption, nullptr);
+    ASSERT_GE(styleOption->values.size(), 4U);
+    EXPECT_EQ(styleOption->values[1].i32, ARKUI_FLEX_WRAP_WRAP);
+    EXPECT_EQ(styleOption->values[2].i32, ARKUI_FLEX_ALIGNMENT_CENTER);
+    EXPECT_EQ(styleOption->values[3].i32, ARKUI_ITEM_ALIGNMENT_END);
+
+    auto topLevelUpdate = ParseJson(R"({"path":"/row","value":{"justify":"start","align":"center","wrap":"noWrap"}})");
+    ASSERT_NE(topLevelUpdate, nullptr);
+    ASSERT_TRUE(surfaceSlot.UpdateDataModel(topLevelUpdate->GetRoot()));
+
+    const NativeAttributeCall* afterTopLevelUpdate = FindLastAttributeCall(row->GetNativeView(), NODE_FLEX_OPTION);
+    ASSERT_NE(afterTopLevelUpdate, nullptr);
+    ASSERT_GE(afterTopLevelUpdate->values.size(), 4U);
+    EXPECT_EQ(afterTopLevelUpdate->values[1].i32, ARKUI_FLEX_WRAP_WRAP);
+    EXPECT_EQ(afterTopLevelUpdate->values[2].i32, ARKUI_FLEX_ALIGNMENT_CENTER);
+    EXPECT_EQ(afterTopLevelUpdate->values[3].i32, ARKUI_ITEM_ALIGNMENT_END);
+}
+
+TEST_F(SurfaceSlotComponentIntegrationTddTest, L0_should_refresh_row_style_wrap_expression_when_data_model_changes)
+{
+    RenderSlot& renderSlot = RenderManager::GetInstance().CreateRenderSlot(COMPONENT_TDD_RENDER_ID);
+    std::shared_ptr<SurfaceManager> surfaceManager = renderSlot.GetSurfaceManager();
+    ASSERT_NE(surfaceManager, nullptr);
+    SurfaceSlot& surfaceSlot = surfaceManager->CreateSurface(COMPONENT_TDD_SURFACE_ID, nullptr);
+    surfaceSlot.SetCatalog(CreateExtendedProtocolCatalog({ "Row" }));
+
+    auto initialData = ParseJson(R"({"value":{"row":{"wrap":"noWrap"}}})");
+    ASSERT_NE(initialData, nullptr);
+    ASSERT_TRUE(surfaceSlot.UpdateDataModel(initialData->GetRoot()));
+
+    auto message = ParseJson(R"({"components":[)"
+                             R"({"id":"root","component":"Row","children":[],"wrap":"noWrap",)"
+                             R"("styles":{"wrap":"{{ $__dataModel.row.wrap }}"}})"
+                             R"(]})");
+    ASSERT_NE(message, nullptr);
+    ASSERT_TRUE(surfaceSlot.UpdateComponents(message->GetRoot()));
+
+    std::shared_ptr<Component> row = surfaceSlot.FindComponentById("root");
+    ASSERT_NE(row, nullptr);
+    const NativeAttributeCall* initialOption = FindLastAttributeCall(row->GetNativeView(), NODE_FLEX_OPTION);
+    ASSERT_NE(initialOption, nullptr);
+    ASSERT_GE(initialOption->values.size(), 2U);
+    EXPECT_EQ(initialOption->values[1].i32, ARKUI_FLEX_WRAP_NO_WRAP);
+
+    auto dataUpdate = ParseJson(R"({"path":"/row/wrap","value":"wrap"})");
+    ASSERT_NE(dataUpdate, nullptr);
+    ASSERT_TRUE(surfaceSlot.UpdateDataModel(dataUpdate->GetRoot()));
+
+    const NativeAttributeCall* updatedOption = FindLastAttributeCall(row->GetNativeView(), NODE_FLEX_OPTION);
+    ASSERT_NE(updatedOption, nullptr);
+    ASSERT_GE(updatedOption->values.size(), 2U);
+    EXPECT_EQ(updatedOption->values[1].i32, ARKUI_FLEX_WRAP_WRAP);
+}
+
 /**
  * @tc.name: L0_should_dispatch_schema_warnings_for_invalid_expression_values_on_extended_container_styles
  * @tc.desc: Verify resolved expression values are still validated for extended container-specific schema warnings.
@@ -1728,7 +2162,7 @@ TEST_F(SurfaceSlotComponentIntegrationTddTest,
 
     EXPECT_EQ(CountWarningRequests(mockNapiPtr_, SCHEMA_ERROR_CODE_INVALID_VALUE, "column.styles.justifyContent"), 1U);
     EXPECT_EQ(CountWarningRequests(mockNapiPtr_, SCHEMA_ERROR_CODE_TYPE_MISMATCH, "column.styles.alignItems"), 1U);
-    EXPECT_EQ(CountWarningRequests(mockNapiPtr_, SCHEMA_ERROR_CODE_INVALID_VALUE, "row.styles.wrap"), 0U);
+    EXPECT_EQ(CountWarningRequests(mockNapiPtr_, SCHEMA_ERROR_CODE_INVALID_VALUE, "row.styles.wrap"), 1U);
     EXPECT_EQ(CountWarningRequests(mockNapiPtr_, SCHEMA_ERROR_CODE_INVALID_VALUE, "row.styles.justifyContent"), 1U);
     EXPECT_EQ(CountWarningRequests(mockNapiPtr_, SCHEMA_ERROR_CODE_TYPE_MISMATCH, "row.styles.alignItems"), 1U);
     EXPECT_EQ(CountWarningRequests(mockNapiPtr_, SCHEMA_ERROR_CODE_INVALID_VALUE, "stack.styles.alignContent"), 1U);
@@ -1875,7 +2309,7 @@ TEST_F(SurfaceSlotComponentIntegrationTddTest,
     EXPECT_EQ(CountWarningRequests(mockNapiPtr_, SCHEMA_ERROR_CODE_INVALID_VALUE, "root.children"), 0U);
     EXPECT_EQ(CountWarningRequests(mockNapiPtr_, SCHEMA_ERROR_CODE_INVALID_VALUE, "root.styles.justifyContent"), 1U);
     EXPECT_EQ(CountWarningRequests(mockNapiPtr_, SCHEMA_ERROR_CODE_TYPE_MISMATCH, "root.styles.alignItems"), 1U);
-    EXPECT_EQ(CountWarningRequests(mockNapiPtr_, SCHEMA_ERROR_CODE_INVALID_VALUE, "root.styles.wrap"), 0U);
+    EXPECT_EQ(CountWarningRequests(mockNapiPtr_, SCHEMA_ERROR_CODE_INVALID_VALUE, "root.styles.wrap"), 1U);
 }
 
 TEST_F(

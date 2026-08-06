@@ -16,7 +16,9 @@
 #include "ExtendedListComponent.h"
 
 #include <algorithm>
+#include <cmath>
 #include <map>
+#include <optional>
 
 #include "components/ChildListSchemaValidationUtils.h"
 #include "data/DataModel.h"
@@ -64,7 +66,8 @@ std::unique_ptr<JsonAdapter> ResolveDynamicStyleObjectMembers(
     DynamicResolveContext context = { .renderId = renderContext.renderId,
         .surfaceId = renderContext.surfaceId,
         .componentId = componentId,
-        .allowExpression = true };
+        .allowExpression = true,
+        .missingPathPolicy = MissingPathPolicy::DEFER_UNTIL_DATA_UPDATE };
     for (JsonValue child = styleObjectValue.GetChild(); child.IsValid(); child = child.GetNext()) {
         std::string key = child.GetKey();
         if (key.empty()) {
@@ -97,7 +100,7 @@ A2UIAxis ResolveListDirection(const std::string& direction)
 
 float NormalizeListSpace(float space)
 {
-    return space < 0.0F ? 0.0F : space;
+    return std::isfinite(space) && space >= 0.0F ? space : 0.0F;
 }
 
 A2UIScrollBarDisplayMode ResolveScrollBar(const std::string& scrollBar)
@@ -139,6 +142,67 @@ struct ExtendedLazyAdapterConfig {
     SurfaceContext surfaceContext;
 };
 
+std::optional<int> PrepareAdapterConfig(ExtendedLazyAdapterConfig& config, const ChildListDescriptor& childList,
+    SurfaceSlot& surfaceSlot, const std::string& componentId)
+{
+    const std::map<std::string, JsonValue>& descriptorStore = surfaceSlot.GetAllComponentDescriptorStore();
+    auto templateIt = descriptorStore.find(childList.templateComponentId);
+    if (templateIt == descriptorStore.end()) {
+        LOG_A2UI(LOG_WARN,
+            "ExtendedListComponent::SetupLazyAdapter: template not found, componentId=%{public}s, "
+            "templateId=%{public}s",
+            componentId.c_str(), childList.templateComponentId.c_str());
+        return std::nullopt;
+    }
+    config.templateComponentId = childList.templateComponentId;
+    config.templatePath = childList.templatePath;
+    config.dataModel = surfaceSlot.GetOrCreateDataModel();
+    config.templateDescriptor = templateIt->second;
+    config.allDescriptors = descriptorStore;
+    config.surfaceId = surfaceSlot.GetSurfaceId();
+    config.renderId = surfaceSlot.GetRenderId();
+    config.surfaceContext = surfaceSlot.GetSurfaceContext();
+    int itemCount = 0;
+    bool isRelativePath = !config.templatePath.empty() && config.templatePath[0] != '/';
+    if (!isRelativePath) {
+        if (config.dataModel == nullptr) {
+            LOG_A2UI(LOG_ERROR,
+                "ExtendedListComponent::SetupLazyAdapter: data model is null, templateComponentId=%{public}s",
+                config.templateComponentId.c_str());
+            return 0;
+        }
+        auto arrayOpt = config.dataModel->GetNode(config.templatePath);
+        if (!arrayOpt.has_value()) {
+            DynamicResolveContext context = { .renderId = config.renderId,
+                .surfaceId = config.surfaceId,
+                .componentId = componentId,
+                .missingPathPolicy = MissingPathPolicy::DEFER_UNTIL_DATA_UPDATE };
+            DynamicValueResolver::ReportMissingPath(context, config.templatePath);
+            LOG_A2UI(LOG_ERROR, "ExtendedListComponent::SetupLazyAdapter: data path not found, path=%{public}s",
+                config.templatePath.c_str());
+            return itemCount;
+        }
+        if (arrayOpt.value().IsArray()) {
+            itemCount = arrayOpt.value().GetArraySize();
+        }
+    }
+    return itemCount;
+}
+
+void InitializeLazyAdapter(ListAdapterNode& adapterNode, const ExtendedLazyAdapterConfig& config,
+    const ChildListDescriptor& childList, const std::map<std::string, JsonValue>& inheritedLocalVariables,
+    int itemCount)
+{
+    adapterNode.Initialize(config.templateComponentId, config.templatePath, itemCount, childList.resolvedIndexVarName,
+        childList.resolvedItemVarName);
+    adapterNode.SetDataModel(config.dataModel);
+    adapterNode.SetTemplateDescriptor(config.templateDescriptor);
+    adapterNode.SetAllDescriptors(config.allDescriptors);
+    adapterNode.SetInheritedLocalVariables(inheritedLocalVariables);
+    adapterNode.SetSurfaceInfo(config.surfaceId, config.renderId);
+    adapterNode.SetSurfaceContext(config.surfaceContext);
+}
+
 } // namespace
 
 ExtendedListComponent::ExtendedListComponent() : ExtendedComponent(ArkUINodeApiAdapter::CreateNode(A2UINodeType::LIST))
@@ -179,70 +243,23 @@ void ExtendedListComponent::SetAdapterNode(const std::shared_ptr<ListAdapterNode
 
 void ExtendedListComponent::SetupLazyAdapter(const ChildListDescriptor& childList, SurfaceSlot& surfaceSlot)
 {
-    const std::map<std::string, JsonValue>& descriptorStore = surfaceSlot.GetAllComponentDescriptorStore();
-    auto templateIt = descriptorStore.find(childList.templateComponentId);
-    if (templateIt == descriptorStore.end()) {
-        LOG_A2UI(LOG_WARN,
-            "ExtendedListComponent::SetupLazyAdapter: template not found, componentId=%{public}s, "
-            "templateId=%{public}s",
-            GetComponentId().c_str(), childList.templateComponentId.c_str());
-        return;
-    }
-
     ExtendedLazyAdapterConfig config;
-    config.templateComponentId = childList.templateComponentId;
-    config.templatePath = childList.templatePath;
-    config.dataModel = surfaceSlot.GetOrCreateDataModel();
-    config.templateDescriptor = templateIt->second;
-    config.allDescriptors = descriptorStore;
-    config.surfaceId = surfaceSlot.GetSurfaceId();
-    config.renderId = surfaceSlot.GetRenderId();
-    config.surfaceContext = surfaceSlot.GetSurfaceContext();
-
-    int itemCount = 0;
-    bool isRelativePath = !config.templatePath.empty() && config.templatePath[0] != '/';
-    if (!isRelativePath) {
-        if (config.dataModel == nullptr) {
-            LOG_A2UI(LOG_ERROR,
-                "ExtendedListComponent::SetupLazyAdapter: data model is null, templateComponentId=%{public}s",
-                config.templateComponentId.c_str());
-            return;
-        }
-        auto arrayOpt = config.dataModel->GetNode(config.templatePath);
-        if (!arrayOpt.has_value()) {
-            LOG_A2UI(LOG_ERROR, "ExtendedListComponent::SetupLazyAdapter: data path not found, path=%{public}s",
-                config.templatePath.c_str());
-            return;
-        }
-        itemCount = arrayOpt.value().GetArraySize();
+    std::optional<int> itemCount = PrepareAdapterConfig(config, childList, surfaceSlot, GetComponentId());
+    if (!itemCount.has_value()) {
+        return;
     }
 
     if (adapterNode_ == nullptr) {
         auto adapterNode = std::make_shared<ListAdapterNode>();
-        adapterNode->Initialize(config.templateComponentId, config.templatePath, itemCount,
-            childList.resolvedIndexVarName, childList.resolvedItemVarName);
-        adapterNode->SetDataModel(config.dataModel);
-        adapterNode->SetTemplateDescriptor(config.templateDescriptor);
-        adapterNode->SetAllDescriptors(config.allDescriptors);
-        adapterNode->SetInheritedLocalVariables(GetLocalVariables());
-        adapterNode->SetSurfaceInfo(config.surfaceId, config.renderId);
-        adapterNode->SetSurfaceContext(config.surfaceContext);
-
+        InitializeLazyAdapter(*adapterNode, config, childList, GetLocalVariables(), itemCount.value());
         SetLazyMode(true);
         SetAdapterNode(adapterNode);
         return;
     }
 
-    adapterNode_->Initialize(config.templateComponentId, config.templatePath, itemCount, childList.resolvedIndexVarName,
-        childList.resolvedItemVarName);
-    adapterNode_->SetDataModel(config.dataModel);
-    adapterNode_->SetTemplateDescriptor(config.templateDescriptor);
-    adapterNode_->SetAllDescriptors(config.allDescriptors);
-    adapterNode_->SetInheritedLocalVariables(GetLocalVariables());
-    adapterNode_->SetSurfaceInfo(config.surfaceId, config.renderId);
-    adapterNode_->SetSurfaceContext(config.surfaceContext);
+    InitializeLazyAdapter(*adapterNode_, config, childList, GetLocalVariables(), itemCount.value());
     adapterNode_->IncrementTemplateVersion();
-    adapterNode_->UpdateItemCount(itemCount);
+    adapterNode_->UpdateItemCount(itemCount.value());
     adapterNode_->ReloadAllItems();
 }
 
@@ -261,13 +278,7 @@ bool ExtendedListComponent::ExpandTemplateChildren(
 
 void ExtendedListComponent::ApplyPrivateAttributes(const JsonValue& descriptor)
 {
-    if (descriptor.IsObject() && descriptor.Has("space")) {
-        JsonValue spaceValue = descriptor.GetItem("space");
-        if (!IsDynamicValueDescriptor(spaceValue) && spaceValue.IsNumber() && spaceValue.GetNumberValue(0.0) < 0.0) {
-            ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
-                "Property space has invalid value and has been reset to default", "space");
-        }
-    }
+    ArkUINodeApiAdapter::SetNodePixelRoundNoForceRound(nativeView_, GetRenderContext().apiVersion);
     ApplyDeclaredPropertyOrFallback(descriptor, "space");
     ApplyDefaultLanes(ResolveThemeContext());
     SetListDirection(A2UIAxis::VERTICAL);
@@ -284,7 +295,11 @@ void ExtendedListComponent::ValidateComponentDescriptorSchema(const JsonValue& d
 
 void ExtendedListComponent::OnConfigChange(const ThemeContext& context)
 {
-    ApplyDefaultLanes(context);
+    ThemeContext componentContext = context;
+    if (componentBreakpoint_.has_value()) {
+        componentContext.breakpoint = componentBreakpoint_.value();
+    }
+    ApplyDefaultLanes(componentContext);
 }
 
 PropertyDeclaration ExtendedListComponent::GetPrivatePropertyDeclaration(const std::string& propertyName)
@@ -292,7 +307,7 @@ PropertyDeclaration ExtendedListComponent::GetPrivatePropertyDeclaration(const s
     if (propertyName == "space") {
         return PropertyDeclaration { .name = "space",
             .type = PropertyValueType::NUMBER,
-            .allowDynamic = false,
+            .allowDynamic = true,
             .allowExpression = true,
             .fallbackNumber = 0.0,
             .applyValue = [this](const JsonValue& value) { SetSpace(static_cast<float>(value.GetNumberValue(0.0))); } };
@@ -452,6 +467,47 @@ void ExtendedListComponent::RegisterComponentSpecificListeners()
         onReachEnd = [this]() { DispatchEvent("onReachEnd"); };
     }
     RegisterNodeEventHandler(A2UINodeEventType::SCROLL_ON_REACH_END, onReachEnd);
+    bool useAreaChange = GetRenderContext().apiVersion < MIN_API_VERSION_SIZE_CHANGE;
+    RegisterNodeEventHandlerWithEvent(
+        useAreaChange ? A2UINodeEventType::ON_AREA_CHANGE : A2UINodeEventType::ON_SIZE_CHANGE,
+        [this, useAreaChange](A2UINodeEvent* event) { HandleSizeChange(event, useAreaChange); });
+}
+
+void ExtendedListComponent::HandleSizeChange(A2UINodeEvent* event, bool isAreaChange)
+{
+    if (event == nullptr) {
+        LOG_A2UI(LOG_WARN, "ExtendedListComponent::HandleSizeChange: event is null, componentId=%{public}s",
+            GetComponentId().c_str());
+        return;
+    }
+    A2UINodeComponentEvent* componentEvent = ArkUIOHApiAdapter::NodeEventGetNodeComponentEvent(event);
+    if (componentEvent == nullptr) {
+        LOG_A2UI(LOG_WARN, "ExtendedListComponent::HandleSizeChange: component event is null, componentId=%{public}s",
+            GetComponentId().c_str());
+        return;
+    }
+
+    float oldWidth = componentEvent->data[0].f32;
+    float newWidth = componentEvent->data[isAreaChange ? 6 : 2].f32;
+    if (!std::isfinite(newWidth)) {
+        LOG_A2UI(LOG_WARN, "ExtendedListComponent::HandleSizeChange: width is not finite, componentId=%{public}s",
+            GetComponentId().c_str());
+        return;
+    }
+    if (newWidth <= 0.0F || oldWidth == newWidth) {
+        return;
+    }
+
+    Breakpoint breakpoint = ResolveBreakpointFromWidth(newWidth);
+    if (componentBreakpoint_.has_value() && componentBreakpoint_.value() == breakpoint) {
+        return;
+    }
+    componentBreakpoint_ = breakpoint;
+    LOG_A2UI(LOG_INFO,
+        "ExtendedListComponent::HandleSizeChange: breakpoint updated, componentId=%{public}s, "
+        "newWidth=%{public}f, breakpoint=%{public}d",
+        GetComponentId().c_str(), newWidth, static_cast<int32_t>(breakpoint));
+    OnConfigChange(ResolveThemeContext());
 }
 
 void ExtendedListComponent::OnAddChild(const std::shared_ptr<Component>& child, size_t index)
@@ -539,14 +595,22 @@ void ExtendedListComponent::ApplyDefaultLanes(const ThemeContext& context)
 ThemeContext ExtendedListComponent::ResolveThemeContext() const
 {
     std::shared_ptr<ThemeManager> themeManager = GetThemeManager();
+    ThemeContext context;
     if (themeManager != nullptr) {
-        return themeManager->GetContext();
+        context = themeManager->GetContext();
     }
-    return ThemeContext();
+    if (componentBreakpoint_.has_value()) {
+        context.breakpoint = componentBreakpoint_.value();
+    }
+    return context;
 }
 
 void ExtendedListComponent::SetSpace(float space)
 {
+    if (!std::isfinite(space) || space < 0.0F) {
+        ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
+            "Property space must be greater than or equal to 0 and has been reset to default", "space");
+    }
     ArkUINodeApiAdapter::SetNodeListSpace(nativeView_, NormalizeListSpace(space));
 }
 

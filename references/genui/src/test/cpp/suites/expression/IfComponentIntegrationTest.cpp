@@ -71,7 +71,13 @@ JsonValue BuildIfDescriptor(const std::string& id, const std::string& condition,
 
 std::shared_ptr<Catalog> CreateExtendedProtocolCatalog()
 {
-    return std::make_shared<Catalog>(A2UI_EXTENDED_CATALOG_ID);
+    auto catalog = std::make_shared<Catalog>(A2UI_EXTENDED_CATALOG_ID);
+    for (const char* componentName : { "Column", "Text", "If" }) {
+        auto item = std::make_shared<CatalogItem>(componentName, CatalogItemType::COMPONENT);
+        item->SetCategory(CatalogCategory::OHOS_EXTENDS);
+        catalog->AddComponent(item);
+    }
+    return catalog;
 }
 
 bool HasRemoveChildCallForIf(ArkUI_NodeHandle parent, ArkUI_NodeHandle child)

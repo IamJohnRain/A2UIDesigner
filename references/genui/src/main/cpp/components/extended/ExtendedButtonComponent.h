@@ -106,6 +106,21 @@ protected:
 
 private:
     void ValidateStylesSchema(const JsonValue& styles);
+    void ValidatePositiveNumberStyle(const JsonValue& styles, const char* propertyName);
+    void ValidateFontWeightStyle(const JsonValue& styles);
+    void ValidateFontScaleStyle(
+        const JsonValue& styles, const char* propertyName, double minValue, double maxValue, bool hasMaxValue);
+    void ValidateFontScaleModeStyle(const JsonValue& styles);
+    void ValidateFontColorStyle(const JsonValue& styles);
+    bool ShouldApplyStyle(const JsonValue& styles, const char* styleName) const;
+    void ApplyFontSizeStyle(const JsonValue& styles);
+    void ApplyFontWeightStyle(const JsonValue& styles);
+    void ApplyMinFontSizeStyle(const JsonValue& styles);
+    void ApplyMaxFontSizeStyle(const JsonValue& styles);
+    void ApplyFontScaleLimits(const JsonValue& styles);
+    void ApplyFontScaleModeStyle(const JsonValue& styles);
+    void ApplyFontColorStyle(const JsonValue& styles);
+    void ApplyBackgroundColorStyle(const JsonValue& styles);
     void SetLabel(const std::string& label);
     void SetFontSize(float fontSize);
     void SetFontWeight(A2UIFontWeight fontWeight);

@@ -25,6 +25,7 @@ import { A2UIDynamicValue } from '../../types/DynamicValue';
 import { A2UIFunctionCall } from '../../types/FunctionCall';
 import { A2UIValueType } from '../../types/types';
 import { A2UIResolveContext, ResolveResult } from '../../types/runtime/ResolveContext';
+import { CustomComponentDynamicValueResolver } from '../../types/runtime/CustomComponentDynamicValueResolver';
 import { DynamicValueResolver } from '../../types/runtime/DynamicValueResolver';
 import { ExpressionEngine } from '../../expression/ExpressionEngine';
 
@@ -176,6 +177,34 @@ function buildResolveContext(attribute: CustomComponentAttribute | undefined): A
   } as A2UIResolveContext;
 }
 
+function resolveDynamicValueWithNative(
+  value: Object | undefined,
+  attribute: CustomComponentAttribute | undefined
+): A2UIValueType | undefined {
+  let surfaceId: string = attribute?.surfaceId ?? '';
+  let componentId: string = attribute?.id ?? '';
+  let renderId: number = attribute?.renderId ?? -1;
+  if (renderId < 0 || surfaceId.length === 0) {
+    return undefined;
+  }
+  let resolver = new CustomComponentDynamicValueResolver({
+    renderId: renderId,
+    surfaceId: surfaceId,
+    componentId: componentId,
+    dataModel: attribute?.dataModel,
+    invokeFunction: (functionCall: A2UIFunctionCall): A2UIValueType =>
+      FunctionBridge.invoke(functionCall, surfaceId, componentId, renderId)
+  });
+  return resolver.evaluateValue<A2UIValueType>(value as A2UIValueType);
+}
+
+export function resolveDynamicValueOptionValueWithNative(
+  value: Object | undefined,
+  attribute: CustomComponentAttribute | undefined
+): A2UIValueType | undefined {
+  return resolveDynamicValueWithNative(value, attribute);
+}
+
 export function resolveStringOptionValue(value: Object | undefined, tag: string, field: string): string | undefined {
   if (typeof value === 'string') {
     return value;
@@ -203,6 +232,10 @@ export function resolveDynamicStringOptionValue(
     let expressionResult: ExpressionOptionResolveResult = resolveExpressionOptionValue(value, attribute);
     return expressionResult.success && typeof expressionResult.value === 'string' &&
       expressionResult.value.length > 0 ? expressionResult.value : undefined;
+  }
+  let nativeResolvedValue: A2UIValueType | undefined = resolveDynamicValueWithNative(value, attribute);
+  if (typeof nativeResolvedValue === 'string' && nativeResolvedValue.length > 0) {
+    return nativeResolvedValue;
   }
   let resolveContext: A2UIResolveContext | undefined = buildResolveContext(attribute);
   let resolvedValue: string = DynamicValueResolver.resolveString(value as A2UIDynamicString, '', resolveContext);

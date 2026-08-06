@@ -50,6 +50,9 @@ export class CustomComponentDynamicValueResolver implements PublicDynamicValueRe
   }
 
   evaluateValue<T>(value: A2UIValueType): T {
+    if (value === undefined) {
+      return undefined as T;
+    }
     const result: ResolveResult<A2UIValueType> = this.resolveValue(value);
     if (result.success) {
       return result.value as T;
@@ -64,6 +67,11 @@ export class CustomComponentDynamicValueResolver implements PublicDynamicValueRe
     callback: ResolveValueCallback<T>
   ): void {
     const customComponentHandle: number = this.context.customComponentHandle ?? -1;
+    if (path === undefined) {
+      this.clearPropertyValueWithNative(customComponentHandle, key);
+      callback(undefined as T);
+      return;
+    }
     if (this.resolvePropertyValueWithNative(customComponentHandle, key, path, callback)) {
       return;
     }
@@ -213,6 +221,23 @@ export class CustomComponentDynamicValueResolver implements PublicDynamicValueRe
       );
     }
     return false;
+  }
+
+  private clearPropertyValueWithNative(customComponentHandle: number, key: string): void {
+    if (!Number.isFinite(customComponentHandle) || customComponentHandle < 0 || key.length === 0) {
+      return;
+    }
+    if (typeof nativeEngine.clearCustomComponentDynamicValue !== 'function') {
+      return;
+    }
+    try {
+      nativeEngine.clearCustomComponentDynamicValue(customComponentHandle, key);
+    } catch (error) {
+      console.warn(
+        `[DynamicValueResolver] native clearPropertyValue exception, handle=${customComponentHandle}, key=${key}, ` +
+        `reason=${JSON.stringify(error)}`
+      );
+    }
   }
 
   private shouldAllowExpression(): boolean {

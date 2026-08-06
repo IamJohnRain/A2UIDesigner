@@ -79,6 +79,20 @@ function resolveExtendedRowStyleProps(
   return undefined;
 }
 
+export function resolveExtendedRowPrivateValue(
+  customProps: Record<string, Object> | undefined,
+  key: string
+): Object | undefined {
+  let styleProps = resolveExtendedRowStyleProps(customProps);
+  if (styleProps !== undefined) {
+    let styleValue = styleProps[key];
+    if (styleValue !== undefined) {
+      return styleValue;
+    }
+  }
+  return customProps?.[key];
+}
+
 function isExtendedRowMatchParentValue(value: Object | undefined): boolean {
   if (typeof value === 'string') {
     let normalized = value.trim().toLowerCase();
@@ -132,21 +146,21 @@ export struct ExtendedRow {
     })
     .accessibilityText(this.resolveAccessibilityLabel())
     .accessibilityDescription(this.resolveAccessibilityDescription())
+    .id(this.attribute?.id ?? '')
     .attributeModifier(buildExtendedRowStyleModifier(this.attribute))
   }
 
   private syncRowState(): void {
     let customProps = parseCustomProps(this.attribute, this.tag);
-    let styleProps = this.resolveStyleProps(customProps);
     let children = this.resolveChildren(customProps?.['children']);
     let resolvedJustifyContent = this.resolveJustifyContent(
-      this.resolveStyleValue(customProps, styleProps, 'justifyContent')
+      resolveExtendedRowPrivateValue(customProps, 'justifyContent')
     );
     let resolvedItemMargin = this.resolveItemMargin(customProps?.['itemMargin']);
     this.rowItems = this.resolveRowItems(children);
-    this.alignItems = this.resolveAlignItems(this.resolveStyleValue(customProps, styleProps, 'alignItems'));
+    this.alignItems = this.resolveAlignItems(resolveExtendedRowPrivateValue(customProps, 'alignItems'));
     this.justifyContent = resolvedJustifyContent;
-    this.wrap = this.resolveWrap(customProps?.['wrap']);
+    this.wrap = this.resolveWrap(resolveExtendedRowPrivateValue(customProps, 'wrap'));
     this.itemMargin = this.isItemMarginDisabledByJustify(resolvedJustifyContent) ? 0 : resolvedItemMargin;
   }
 
@@ -258,28 +272,6 @@ export struct ExtendedRow {
     }
   }
 
-  private resolveStyleProps(customProps: Record<string, Object> | undefined): Record<string, Object> | undefined {
-    let styleValue = customProps?.['styles'];
-    if (typeof styleValue === 'object' && styleValue !== null && !Array.isArray(styleValue)) {
-      return styleValue as Record<string, Object>;
-    }
-    return undefined;
-  }
-
-  private resolveStyleValue(
-    customProps: Record<string, Object> | undefined,
-    styleProps: Record<string, Object> | undefined,
-    key: string
-  ): Object | undefined {
-    if (styleProps !== undefined) {
-      let value = styleProps[key];
-      if (value !== undefined) {
-        return value;
-      }
-    }
-    return customProps?.[key];
-  }
-
   private isItemMarginDisabledByJustify(justifyContent: FlexAlign): boolean {
     return justifyContent === FlexAlign.SpaceAround ||
       justifyContent === FlexAlign.SpaceBetween ||
@@ -288,8 +280,7 @@ export struct ExtendedRow {
 
   private resolveLength(key: string, fallback: string | number): string | number {
     let customProps = parseCustomProps(this.attribute, this.tag);
-    let styleProps = this.resolveStyleProps(customProps);
-    let value = this.resolveStyleValue(customProps, styleProps, key);
+    let value = resolveExtendedRowPrivateValue(customProps, key);
     if (typeof value === 'number' && Number.isFinite(value)) {
       return value;
     }

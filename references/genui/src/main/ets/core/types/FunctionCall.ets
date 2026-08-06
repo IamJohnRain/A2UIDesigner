@@ -19,9 +19,9 @@ export type A2UIFunctionReturnType = 'string' | 'number' | 'boolean' | 'array' |
 export type A2UIFunctionArgs = Record<string, A2UIDynamicValue | Record<string, Object>>
 
 export class A2UIFunctionCall {
-  call: string = ''
-  args?: A2UIFunctionArgs
-  returnType?: A2UIFunctionReturnType
+  public call: string = ''
+  public args?: A2UIFunctionArgs
+  public returnType?: A2UIFunctionReturnType
 
   static schemaRef(): string {
     return '{ "$ref": "#/$defs/FunctionCall" }'

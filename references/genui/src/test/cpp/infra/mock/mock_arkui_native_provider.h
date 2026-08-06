@@ -41,6 +41,17 @@ public:
         int32_t attribute = 0;
     };
 
+    struct CreatedNodeRecord {
+        ArkUI_NodeHandle nodeHandle = nullptr;
+        ArkUI_NodeType nodeType = 0;
+    };
+
+    struct LayoutRecord {
+        ArkUI_NodeHandle nodeHandle = nullptr;
+        int32_t x = 0;
+        int32_t y = 0;
+    };
+
     static MockArkUINativeProvider& GetInstance();
     ~MockArkUINativeProvider() override;
 
@@ -123,6 +134,10 @@ public:
     void SetNodeEventComponentEvent(const ArkUI_NodeEvent* event, ArkUI_NodeComponentEvent* componentEvent);
     void SetNodeEventStringAsyncEvent(const ArkUI_NodeEvent* event, ArkUI_StringAsyncEvent* stringAsyncEvent);
     bool DispatchNodeEvent(ArkUI_NodeHandle nodeHandle, ArkUI_NodeEvent* event);
+    int32_t RegisterCustomEvent(ArkUI_NodeHandle node, ArkUI_NodeCustomEventType eventType, void* userData);
+    void UnregisterCustomEvent(ArkUI_NodeHandle node, ArkUI_NodeCustomEventType eventType);
+    bool DispatchMeasureEvent(ArkUI_NodeHandle node, int32_t percentReferenceWidth, int32_t percentReferenceHeight);
+    bool DispatchLayoutEvent(ArkUI_NodeHandle node, int32_t x, int32_t y);
     void SetDialogDismissEventUserData(ArkUI_DialogDismissEvent* event, void* userData);
     void SetNodeUniqueId(ArkUI_NodeHandle node, int32_t uniqueId);
     void SetGetNodeUniqueIdResult(int32_t result);
@@ -136,6 +151,7 @@ public:
     std::map<ArkUI_NodeContentHandle, std::vector<ArkUI_NodeHandle>> nodeContentMapping_;
     std::map<ArkUI_NodeHandle, void*> nodeUserData_;
     std::map<ArkUI_NodeHandle, std::vector<ArkUI_NodeEventCallback>> nodeEventReceivers_;
+    std::map<ArkUI_NodeHandle, std::vector<ArkUI_NodeCustomEventCallback>> nodeCustomEventReceivers_;
     std::map<ArkUI_NodeHandle, std::set<ArkUI_NodeEventType>> registeredNodeEvents_;
     std::vector<ArkUI_NodeAdapterHandle> createdAdapters_;
     std::vector<ArkUI_NodeAdapterHandle> disposedAdapters_;
@@ -151,6 +167,15 @@ public:
     std::map<ArkUI_NodeHandle, bool> crossLanguageOptionNodes_;
     std::map<ArkUI_NodeHandle, int32_t> nodeUniqueIds_;
     std::vector<SetAttributeRecord> setAttributeRecords_;
+    std::map<std::pair<ArkUI_NodeHandle, int32_t>, SetAttributeRecord> currentAttributes_;
+    std::vector<CreatedNodeRecord> createdNodes_;
+    std::vector<ArkUI_NodeHandle> disposedNodes_;
+    std::map<ArkUI_NodeHandle, std::vector<ArkUI_NodeHandle>> nodeChildren_;
+    std::map<ArkUI_NodeHandle, ArkUI_NodeHandle> nodeParents_;
+    std::map<ArkUI_NodeHandle, ArkUI_IntSize> measuredSizes_;
+    std::vector<ArkUI_NodeHandle> measuredNodes_;
+    std::vector<LayoutRecord> layoutRecords_;
+    std::vector<std::pair<ArkUI_NodeHandle, ArkUI_NodeDirtyFlag>> dirtyNodes_;
     std::vector<ArkUI_NativeDialogHandle> createdDialogs_;
     std::vector<ArkUI_NativeDialogHandle> disposedDialogs_;
     std::vector<ArkUI_NativeDialogHandle> closedDialogs_;
@@ -158,6 +183,11 @@ public:
     int32_t nativeDialogApiCallCount_ = 0;
 
 private:
+    struct CustomEventRegistration {
+        ArkUI_NodeCustomEventType eventType = 0;
+        void* userData = nullptr;
+    };
+
     struct DialogDismissRegistration {
         void* userData = nullptr;
         void (*callback)(ArkUI_DialogDismissEvent*) = nullptr;
@@ -206,6 +236,7 @@ private:
     std::map<const ArkUI_NodeEvent*, ArkUI_NodeEventType> nodeEventTypes_;
     std::map<const ArkUI_NodeEvent*, ArkUI_NodeComponentEvent*> nodeEventComponentEvents_;
     std::map<const ArkUI_NodeEvent*, ArkUI_StringAsyncEvent*> nodeEventStringAsyncEvents_;
+    std::map<ArkUI_NodeHandle, std::map<ArkUI_NodeCustomEventType, CustomEventRegistration>> customEventRegistrations_;
     std::map<ArkUI_DialogDismissEvent*, void*> dialogDismissEventUserData_;
     std::map<ArkUI_NativeDialogHandle, DialogDismissRegistration> dialogDismissRegistrations_;
     int32_t getNodeUniqueIdResult_ = 0;

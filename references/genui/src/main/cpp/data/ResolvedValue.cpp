@@ -17,79 +17,79 @@
 
 namespace NativeModule {
 
-ResolvedValue ResolvedValue::OkLiteral(const JsonValue& value)
+ResolvedValue ResolvedValue::OkLiteral(const JsonValue& valueVal)
 {
     ResolvedValue result;
     result.source = ResolveSource::LITERAL;
     result.success = true;
-    result.value = value;
+    result.value = valueVal;
     return result;
 }
 
-ResolvedValue ResolvedValue::OkExpression(const JsonValue& value)
+ResolvedValue ResolvedValue::OkExpression(const JsonValue& valueVal)
 {
     ResolvedValue result;
     result.source = ResolveSource::EXPRESSION;
     result.success = true;
-    result.value = value;
+    result.value = valueVal;
     return result;
 }
 
-ResolvedValue ResolvedValue::OkPath(const JsonValue& value, const std::string& path)
+ResolvedValue ResolvedValue::OkPath(const JsonValue& valueVal, const std::string& pathVal)
 {
     ResolvedValue result;
     result.source = ResolveSource::PATH;
     result.success = true;
-    result.value = value;
-    result.path = path;
+    result.value = valueVal;
+    result.path = pathVal;
     return result;
 }
 
-ResolvedValue ResolvedValue::OkFunctionCall(const JsonValue& value, const std::string& functionName)
+ResolvedValue ResolvedValue::OkFunctionCall(const JsonValue& valueVal, const std::string& functionNameVal)
 {
     ResolvedValue result;
     result.source = ResolveSource::FUNCTION_CALL;
     result.success = true;
-    result.value = value;
-    result.functionName = functionName;
+    result.value = valueVal;
+    result.functionName = functionNameVal;
     return result;
 }
 
-ResolvedValue ResolvedValue::FailExpression(const std::string& errorMessage)
+ResolvedValue ResolvedValue::FailExpression(const std::string& errorMessageVal)
 {
     ResolvedValue result;
     result.source = ResolveSource::EXPRESSION;
     result.success = false;
-    result.errorMessage = errorMessage;
+    result.errorMessage = errorMessageVal;
     return result;
 }
 
-ResolvedValue ResolvedValue::FailPath(const std::string& path, const std::string& errorMessage)
+ResolvedValue ResolvedValue::FailPath(const std::string& pathVal, const std::string& errorMessageVal)
 {
     ResolvedValue result;
     result.source = ResolveSource::PATH;
     result.success = false;
-    result.path = path;
-    result.errorMessage = errorMessage;
+    result.path = pathVal;
+    result.errorMessage = errorMessageVal;
     return result;
 }
 
-ResolvedValue ResolvedValue::FailFunctionCall(const std::string& functionName, const std::string& errorMessage)
+ResolvedValue ResolvedValue::FailFunctionCall(const std::string& functionNameVal, const std::string& errorMessageVal)
 {
     ResolvedValue result;
     result.source = ResolveSource::FUNCTION_CALL;
     result.success = false;
-    result.functionName = functionName;
-    result.errorMessage = errorMessage;
+    result.functionName = functionNameVal;
+    result.errorMessage = errorMessageVal;
     return result;
 }
 
-ResolvedValue ResolvedValue::FailInvalid(const std::string& errorMessage)
+ResolvedValue ResolvedValue::FailInvalid(const std::string& errorMessageVal)
 {
     ResolvedValue result;
     result.source = ResolveSource::INVALID;
     result.success = false;
-    result.errorMessage = errorMessage;
+    result.errorMessage = errorMessageVal;
     return result;
 }
 

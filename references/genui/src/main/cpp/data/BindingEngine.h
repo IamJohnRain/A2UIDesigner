@@ -50,9 +50,9 @@ public:
     void UpdateDataModel(const std::map<std::string, std::string>& data);
 
     // 新的更新接口：支持路径、删除和替换
-    void UpdateDataModelByPath(const std::string& surfaceId, const std::string& path, const JsonValue& value);
-    void DeleteDataModelByPath(const std::string& surfaceId, const std::string& path);
-    void ReplaceDataModel(const std::string& surfaceId, const JsonValue& value);
+    bool UpdateDataModelByPath(const std::string& surfaceId, const std::string& path, const JsonValue& value);
+    bool DeleteDataModelByPath(const std::string& surfaceId, const std::string& path);
+    bool ReplaceDataModel(const std::string& surfaceId, const JsonValue& value);
 
     // 处理 DataModelUpdate 请求
     void ProcessUpdate(const DataModelUpdate& updateRequest);
@@ -94,6 +94,14 @@ private:
         const std::shared_ptr<Component>& comp, const std::string& surfaceId, const std::vector<DataBinding>& bindings);
     void UnregisterBindingPaths(
         const std::shared_ptr<Component>& comp, const std::string& surfaceId, const std::vector<DataBinding>& bindings);
+    void RegisterExpressionBindingPaths(const std::shared_ptr<Component>& comp,
+        const std::shared_ptr<DataModel>& dataModel, const DataBinding& binding);
+    void RegisterNonExpressionBindingPaths(const std::shared_ptr<Component>& comp,
+        const std::shared_ptr<DataModel>& dataModel, const DataBinding& binding);
+    void UnregisterExpressionBindingPaths(
+        const std::shared_ptr<DataModel>& dataModel, const DataBinding& binding, const std::string& componentId);
+    void UnregisterNonExpressionBindingPaths(
+        const std::shared_ptr<DataModel>& dataModel, const DataBinding& binding, const std::string& componentId);
 
     // 组件注册表
     std::unordered_map<std::string, std::shared_ptr<Component>> components_;

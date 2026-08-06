@@ -44,6 +44,8 @@
 #undef protected
 #undef private
 
+#include "utils/SystemProperties.h"
+
 #include "RenderManager.h"
 #include "RenderSlot.h"
 #include "SurfaceManager.h"
@@ -260,8 +262,13 @@ TEST_F(SurfaceSlotCustomComponentInternalCoverageTest, should_skip_extended_comp
     EXPECT_EQ(fallbackSlot.descriptorsById_["nav"].GetString("component", ""), "NavContainer");
 }
 
+/**
+ * @tc.name: Extended 组件名保持精确值
+ * @tc.desc: descriptor 预处理不再把 Extended.* 自动归一化为 Catalog 中的短组件名。
+ * @tc.type: FUNC
+ */
 TEST_F(SurfaceSlotCustomComponentInternalCoverageTest,
-    should_normalize_extended_prefixed_component_to_short_type_only_when_catalog_has_short_name)
+    should_preserve_extended_prefixed_component_type_for_exact_catalog_validation)
 {
     SurfaceSlot slot;
     slot.SetSurfaceId("extended_prefixed_surface");
@@ -277,8 +284,34 @@ TEST_F(SurfaceSlotCustomComponentInternalCoverageTest,
     slot.PrepareDescriptorById(descriptors->GetRoot());
 
     ASSERT_EQ(slot.descriptorsById_.size(), 2u);
-    EXPECT_EQ(slot.descriptorsById_["short_match"].GetString("component", ""), "Text");
+    EXPECT_EQ(slot.descriptorsById_["short_match"].GetString("component", ""), "Extended.Text");
     EXPECT_EQ(slot.descriptorsById_["keep_prefixed"].GetString("component", ""), "Extended.Unknown");
+}
+
+/**
+ * @tc.name: Extended 旧前缀组件名拒绝
+ * @tc.desc: Catalog 仅声明短组件名时拒绝 Extended.*，并保持短组件名正常创建。
+ * @tc.type: FUNC
+ */
+TEST_F(SurfaceSlotCustomComponentInternalCoverageTest,
+    should_reject_legacy_prefixed_built_in_type_when_extended_catalog_uses_short_name)
+{
+    SurfaceSlot slot;
+    slot.SetSurfaceId("extended_strict_component_type_surface");
+    slot.SetRenderId(1305);
+    slot.SetCatalog(BuildCatalog(A2UI_EXTENDED_CATALOG_ID, { { "Grid", false } }));
+
+    EXPECT_EQ(slot.BuildComponent("Extended.Grid"), nullptr);
+    EXPECT_NE(slot.BuildComponent("Grid"), nullptr);
+
+    std::unique_ptr<JsonAdapter> message = ParseJson(R"({
+        "components": [
+            {"id":"root","component":"Extended.Grid"}
+        ]
+    })");
+    ASSERT_NE(message, nullptr);
+    EXPECT_FALSE(slot.UpdateComponents(message->GetRoot()));
+    EXPECT_EQ(slot.FindComponentById("root"), nullptr);
 }
 
 TEST_F(SurfaceSlotCustomComponentInternalCoverageTest,
@@ -577,10 +610,10 @@ TEST_F(SurfaceSlotCustomComponentInternalCoverageTest,
     SurfaceSlot extendedSlot;
     extendedSlot.SetSurfaceId("route_extended");
     extendedSlot.SetRenderId(1502);
-    extendedSlot.SetCatalog(
-        BuildCatalog(A2UI_EXTENDED_CATALOG_ID, { { "Fancy", false }, { "PlainInner", true }, { "Text", false } }));
+    extendedSlot.SetCatalog(BuildCatalog(A2UI_EXTENDED_CATALOG_ID,
+        { { "Fancy", false }, { "PlainInner", true }, { "Text", false }, { "Custom.Row", false } }));
     extendedSlot.SetSurfaceCatalogId(A2UI_EXTENDED_CATALOG_ID);
-    extendedSlot.SetApiVersion(18);
+    SystemProperties::GetInstance().SetApiVersion(18);
 
     std::shared_ptr<Component> customRow = extendedSlot.BuildComponent("Custom.Row");
     ASSERT_NE(customRow, nullptr);
@@ -628,7 +661,7 @@ TEST_F(SurfaceSlotCustomComponentInternalCoverageTest, should_cover_surface_slot
     slot.SetCatalog(catalog);
     slot.SetCatalog(catalog);
     slot.SetSurfaceCatalogId(A2UI_EXTENDED_CATALOG_ID);
-    slot.SetApiVersion(18);
+    SystemProperties::GetInstance().SetApiVersion(18);
     EXPECT_EQ(slot.GetApiVersion(), 18);
 
     std::shared_ptr<Component> extendedText = slot.BuildComponent("Text");
@@ -824,8 +857,8 @@ TEST_F(SurfaceSlotCustomComponentInternalCoverageTest,
         extendedSlot.CreateOrUpdateComponentNode(updatedDescriptor->GetRoot(), "extended_text", "Text");
     EXPECT_EQ(updatedText, extendedText);
 
-    RenderContext renderContext =
-        RenderContext::Create(extendedSlot.GetRenderId(), extendedSlot.GetSurfaceId(), extendedSlot.bindingEngine_,
-            extendedSlot.GetCatalog(), extendedSlot.GetFontSizeScale(), extendedSlot.GetApiVersion());
+    RenderContext renderContext = RenderContext::Create(extendedSlot.GetRenderId(), extendedSlot.GetSurfaceId(),
+        extendedSlot.bindingEngine_, extendedSlot.GetCatalog(), extendedSlot.GetFontSizeScale(),
+        SystemProperties::GetInstance().GetApiVersion());
     extendedSlot.ApplyExtendedComponentDescriptor(updatedDescriptor->GetRoot(), nullptr, true, renderContext);
 }

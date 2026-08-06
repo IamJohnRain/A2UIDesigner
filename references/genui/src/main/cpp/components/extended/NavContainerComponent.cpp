@@ -16,11 +16,15 @@
 #include "NavContainerComponent.h"
 
 #include <algorithm>
+#include <cmath>
 #include <functional>
+#include <limits>
 #include <map>
 
 #include "components/ChildListSchemaValidationUtils.h"
 #include "utils/LogA2UI.h"
+
+#include "SchemaErrorCodes.h"
 
 namespace NativeModule {
 
@@ -55,7 +59,19 @@ std::string NavContainerComponent::GetType() const
 
 void NavContainerComponent::ApplyPrivateAttributes(const JsonValue& descriptor)
 {
+    isApplyingCurrentIndexDescriptor_ = true;
+    hasDescriptorCurrentIndex_ = descriptor.IsObject() && descriptor.Has("currentIndex");
+    hasDescriptorChildCount_ = false;
+    descriptorChildCount_ = 0;
+    if (descriptor.IsObject() && descriptor.Has("children")) {
+        JsonValue childrenValue = descriptor.GetItem("children");
+        if (childrenValue.IsArray()) {
+            hasDescriptorChildCount_ = true;
+            descriptorChildCount_ = static_cast<size_t>(childrenValue.GetArraySize());
+        }
+    }
     ApplySchemaProperty("currentIndex", descriptor);
+    isApplyingCurrentIndexDescriptor_ = false;
     RefreshChildVisibility();
 }
 
@@ -87,10 +103,7 @@ PropertyDeclaration NavContainerComponent::GetPrivatePropertyDeclaration(const s
                     .allowDynamic = true,
                     .allowExpression = true,
                     .fallbackNumber = NAV_CONTAINER_CURRENT_INDEX_FALLBACK,
-                    .applyValue = [&component](const JsonValue& value) {
-                        component.SetCurrentIndex(static_cast<int32_t>(value.GetNumberValue(0.0)));
-                        component.RefreshChildVisibility();
-                    } };
+                    .applyValue = [&component](const JsonValue& value) { component.ApplyCurrentIndexValue(value); } };
             } }
     };
 
@@ -151,6 +164,40 @@ bool NavContainerComponent::NavigateToTargetComponent(const std::string& targetC
     return true;
 }
 
+void NavContainerComponent::ApplyCurrentIndexValue(const JsonValue& value)
+{
+    if (isApplyingCurrentIndexDescriptor_ && !hasDescriptorCurrentIndex_) {
+        SetCurrentIndex(NAV_CONTAINER_CURRENT_INDEX_FALLBACK);
+        RefreshChildVisibility();
+        return;
+    }
+
+    double currentIndex = value.GetNumberValue(NAV_CONTAINER_CURRENT_INDEX_FALLBACK);
+    size_t childCount = ResolveCurrentIndexValidationChildCount();
+    bool isInvalidNumber = !std::isfinite(currentIndex) || currentIndex < 0.0 ||
+                           std::floor(currentIndex) != currentIndex ||
+                           currentIndex > static_cast<double>(std::numeric_limits<int32_t>::max());
+    if (isInvalidNumber) {
+        ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
+            "Property currentIndex must be a non-negative integer less than children.length, fallback to 0",
+            "currentIndex");
+        SetCurrentIndex(NAV_CONTAINER_CURRENT_INDEX_FALLBACK);
+        RefreshChildVisibility();
+        return;
+    }
+
+    int32_t resolvedIndex = static_cast<int32_t>(currentIndex);
+    if (currentIndex >= static_cast<double>(childCount)) {
+        resolvedIndex = ClampCurrentIndex(resolvedIndex, childCount);
+        ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
+            "Property currentIndex exceeds children.length, clamped to " + std::to_string(resolvedIndex),
+            "currentIndex");
+    }
+
+    SetCurrentIndex(resolvedIndex);
+    RefreshChildVisibility();
+}
+
 void NavContainerComponent::SetCurrentIndex(int32_t currentIndex)
 {
     currentIndex_ = currentIndex;
@@ -159,6 +206,14 @@ void NavContainerComponent::SetCurrentIndex(int32_t currentIndex)
 int32_t NavContainerComponent::ResolveVisibleIndex(size_t childCount) const
 {
     return ClampCurrentIndex(currentIndex_, childCount);
+}
+
+size_t NavContainerComponent::ResolveCurrentIndexValidationChildCount() const
+{
+    if (isApplyingCurrentIndexDescriptor_ && hasDescriptorChildCount_) {
+        return descriptorChildCount_;
+    }
+    return GetChildren().size();
 }
 
 void NavContainerComponent::RefreshChildVisibility()

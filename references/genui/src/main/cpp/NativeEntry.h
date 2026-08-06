@@ -40,6 +40,7 @@ napi_value RegisterUpdateCustomComponent(napi_env env, napi_callback_info info);
 napi_value ValidateCustomComponentChecks(napi_env env, napi_callback_info info);
 napi_value DispatchCustomComponentAction(napi_env env, napi_callback_info info);
 napi_value ResolveCustomComponentDynamicValue(napi_env env, napi_callback_info info);
+napi_value ClearCustomComponentDynamicValue(napi_env env, napi_callback_info info);
 napi_value EvaluateDynamicValue(napi_env env, napi_callback_info info);
 napi_value SetFontSizeScale(napi_env env, napi_callback_info info);
 napi_value SetApiVersion(napi_env env, napi_callback_info info);

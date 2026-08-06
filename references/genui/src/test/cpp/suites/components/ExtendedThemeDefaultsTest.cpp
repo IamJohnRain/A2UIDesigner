@@ -49,7 +49,8 @@ namespace {
 
 constexpr uint32_t RADIO_DARK_CHECKED_BACKGROUND_COLOR = 0xFF317AF7u;
 constexpr uint32_t RADIO_LIGHT_CHECKED_BACKGROUND_COLOR = 0xFF0A59F7u;
-constexpr uint32_t RADIO_DEFAULT_UNCHECKED_BORDER_COLOR = 0x33FFFFFFu;
+constexpr uint32_t RADIO_LIGHT_UNCHECKED_BORDER_COLOR = 0x33FFFFFFu;
+constexpr uint32_t RADIO_DARK_UNCHECKED_BORDER_COLOR = 0x33FFFFFFu;
 constexpr uint32_t RADIO_DEFAULT_INDICATOR_COLOR = 0xFFFFFFFFu;
 constexpr uint32_t TOGGLE_LIGHT_SELECTED_COLOR = 0xFF007DFFu;
 constexpr uint32_t TOGGLE_LIGHT_UNSELECTED_COLOR = 0x19000000u;
@@ -331,6 +332,42 @@ TEST_F(ExtendedThemeDefaultsTest, L0_should_apply_renamed_radio_unchecked_border
     EXPECT_EQ(radio->GetUncheckedBackgroundColorForTest(), 0xFFAABBCCu);
 }
 
+TEST_F(ExtendedThemeDefaultsTest, L0_should_use_button_default_font_weight_and_floor_fractional_values)
+{
+    InitializeTheme(ThemeMode::LIGHT);
+    slot_.SetCatalog(BuildExtendedProtocolCatalog({ "Button" }));
+    auto message = JsonAdapter::Parse(R"({
+        "components": [
+            {"id": "defaultButton", "component": "Button", "label": "default"},
+            {
+                "id": "fractionalButton",
+                "component": "Button",
+                "label": "fractional",
+                "styles": {"fontWeight": 700.9}
+            },
+            {
+                "id": "invalidButton",
+                "component": "Button",
+                "label": "invalid",
+                "styles": {"fontWeight": "invalid"}
+            }
+        ]
+    })");
+    ASSERT_NE(message, nullptr);
+    ASSERT_TRUE(slot_.UpdateComponents(message->GetRoot()));
+
+    auto defaultButton = std::dynamic_pointer_cast<ExtendedButtonComponent>(slot_.FindComponentById("defaultButton"));
+    auto fractionalButton =
+        std::dynamic_pointer_cast<ExtendedButtonComponent>(slot_.FindComponentById("fractionalButton"));
+    auto invalidButton = std::dynamic_pointer_cast<ExtendedButtonComponent>(slot_.FindComponentById("invalidButton"));
+    ASSERT_NE(defaultButton, nullptr);
+    ASSERT_NE(fractionalButton, nullptr);
+    ASSERT_NE(invalidButton, nullptr);
+    EXPECT_EQ(defaultButton->GetFontWeightForTest(), static_cast<int32_t>(A2UIFontWeight::W500));
+    EXPECT_EQ(fractionalButton->GetFontWeightForTest(), static_cast<int32_t>(A2UIFontWeight::W700));
+    EXPECT_EQ(invalidButton->GetFontWeightForTest(), static_cast<int32_t>(A2UIFontWeight::W500));
+}
+
 TEST_F(ExtendedThemeDefaultsTest, L0_should_ignore_legacy_radio_unchecked_border_color_field)
 {
     InitializeTheme(ThemeMode::LIGHT);
@@ -349,7 +386,7 @@ TEST_F(ExtendedThemeDefaultsTest, L0_should_ignore_legacy_radio_unchecked_border
 
     auto radio = std::dynamic_pointer_cast<ExtendedRadioComponent>(slot_.FindComponentById("root"));
     ASSERT_NE(radio, nullptr);
-    EXPECT_EQ(radio->GetUncheckedBackgroundColorForTest(), RADIO_DEFAULT_UNCHECKED_BORDER_COLOR);
+    EXPECT_EQ(radio->GetUncheckedBackgroundColorForTest(), RADIO_LIGHT_UNCHECKED_BORDER_COLOR);
 }
 
 TEST_F(ExtendedThemeDefaultsTest, L0_should_report_indicator_type_as_undefined_field_for_radio)
@@ -2171,7 +2208,7 @@ TEST_F(ExtendedThemeDefaultsTest, L0_should_apply_dark_theme_defaults_for_radio_
     auto radio = std::dynamic_pointer_cast<ExtendedRadioComponent>(slot_.FindComponentById("radio"));
     ASSERT_NE(radio, nullptr);
     EXPECT_EQ(radio->GetCheckedBackgroundColorForTest(), RADIO_DARK_CHECKED_BACKGROUND_COLOR);
-    EXPECT_EQ(radio->GetUncheckedBackgroundColorForTest(), RADIO_DEFAULT_UNCHECKED_BORDER_COLOR);
+    EXPECT_EQ(radio->GetUncheckedBackgroundColorForTest(), RADIO_DARK_UNCHECKED_BORDER_COLOR);
     EXPECT_EQ(radio->GetIndicatorColorForTest(), RADIO_DEFAULT_INDICATOR_COLOR);
 
     auto toggle = std::dynamic_pointer_cast<ExtendedToggleComponent>(slot_.FindComponentById("toggle"));
@@ -2796,6 +2833,7 @@ TEST_F(ExtendedThemeDefaultsTest, L0_should_preserve_textinput_colors_on_config_
             "component": "TextInput",
             "text": "hello",
             "styles": {
+                "backgroundColor": "#112233",
                 "caretColor": "#778899",
                 "selectedBackgroundColor": "#AABBCC"
             }
@@ -2813,4 +2851,136 @@ TEST_F(ExtendedThemeDefaultsTest, L0_should_preserve_textinput_colors_on_config_
 
     EXPECT_EQ(input->GetCaretColorForTest(), 0xFF778899u);
     EXPECT_EQ(input->GetSelectedBackgroundColorForTest(), 0xFFAABBCCu);
+    const auto* backgroundCall =
+        FindLastSetAttributeRecord(mockArkUIPtr_, input->GetNativeView(), NODE_BACKGROUND_COLOR);
+    ASSERT_NE(backgroundCall, nullptr);
+    ASSERT_FALSE(backgroundCall->values.empty());
+    EXPECT_EQ(backgroundCall->values[0].u32, 0xFF112233u);
+}
+
+TEST_F(ExtendedThemeDefaultsTest, L0_should_update_textinput_default_background_color_on_theme_change)
+{
+    InitializeTheme(ThemeMode::LIGHT);
+    slot_.SetCatalog(BuildExtendedProtocolCatalog({ "TextInput" }));
+    auto message = JsonAdapter::Parse(R"({
+        "components": [{
+            "id": "input",
+            "component": "TextInput"
+        }]
+    })");
+    ASSERT_NE(message, nullptr);
+    ASSERT_TRUE(slot_.UpdateComponents(message->GetRoot()));
+
+    auto input = std::dynamic_pointer_cast<ExtendedTextInputComponent>(slot_.FindComponentById("input"));
+    ASSERT_NE(input, nullptr);
+    ArkUI_NodeHandle inputNode = input->GetNativeView();
+    ASSERT_NE(inputNode, nullptr);
+    const auto* lightBackgroundCall = FindLastSetAttributeRecord(mockArkUIPtr_, inputNode, NODE_BACKGROUND_COLOR);
+    ASSERT_NE(lightBackgroundCall, nullptr);
+    ASSERT_FALSE(lightBackgroundCall->values.empty());
+    EXPECT_EQ(lightBackgroundCall->values[0].u32, 0x0C000000u);
+
+    auto themeManager = slot_.GetThemeManager();
+    ASSERT_NE(themeManager, nullptr);
+    themeManager->UpdateThemeMode(ThemeMode::DARK);
+    std::static_pointer_cast<Component>(input)->OnConfigChange(themeManager->GetContext());
+
+    const auto* darkBackgroundCall = FindLastSetAttributeRecord(mockArkUIPtr_, inputNode, NODE_BACKGROUND_COLOR);
+    ASSERT_NE(darkBackgroundCall, nullptr);
+    ASSERT_FALSE(darkBackgroundCall->values.empty());
+    EXPECT_EQ(darkBackgroundCall->values[0].u32, 0x19FFFFFFu);
+}
+
+TEST_F(ExtendedThemeDefaultsTest, L0_should_reset_radio_value_and_group_when_non_string_value_provided)
+{
+    RegisterWarningDispatchCallback(mockNapiPtr_);
+    InitializeTheme(ThemeMode::LIGHT);
+    slot_.SetCatalog(BuildExtendedProtocolCatalog({ "Radio" }));
+    auto message = JsonAdapter::Parse(R"({
+        "components": [
+            {
+                "id": "radioNum",
+                "component": "Radio",
+                "value": 2026,
+                "group": 2026
+            },
+            {
+                "id": "radioObj",
+                "component": "Radio",
+                "value": { "nested": "object" },
+                "group": [1, 2, 3]
+            }
+        ]
+    })");
+    ASSERT_NE(message, nullptr);
+    ASSERT_TRUE(slot_.UpdateComponents(message->GetRoot()));
+
+    auto radioNum = std::dynamic_pointer_cast<ExtendedRadioComponent>(slot_.FindComponentById("radioNum"));
+    ASSERT_NE(radioNum, nullptr);
+    EXPECT_EQ(radioNum->GetValueForTest(), "");
+    EXPECT_EQ(radioNum->GetGroupForTest(), "");
+
+    auto radioObj = std::dynamic_pointer_cast<ExtendedRadioComponent>(slot_.FindComponentById("radioObj"));
+    ASSERT_NE(radioObj, nullptr);
+    EXPECT_EQ(radioObj->GetValueForTest(), "");
+    EXPECT_EQ(radioObj->GetGroupForTest(), "");
+}
+
+TEST_F(ExtendedThemeDefaultsTest, L0_should_reset_radio_value_and_group_after_invalid_update)
+{
+    RegisterWarningDispatchCallback(mockNapiPtr_);
+    InitializeTheme(ThemeMode::LIGHT);
+    slot_.SetCatalog(BuildExtendedProtocolCatalog({ "Radio" }));
+    auto initialMessage = JsonAdapter::Parse(R"({
+        "components": [
+            {
+                "id": "radio",
+                "component": "Radio",
+                "value": "keep-value",
+                "group": "keep-group"
+            }
+        ]
+    })");
+    ASSERT_NE(initialMessage, nullptr);
+    ASSERT_TRUE(slot_.UpdateComponents(initialMessage->GetRoot()));
+
+    auto invalidUpdate = JsonAdapter::Parse(R"({
+        "components": [
+            {
+                "id": "radio",
+                "component": "Radio",
+                "value": { "invalid": 2026 },
+                "group": ["invalid"]
+            }
+        ]
+    })");
+    ASSERT_NE(invalidUpdate, nullptr);
+    ASSERT_TRUE(slot_.UpdateComponents(invalidUpdate->GetRoot()));
+
+    auto radio = std::dynamic_pointer_cast<ExtendedRadioComponent>(slot_.FindComponentById("radio"));
+    ASSERT_NE(radio, nullptr);
+    EXPECT_EQ(radio->GetValueForTest(), "");
+    EXPECT_EQ(radio->GetGroupForTest(), "");
+}
+
+TEST_F(ExtendedThemeDefaultsTest, L0_should_report_type_mismatch_for_accessibility_label_non_string)
+{
+    RegisterWarningDispatchCallback(mockNapiPtr_);
+    InitializeTheme(ThemeMode::LIGHT);
+    slot_.SetCatalog(BuildExtendedProtocolCatalog({ "Radio" }));
+    auto message = JsonAdapter::Parse(R"({
+        "components": [
+            {
+                "id": "radio",
+                "component": "Radio",
+                "accessibility": {
+                    "label": 2026
+                }
+            }
+        ]
+    })");
+    ASSERT_NE(message, nullptr);
+    ASSERT_TRUE(slot_.UpdateComponents(message->GetRoot()));
+
+    EXPECT_GE(CountWarningRequests(mockNapiPtr_, "ERROR_CODE_TYPE_MISMATCH", "accessibility.label"), 1U);
 }

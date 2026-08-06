@@ -40,9 +40,9 @@ struct RenderContext {
     int32_t apiVersion = 0;
     ThemeMode colorMode = ThemeMode::LIGHT;
 
-    static RenderContext Create(int32_t renderId, const std::string& surfaceId,
-        const std::shared_ptr<BindingEngine>& bindingEngine, const std::shared_ptr<Catalog>& catalog,
-        float fontSizeScale = 1.0F, int32_t apiVersion = 0, ThemeMode colorMode = ThemeMode::LIGHT);
+    static RenderContext Create(int32_t renderIdVal, const std::string& surfaceIdVal,
+        const std::shared_ptr<BindingEngine>& bindingEngineVal, const std::shared_ptr<Catalog>& catalogVal,
+        float fontSizeScaleVal = 1.0F, int32_t apiVersionVal = 0, ThemeMode colorModeVal = ThemeMode::LIGHT);
     bool IsValid() const;
 };
 

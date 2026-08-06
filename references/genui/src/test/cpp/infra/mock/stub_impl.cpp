@@ -35,6 +35,11 @@ float g_displayScaledDensity = 1.0F;
 extern "C" {
 #endif
 
+void SetStubDisplayDensityPixels(float densityPixels)
+{
+    g_displayDensityPixels = densityPixels;
+}
+
 ArkUI_NodeHandle OH_ArkUI_NodeEvent_GetNodeHandle(ArkUI_NodeEvent* event)
 {
     return nullptr;
@@ -46,6 +51,41 @@ ArkUI_NodeEventType OH_ArkUI_NodeEvent_GetEventType(ArkUI_NodeEvent* event)
 ArkUI_StringAsyncEvent* OH_ArkUI_NodeEvent_GetStringAsyncEvent(ArkUI_NodeEvent* event)
 {
     return nullptr;
+}
+
+ArkUI_LayoutConstraint* OH_ArkUI_NodeCustomEvent_GetLayoutConstraintInMeasure(ArkUI_NodeCustomEvent* event)
+{
+    return event == nullptr ? nullptr : event->layoutConstraint;
+}
+
+ArkUI_NodeHandle OH_ArkUI_NodeCustomEvent_GetNodeHandle(ArkUI_NodeCustomEvent* event)
+{
+    return event == nullptr ? nullptr : event->node;
+}
+
+ArkUI_NodeCustomEventType OH_ArkUI_NodeCustomEvent_GetEventType(ArkUI_NodeCustomEvent* event)
+{
+    return event == nullptr ? static_cast<ArkUI_NodeCustomEventType>(0) : event->eventType;
+}
+
+void* OH_ArkUI_NodeCustomEvent_GetUserData(ArkUI_NodeCustomEvent* event)
+{
+    return event == nullptr ? nullptr : event->userData;
+}
+
+ArkUI_IntOffset OH_ArkUI_NodeCustomEvent_GetPositionInLayout(ArkUI_NodeCustomEvent* event)
+{
+    return event == nullptr ? ArkUI_IntOffset { 0, 0 } : event->layoutPosition;
+}
+
+int32_t OH_ArkUI_LayoutConstraint_GetPercentReferenceWidth(const ArkUI_LayoutConstraint* constraint)
+{
+    return constraint == nullptr ? 0 : constraint->percentReferenceWidth;
+}
+
+int32_t OH_ArkUI_LayoutConstraint_GetPercentReferenceHeight(const ArkUI_LayoutConstraint* constraint)
+{
+    return constraint == nullptr ? 0 : constraint->percentReferenceHeight;
 }
 
 ArkUI_NodeAdapterHandle OH_ArkUI_NodeAdapter_Create(void)

@@ -297,7 +297,7 @@ TEST_F(ExtendedComponentDynamicStyleValidationTddTest,
     ASSERT_NE(rowStyles, nullptr);
     row.ValidateDynamicStylesForTest(rowStyles->GetRoot(), { "justifyContent", "alignItems", "wrap" });
     EXPECT_EQ(CountWarnings(mockNapiPtr_, SCHEMA_ERROR_CODE_TYPE_MISMATCH, "row.styles.alignItems"), 1U);
-    EXPECT_EQ(CountWarnings(mockNapiPtr_, SCHEMA_ERROR_CODE_INVALID_VALUE, "row.styles.wrap"), 0U);
+    EXPECT_EQ(CountWarnings(mockNapiPtr_, SCHEMA_ERROR_CODE_INVALID_VALUE, "row.styles.wrap"), 1U);
 
     ClearWarnings(mockNapiPtr_);
     DynamicStyleStackProbeComponent stack;

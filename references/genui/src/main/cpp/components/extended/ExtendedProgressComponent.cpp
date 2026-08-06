@@ -19,6 +19,7 @@
 #include <functional>
 #include <map>
 
+#include "functions/CrossLanguageAttributeBridge.h"
 #include "styles/StyleApplyUtils.h"
 #include "theme/ThemeManager.h"
 #include "utils/LogA2UI.h"
@@ -32,6 +33,7 @@ namespace {
 
 constexpr float DEFAULT_PROGRESS_VALUE = 0.0F;
 constexpr float DEFAULT_PROGRESS_TOTAL = 100.0F;
+constexpr float DEFAULT_PROGRESS_STROKE_WIDTH = 4.0F;
 constexpr int32_t DEFAULT_PROGRESS_TYPE = 0;
 enum class ProgressDfxDecision { APPLIED, FALLBACK, PRESERVED };
 
@@ -122,29 +124,8 @@ void ExtendedProgressComponent::OnConfigChange(const ThemeContext& context)
     }
 }
 
-void ExtendedProgressComponent::ApplyPrivateAttributes(const JsonValue& descriptor)
+void ExtendedProgressComponent::ApplyTotalPrivateAttribute(const JsonValue& descriptor)
 {
-    JsonValue valueValue = descriptor.GetItem("value");
-    bool hasValue = descriptor.IsObject() && descriptor.Has("value");
-    if (!hasValue) {
-        ApplyRuntimeProperty("value", JsonValue(), false);
-        LogProgressDfxEvent(GetComponentId(), "ApplyPrivateAttributes", "value", valueValue, false,
-            ProgressDfxDecision::FALLBACK, "value=" + std::to_string(value_));
-    } else if (IsResolvableProgressPropertyValue(valueValue)) {
-        ApplyDeclaredPropertyOrFallback(descriptor, "value");
-        LogProgressDfxEvent(GetComponentId(), "ApplyPrivateAttributes", "value", valueValue, false,
-            ProgressDfxDecision::APPLIED, "value=" + std::to_string(value_));
-    } else {
-        RemoveBindingsForProperty("value");
-        ApplyRuntimeProperty("value", JsonValue(), false);
-        ReportSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
-            std::string("Property value expects number value, got type '") + valueValue.GetTypeName() +
-                "', fallback to default value",
-            "value");
-        LogProgressDfxEvent(GetComponentId(), "ApplyPrivateAttributes", "value", valueValue, false,
-            ProgressDfxDecision::FALLBACK, "value=" + std::to_string(value_));
-    }
-
     JsonValue totalValue = descriptor.GetItem("total");
     bool hasTotal = descriptor.IsObject() && descriptor.Has("total");
     if (!hasTotal) {
@@ -181,6 +162,32 @@ void ExtendedProgressComponent::ApplyPrivateAttributes(const JsonValue& descript
         LogProgressDfxEvent(GetComponentId(), "ApplyPrivateAttributes", "total", totalValue, false,
             ProgressDfxDecision::FALLBACK, "total=" + std::to_string(total_));
     }
+}
+
+void ExtendedProgressComponent::ApplyPrivateAttributes(const JsonValue& descriptor)
+{
+    JsonValue valueValue = descriptor.GetItem("value");
+    bool hasValue = descriptor.IsObject() && descriptor.Has("value");
+    if (!hasValue) {
+        ApplyRuntimeProperty("value", JsonValue(), false);
+        LogProgressDfxEvent(GetComponentId(), "ApplyPrivateAttributes", "value", valueValue, false,
+            ProgressDfxDecision::FALLBACK, "value=" + std::to_string(value_));
+    } else if (IsResolvableProgressPropertyValue(valueValue)) {
+        ApplyDeclaredPropertyOrFallback(descriptor, "value");
+        LogProgressDfxEvent(GetComponentId(), "ApplyPrivateAttributes", "value", valueValue, false,
+            ProgressDfxDecision::APPLIED, "value=" + std::to_string(value_));
+    } else {
+        RemoveBindingsForProperty("value");
+        ApplyRuntimeProperty("value", JsonValue(), false);
+        ReportSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
+            std::string("Property value expects number value, got type '") + valueValue.GetTypeName() +
+                "', fallback to default value",
+            "value");
+        LogProgressDfxEvent(GetComponentId(), "ApplyPrivateAttributes", "value", valueValue, false,
+            ProgressDfxDecision::FALLBACK, "value=" + std::to_string(value_));
+    }
+
+    ApplyTotalPrivateAttribute(descriptor);
 
     if (value_ < 0.0F) {
         ReportSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
@@ -258,6 +265,9 @@ void ExtendedProgressComponent::ApplyComponentSpecificStyles(const JsonValue& st
     }
     if (styles.Has("color")) {
         ApplyColorValue(styles.GetItem("color"));
+    }
+    if (styles.Has("strokeWidth")) {
+        ApplyStrokeWidthValue(styles.GetItem("strokeWidth"));
     }
 }
 
@@ -347,6 +357,35 @@ void ExtendedProgressComponent::ApplyProgressTypeValue(const JsonValue& value)
     if (useDefaultColor_) {
         SetColor(ResolveDefaultColorByType(progressType_));
     }
+}
+
+void ExtendedProgressComponent::SetStrokeWidth(float strokeWidth)
+{
+    strokeWidth_ = strokeWidth;
+    CrossLanguageAttributeBridge::GetInstance().Dispatch({ .renderId = GetRenderId(),
+        .componentId = GetComponentId(),
+        .nodeUniqueId = GetNativeNodeUniqueId(),
+        .componentType = "Progress",
+        .attributeName = "strokeWidth",
+        .floatValue = strokeWidth_,
+        .reset = false });
+} // LCOV_EXCL_BR_LINE - closing brace only has compiler-generated exception cleanup arcs
+
+void ExtendedProgressComponent::ApplyStrokeWidthValue(const JsonValue& value)
+{
+    if (value.IsNumber()) {
+        SetStrokeWidth(static_cast<float>(value.GetNumberValue(DEFAULT_PROGRESS_STROKE_WIDTH)));
+        LogProgressDfxEvent(GetComponentId(), "ApplyComponentSpecificStyles", "strokeWidth", value,
+            IsApplyingStyleDeltaUpdate(), ProgressDfxDecision::APPLIED, "strokeWidth=" + std::to_string(strokeWidth_));
+        return;
+    }
+    if (value.IsValid()) {
+        ReportStyleWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH, "strokeWidth",
+            std::string("Property strokeWidth expects number value, got type '") + value.GetTypeName() +
+                "', fallback to default value");
+    }
+    LogProgressDfxEvent(GetComponentId(), "ApplyComponentSpecificStyles", "strokeWidth", value,
+        IsApplyingStyleDeltaUpdate(), ProgressDfxDecision::FALLBACK, "strokeWidth=" + std::to_string(strokeWidth_));
 }
 
 } // namespace NativeModule

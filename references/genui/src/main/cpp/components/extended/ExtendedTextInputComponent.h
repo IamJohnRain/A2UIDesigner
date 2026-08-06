@@ -196,7 +196,29 @@ protected:
 private:
     static void NodeEventReceiver(A2UINodeEvent* event);
 
+    PropertyDeclaration CreateTextPropertyDeclaration();
+    PropertyDeclaration CreatePlaceholderPropertyDeclaration();
+    PropertyDeclaration CreateEnabledPropertyDeclaration();
+    PropertyDeclaration CreateMaxLengthPropertyDeclaration();
+    PropertyDeclaration CreateTypePropertyDeclaration();
     void ValidateStylesSchema(const JsonValue& styles);
+    void ValidatePositiveNumberStyle(const JsonValue& styles, const char* propertyName);
+    void ValidateColorStyle(const JsonValue& styles, const char* propertyName);
+    void ValidateMaxLinesStyle(const JsonValue& styles);
+    void ValidateFontWeightStyle(const JsonValue& styles);
+    void ValidateTextAlignStyle(const JsonValue& styles);
+    void ValidateFontScaleRangeStyle(
+        const JsonValue& styles, const char* propertyName, double minValue, double maxValue, bool hasMaxValue);
+    void ValidateFontScaleModeStyle(const JsonValue& styles);
+    void ValidateShowUnderlineStyle(const JsonValue& styles);
+    void ValidateCancelButtonStyleProperty(const JsonValue& styles);
+    void ValidateUnderlineColorStyle(const JsonValue& styles);
+    void ValidateWordBreakStyle(const JsonValue& styles);
+    void ValidateCancelButtonSchema(const JsonValue& cancelButtonValue);
+    void ValidateCancelButtonStyleValue(const JsonValue& styleValue, bool allowDynamic);
+    void ValidateCancelButtonFontSizeValue(const JsonValue& fontSizeValue, bool allowDynamic);
+    void ValidateCancelButtonFontColorValue(const JsonValue& fontColorValue, bool allowDynamic);
+    void ValidateUnderlineColorSchema(const JsonValue& underlineColorValue);
     std::unique_ptr<JsonAdapter> ResolveStyleObjectDynamicMembers(const JsonValue& styleObjectValue) const;
     std::unique_ptr<JsonAdapter> ResolveCancelButtonDynamicMembers(const JsonValue& cancelButtonValue) const;
     std::unique_ptr<JsonAdapter> ResolveUnderlineColorDynamicMembers(const JsonValue& underlineColorValue) const;
@@ -206,6 +228,8 @@ private:
     void HandleNodeEvent(A2UINodeEvent* event);
     void HandleInputValueChange(const std::string& nextValue);
     void UpdateChangeEventRegistration();
+    void RegisterChangeEvent();
+    void UnregisterChangeEvent();
     void ResetTextPropertyIfMissing();
     void ResetNodeFontSize();
     void ResetNodeTextInputNumberOfLines();
@@ -229,6 +253,7 @@ private:
     void SetTextAlign(int32_t textAlign);
     void SetMinFontSize(float minFontSize);
     void SetMaxFontSize(float maxFontSize);
+    void SetBackgroundColor(uint32_t color, bool userOverride = true);
     void SetCaretColor(uint32_t color, bool userOverride = true);
     void SetSelectedBackgroundColor(uint32_t color, bool userOverride = true);
     void ResetCancelButton();
@@ -246,6 +271,25 @@ private:
     void SetMaxFontScale(float maxFontScale);
     std::string ResolveTextBindingPath() const;
     void SyncTextToBoundDataModel(const std::string& value);
+    bool ShouldApplyStyle(const JsonValue& styles, const char* styleName) const;
+    void ResetStylesToDefaults(uint32_t defaultFontColor, uint32_t defaultPlaceholderColor, uint32_t defaultCaretColor,
+        uint32_t defaultSelectedBackgroundColor, uint32_t defaultUnderlineColor);
+    void ApplyBackgroundColorStyle(const JsonValue& styles, ThemeMode themeMode);
+    void ApplyColorStyles(const JsonValue& styles, uint32_t defaultFontColor, uint32_t defaultPlaceholderColor,
+        uint32_t defaultCaretColor, uint32_t defaultSelectedBackgroundColor);
+    void ApplyCancelButtonStyle(const JsonValue& styles);
+    void ApplyFontSizeStyle(const JsonValue& styles, ArkUINodeApiAdapter& applier);
+    void ApplyTextInputStyle(const JsonValue& styles, ArkUINodeApiAdapter& applier);
+    void ApplyMaxLinesStyle(const JsonValue& styles, ArkUINodeApiAdapter& applier);
+    void ApplyFontWeightStyle(const JsonValue& styles);
+    void ApplyTextAlignStyle(const JsonValue& styles);
+    void ApplyMinFontSizeStyle(const JsonValue& styles);
+    void ApplyMaxFontSizeStyle(const JsonValue& styles);
+    void ApplyFontScaleLimits(const JsonValue& styles);
+    void ApplyFontScaleModeStyle(const JsonValue& styles);
+    void ApplyShowUnderlineStyle(const JsonValue& styles);
+    void ApplyUnderlineColorStyle(const JsonValue& styles, uint32_t defaultUnderlineColor);
+    void ApplyWordBreakStyle(const JsonValue& styles);
 
     std::string textValue_;
     std::string fontScaleMode_ = "followSystem";
@@ -262,6 +306,7 @@ private:
     float maxFontScale_ = 0.0F;
     uint32_t fontColor_ = 0xFF182431u;
     uint32_t placeholderColor_ = 0x99182431u;
+    uint32_t backgroundColor_ = 0x0C000000u;
     uint32_t caretColor_ = 0xFF007DFFu;
     uint32_t selectedBackgroundColor_ = 0x33007DFFu;
     bool hasCancelButton_ = false;
@@ -276,6 +321,7 @@ private:
     bool hasUnderlineColor_ = false;
     bool hasFontColorOverride_ = false;
     bool hasPlaceholderColorOverride_ = false;
+    bool hasBackgroundColorOverride_ = false;
     bool hasCaretColorOverride_ = false;
     bool hasSelectedBackgroundColorOverride_ = false;
     uint32_t underlineColorTyping_ = 0x33182431u;

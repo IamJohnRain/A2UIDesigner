@@ -27,7 +27,7 @@ namespace NativeModule {
 
 class Catalog {
 public:
-    Catalog(const std::string& id, const std::string& a2UIProtocolVersion = DEFAULT_A2UI_PROTOCOL_VERSION);
+    explicit Catalog(const std::string& id, const std::string& a2UIProtocolVersion = DEFAULT_A2UI_PROTOCOL_VERSION);
     ~Catalog() = default;
 
     const std::string& GetCatalogId() const;

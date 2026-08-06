@@ -1,25 +1,6 @@
 {
   "type": "object",
   "$defs": {
-    "ExpressionString": {
-      "type": "string",
-      "pattern": "^\\s*\\{\\{[\\s\\S]*\\}\\}\\s*$",
-      "description": "A full {{ }} expression string."
-    },
-    "NumericLike": {
-      "oneOf": [
-        {
-          "$ref": "../common_types.json#/$defs/DynamicNumber"
-        },
-        {
-          "type": "string",
-          "pattern": "^-?(0|[1-9]\\d*)(?:\\.\\d+)?$"
-        },
-        {
-          "$ref": "#/$defs/ExpressionString"
-        }
-      ]
-    },
     "DynamicTabType": {
       "oneOf": [
         {
@@ -27,62 +8,33 @@
           "enum": ["", "capsule", "underline"]
         },
         {
-          "$ref": "../common_types.json#/$defs/DataBinding"
-        },
-        {
-          "$ref": "../common_types.json#/$defs/FunctionCallString"
-        },
-        {
-          "$ref": "#/$defs/ExpressionString"
+          "$ref": "../common_types.json#/$defs/ExtendedDynamicValueRef"
         }
       ]
     },
-    "FontWeightLike": {
+    "NonNegativeNumberValue": {
       "oneOf": [
         {
-          "type": "number"
+          "type": "number",
+          "minimum": 0
+        },
+        {
+          "$ref": "../common_types.json#/$defs/ExtendedDynamicValueRef"
+        }
+      ]
+    },
+    "FontWeight": {
+      "oneOf": [
+        {
+          "type": "integer",
+          "enum": [100, 200, 300, 400, 500, 600, 700, 800, 900]
         },
         {
           "type": "string",
           "enum": ["lighter", "normal", "regular", "medium", "bold", "bolder"]
         },
         {
-          "type": "string",
-          "pattern": "^-?(0|[1-9]\\d*)(?:\\.\\d+)?$"
-        },
-        {
-          "$ref": "../common_types.json#/$defs/DataBinding"
-        },
-        {
-          "allOf": [
-            {
-              "$ref": "../common_types.json#/$defs/FunctionCall"
-            },
-            {
-              "properties": {
-                "returnType": {
-                  "const": "string"
-                }
-              }
-            }
-          ]
-        },
-        {
-          "allOf": [
-            {
-              "$ref": "../common_types.json#/$defs/FunctionCall"
-            },
-            {
-              "properties": {
-                "returnType": {
-                  "const": "number"
-                }
-              }
-            }
-          ]
-        },
-        {
-          "$ref": "#/$defs/ExpressionString"
+          "$ref": "../common_types.json#/$defs/ExtendedDynamicValueRef"
         }
       ]
     },
@@ -96,24 +48,6 @@
           "type": "string"
         },
         "selectedSrc": {
-          "type": "string"
-        },
-        "selectedColor": {
-          "type": "string"
-        },
-        "unSelectedColor": {
-          "type": "string"
-        },
-        "defaultBackgroundColor": {
-          "type": "string"
-        },
-        "selectedBackgroundColor": {
-          "type": "string"
-        },
-        "defaultBorderColor": {
-          "type": "string"
-        },
-        "selectedBorderColor": {
           "type": "string"
         }
       },
@@ -134,20 +68,20 @@
           "const": "TabContent"
         },
         "title": {
-          "$ref": "../common_types.json#/$defs/DynamicString"
+          "$ref": "../common_types.json#/$defs/ExtendedDynamicString"
         },
         "icon": {
-          "$ref": "../common_types.json#/$defs/DynamicString"
+          "$ref": "../common_types.json#/$defs/ExtendedDynamicString"
         },
         "selectedSrc": {
-          "$ref": "../common_types.json#/$defs/DynamicString"
+          "$ref": "../common_types.json#/$defs/ExtendedDynamicString"
         },
         "tabType": {
           "$ref": "#/$defs/DynamicTabType"
         },
         "__a2uiBindings": {
           "$ref": "#/$defs/BindingPathMap",
-          "description": "Optional binding path map consumed by Extended.TabContent for string-backed metadata fields."
+          "description": "Optional binding path map consumed by Extended.TabContent for string-backed property fields."
         },
         "styles": {
           "allOf": [
@@ -158,34 +92,40 @@
               "type": "object",
               "properties": {
                 "selectedColor": {
-                  "$ref": "../common_types.json#/$defs/DynamicString"
+                  "$ref": "../common_types.json#/$defs/ExtendedDynamicString",
+                  "description": "Text color of the selected tabBar title."
                 },
                 "unSelectedColor": {
-                  "$ref": "../common_types.json#/$defs/DynamicString"
+                  "$ref": "../common_types.json#/$defs/ExtendedDynamicString",
+                  "description": "Text color of the unselected tabBar title."
                 },
                 "defaultBackgroundColor": {
-                  "$ref": "../common_types.json#/$defs/DynamicString"
+                  "$ref": "../common_types.json#/$defs/ExtendedDynamicString",
+                  "description": "Background color of the unselected tabBar title."
                 },
                 "selectedBackgroundColor": {
-                  "$ref": "../common_types.json#/$defs/DynamicString"
+                  "$ref": "../common_types.json#/$defs/ExtendedDynamicString",
+                  "description": "Background color of the selected tabBar title."
                 },
                 "defaultBorderColor": {
-                  "$ref": "../common_types.json#/$defs/DynamicString"
+                  "$ref": "../common_types.json#/$defs/ExtendedDynamicString",
+                  "description": "Border color of the unselected tabBar title."
                 },
                 "selectedBorderColor": {
-                  "$ref": "../common_types.json#/$defs/DynamicString"
+                  "$ref": "../common_types.json#/$defs/ExtendedDynamicString",
+                  "description": "Border color of the selected tabBar title."
                 },
                 "fontSize": {
-                  "$ref": "#/$defs/NumericLike"
+                  "$ref": "#/$defs/NonNegativeNumberValue"
                 },
                 "fontWeight": {
-                  "$ref": "#/$defs/FontWeightLike"
+                  "$ref": "#/$defs/FontWeight"
                 },
                 "iconSize": {
-                  "$ref": "#/$defs/NumericLike"
+                  "$ref": "#/$defs/NonNegativeNumberValue"
                 },
                 "space": {
-                  "$ref": "#/$defs/NumericLike"
+                  "$ref": "#/$defs/NonNegativeNumberValue"
                 }
               },
               "additionalProperties": true
@@ -193,7 +133,8 @@
           ]
         },
         "children": {
-          "$ref": "../common_types.json#/$defs/ChildList"
+          "$ref": "../common_types.json#/$defs/ChildList",
+          "description": "Child component IDs or template source rendered inside the tab content area."
         }
       },
       "required": [

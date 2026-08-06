@@ -32,6 +32,8 @@
 
 namespace NativeModule {
 
+class SurfaceSlot;
+
 /**
  * @brief 基于模板和数据的懒加载适配器基类。
  *
@@ -52,11 +54,18 @@ public:
         ArkUI_NodeHandle contentParentNode = nullptr;
     };
 
+    struct TemplateInstanceBuildContext {
+        const std::string& templateComponentId;
+        const std::string& arrayPath;
+        int32_t itemIndex = 0;
+        const std::map<std::string, JsonValue>* allDescriptors = nullptr;
+        std::map<std::string, JsonValue>* generatedDescriptors = nullptr;
+    };
+
     virtual ~TemplateAdapterNode();
     static void RewriteDataPaths(JsonValue& json, const std::string& arrayPath, int32_t itemIndex);
-    static std::string BuildTemplateInstanceTreeDescriptors(std::string& id, const std::string& templateComponentId,
-        const std::string& arrayPath, int32_t itemIndex, const std::map<std::string, JsonValue>* allDescriptors,
-        std::map<std::string, JsonValue>* generatedDescriptors);
+    static std::string BuildTemplateInstanceTreeDescriptors(
+        std::string& id, const TemplateInstanceBuildContext& context);
 
     static std::set<std::string> CollectReferencedDescriptorIds(
         const std::string& rootId, const std::map<std::string, JsonValue>& allDescriptors);
@@ -161,18 +170,32 @@ private:
 
     void OnNewItemIdCreated(A2UINodeAdapterEvent* event);
     void OnNewItemAttached(A2UINodeAdapterEvent* event);
+    bool BuildAttachedItemDescriptors(
+        int32_t index, std::string& generatedInstanceId, std::map<std::string, JsonValue>& generatedDescriptors);
+    std::shared_ptr<Component> BuildAttachedItemComponent(int32_t index, const std::string& generatedInstanceId,
+        const std::map<std::string, JsonValue>& generatedDescriptors, SurfaceSlot& surfaceSlot);
+    void PrepareAttachedItemComponent(const std::shared_ptr<Component>& component, int32_t index);
+    bool AttachItemWrapperToAdapter(
+        A2UINodeAdapterEvent* event, const std::shared_ptr<Component>& component, int32_t index);
     void OnItemDetached(A2UINodeAdapterEvent* event);
 
     static void CleanUpTargetComponentTreeFromAllComponents(
         const std::shared_ptr<Component>& component, std::map<std::string, std::shared_ptr<Component>>& allComponents);
     static std::string RewriteTemplateStringPaths(
         const std::string& str, const std::string& arrayPath, int32_t itemIndex);
-    static std::unique_ptr<JsonAdapter> BuildTemplateInstanceDescriptorById(std::string& id,
-        const std::string& templateComponentId, const std::string& arrayPath, int32_t itemIndex,
-        const std::map<std::string, JsonValue>* allDescriptors, std::map<std::string, JsonValue>* generatedDescriptors);
+    static std::unique_ptr<JsonAdapter> BuildTemplateInstanceDescriptorById(
+        std::string& id, const TemplateInstanceBuildContext& context);
     static void CollectReferencedDescriptorIdsRecursive(const std::string& id,
         const std::map<std::string, JsonValue>& allDescriptors, std::set<std::string>& result,
         std::set<std::string>& visited);
+    static void RewriteObjectPathField(JsonValue& json, const std::string& arrayPath, int32_t itemIndex);
+    static void RewriteChildStringPath(
+        JsonValue& json, const JsonValue& child, const std::string& arrayPath, int32_t itemIndex);
+    static void CollectChildIdsFromChildrenValue(const JsonValue& childrenValue,
+        const std::map<std::string, JsonValue>& allDescriptors, std::set<std::string>& result,
+        std::set<std::string>& visited);
+    void DetachFromPreviousWrapper(
+        const std::shared_ptr<Component>& component, ArkUI_NodeHandle nativeView, int32_t index);
 };
 
 } // namespace NativeModule

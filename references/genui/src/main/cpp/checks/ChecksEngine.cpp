@@ -73,6 +73,44 @@ bool InjectDefaultTargetValue(JsonValue& conditionValue, const ChecksDefaultTarg
     }
     return argsValue.Put("value", targetValue);
 }
+
+void CollectObjectPath(const JsonValue& value, std::unordered_set<std::string>& paths)
+{
+    if (!value.Has("path")) {
+        return;
+    }
+
+    JsonValue pathValue = value.GetItem("path");
+    if (!pathValue.IsString()) {
+        return;
+    }
+
+    std::string path = pathValue.GetStringValue("");
+    if (!path.empty()) {
+        paths.insert(path);
+    }
+}
+
+void CollectBindingPaths(const JsonValue& value, std::unordered_set<std::string>& paths)
+{
+    if (!value.IsValid()) {
+        return;
+    }
+    if (value.IsArray()) {
+        for (int index = 0; index < value.GetArraySize(); ++index) {
+            CollectBindingPaths(value.GetArrayItem(index), paths);
+        }
+        return;
+    }
+    if (!value.IsObject()) {
+        return;
+    }
+
+    CollectObjectPath(value, paths);
+    for (JsonValue child = value.GetChild(); child.IsValid(); child = child.GetNext()) {
+        CollectBindingPaths(child, paths);
+    }
+}
 } // namespace
 
 ChecksEngine::ChecksEngine(
@@ -90,32 +128,7 @@ ChecksResolveContext ChecksEngine::BuildContext() const
 
 void ChecksEngine::CollectCheckBindingPaths(const JsonValue& value, std::unordered_set<std::string>& paths) const
 {
-    if (!value.IsValid()) {
-        return;
-    }
-    if (value.IsObject()) {
-        if (value.Has("path")) {
-            JsonValue pathValue = value.GetItem("path");
-            if (pathValue.IsString()) {
-                std::string path = pathValue.GetStringValue("");
-                if (!path.empty()) {
-                    paths.insert(path);
-                }
-            }
-        }
-        JsonValue child = value.GetChild();
-        while (child.IsValid()) {
-            CollectCheckBindingPaths(child, paths);
-            child = child.GetNext();
-        }
-        return;
-    }
-    if (value.IsArray()) {
-        int itemCount = value.GetArraySize();
-        for (int index = 0; index < itemCount; ++index) {
-            CollectCheckBindingPaths(value.GetArrayItem(index), paths);
-        }
-    }
+    CollectBindingPaths(value, paths);
 }
 
 void ChecksEngine::ParseChecks(const JsonValue& descriptor)

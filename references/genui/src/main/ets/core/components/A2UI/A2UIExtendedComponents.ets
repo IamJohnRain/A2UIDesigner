@@ -17,9 +17,12 @@ import { CatalogItem, EMPTY_COMPONENT_BUILDER } from '../../base/CatalogItem';
 import { SchemaResourceLoader } from '../../schema/SchemaResourceLoader';
 import { CustomComponentDefinition, CustomComponentFactory } from './CustomComponentFactory';
 import { createExtendedSelectDefinition } from '../extended/ExtendedSelect';
+import { createRadioDefinition } from '../extended/ExtendedRadio';
+import { createExtendedRowDefinition } from '../extended/ExtendedRow';
 import { createExtendedTabContentDefinition } from '../extended/ExtendedTabContent';
 import { createExtendedTabsDefinition } from '../extended/ExtendedTabs';
 import { createExtendedWebDefinition } from '../extended/ExtendedWeb';
+import { deviceInfo } from '@kit.BasicServicesKit';
 
 const EXTENDED_NATIVE_COMPONENT_NAMES: string[] = [
   'Button',
@@ -81,6 +84,10 @@ function createExtendedTextSchema(): string {
   return `{
   "type": "object",
   "$defs": {
+    "Expression": {
+      "type": "string",
+      "pattern": "^\\\\{\\\\{[\\\\s\\\\S]*\\\\}\\\\}$"
+    },
     "DataBinding": {
       "type": "object",
       "properties": {
@@ -177,21 +184,47 @@ function createExtendedTextSchema(): string {
         { "$ref": "#/$defs/DynamicStringFunction" }
       ]
     },
-    "DecorationLiteral": {
-      "type": "object",
-      "properties": {
-        "type": {
+    "DynamicDecorationType": {
+      "oneOf": [
+        {
           "type": "string",
           "enum": ["none","underline","overline","linethrough"],
           "default": "none"
         },
-        "color": { "$ref": "#/$defs/DynamicStringOrNumber" },
-        "style": {
+        { "$ref": "#/$defs/Expression" },
+        { "$ref": "#/$defs/DataBinding" },
+        { "$ref": "#/$defs/DynamicStringFunction" }
+      ]
+    },
+    "DynamicDecorationStyle": {
+      "oneOf": [
+        {
           "type": "string",
           "enum": ["solid","double","dotted","dashed","wavy"],
           "default": "solid"
         },
-        "thicknessScale": { "$ref": "#/$defs/DynamicStringOrNumber" }
+        { "$ref": "#/$defs/Expression" },
+        { "$ref": "#/$defs/DataBinding" },
+        { "$ref": "#/$defs/DynamicStringFunction" }
+      ]
+    },
+    "DynamicDecorationStringOrNumber": {
+      "anyOf": [
+        { "type": "string", "default": "" },
+        { "type": "number", "default": 0 },
+        { "$ref": "#/$defs/Expression" },
+        { "$ref": "#/$defs/DataBinding" },
+        { "$ref": "#/$defs/DynamicStringFunction" },
+        { "$ref": "#/$defs/DynamicNumberFunction" }
+      ]
+    },
+    "DecorationLiteral": {
+      "type": "object",
+      "properties": {
+        "type": { "$ref": "#/$defs/DynamicDecorationType" },
+        "color": { "$ref": "#/$defs/DynamicDecorationStringOrNumber" },
+        "style": { "$ref": "#/$defs/DynamicDecorationStyle" },
+        "thicknessScale": { "$ref": "#/$defs/DynamicDecorationStringOrNumber" }
       },
       "required": ["type"],
       "additionalProperties": {}
@@ -208,6 +241,7 @@ function createExtendedTextSchema(): string {
     "component": { "const": "Text" },
     "id": { "type": "string", "default": "" },
     "content": { "$ref": "#/$defs/DynamicString" },
+    "text": { "$ref": "#/$defs/DynamicString" },
     "styles": {
       "type": "object",
       "properties": {
@@ -322,11 +356,6 @@ function createExtendedImageSchema(): string {
       "type": "object",
       "properties": {
         "aspectRatio": { "$ref": "#/$defs/DynamicNumber" },
-        "fillColor": {
-          "type": "string",
-          "pattern": "^#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$",
-          "description": "Static SVG fill color in #RRGGBB or #AARRGGBB format."
-        },
         "objectFit": {
           "oneOf": [
             { "$ref": "#/$defs/ObjectFitLiteral" },
@@ -492,6 +521,7 @@ function createExtendedProgressSchema(): string {
       "type": "object",
       "properties": {
         "color": { "$ref": "#/$defs/DynamicString" },
+        "strokeWidth": { "$ref": "#/$defs/DynamicNumber" },
         "type": {
           "oneOf": [
             { "$ref": "#/$defs/ProgressTypeLiteral" },
@@ -545,12 +575,28 @@ function createExtendedNativeCatalogItem(componentName: string): CatalogItem {
 }
 
 function getExtendedCustomDefinitions(): CustomComponentDefinition[] {
-  return [
+  const defs: CustomComponentDefinition[] = [
+    createRadioDefinition(),
     createExtendedTabContentDefinition(),
     createExtendedSelectDefinition(),
     createExtendedTabsDefinition(),
     createExtendedWebDefinition()
   ];
+  // API < 23 时 Row 组件走 ExtendedRow（ETS 兼容路径），
+  // API >= 23 时 Row 保留原生组件（C++ MATCH_PARENT 布局策略）。
+  if (deviceInfo.sdkApiVersion < 23) {
+    defs.push(createExtendedRowDefinition());
+  }
+  return defs;
+}
+
+function addOrReplaceCatalogItem(components: CatalogItem[], item: CatalogItem): void {
+  const index: number = components.findIndex((current: CatalogItem) => current.name === item.name);
+  if (index >= 0) {
+    components[index] = item;
+    return;
+  }
+  components.push(item);
 }
 
 export function allA2UIExtendedComponents(): CatalogItem[] {
@@ -561,7 +607,7 @@ export function allA2UIExtendedComponents(): CatalogItem[] {
 
   for (const definition of getExtendedCustomDefinitions()) {
     CustomComponentFactory.registerCustomComponent(definition);
-    components.push(CustomComponentFactory.createCatalogItem(definition.type));
+    addOrReplaceCatalogItem(components, CustomComponentFactory.createCatalogItemFromDefinition(definition));
   }
   return components;
 }

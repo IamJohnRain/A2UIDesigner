@@ -341,15 +341,15 @@ export default function ExtendedComponentsTest() {
     });
 
     describe('ExtendedSchemaCompatibility', () => {
-      it('should_use_children_in_extended_tab_content_schema_without_legacy_child_field', 0, () => {
+      it('should_use_children_in_extended_tab_content_schema', 0, () => {
         if (tabContentDefinition.schemaProvider === undefined) {
           expect(false).assertTrue();
           return;
         }
         let schema: string = tabContentDefinition.schemaProvider();
         expect(schema).assertContain('"children"');
-        let hasLegacyChildField: boolean = schema.indexOf('"child":') >= 0;
-        expect(hasLegacyChildField).assertFalse();
+        expect(schema).assertContain('"tabType"');
+        expect(schema).assertContain('"styles"');
       });
     });
 

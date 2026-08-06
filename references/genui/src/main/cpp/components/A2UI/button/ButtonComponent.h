@@ -74,6 +74,7 @@ private:
 
     // Action dispatch
     void DispatchAction() const;
+    void DispatchFunctionCallAction() const;
 
     // Style and child-text sync state
     std::string variant_ = "";

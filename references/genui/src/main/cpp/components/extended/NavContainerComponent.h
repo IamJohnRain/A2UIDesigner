@@ -47,11 +47,17 @@ protected:
     std::vector<std::string> GetComponentDirectRequiredPropertyKeys() const override;
 
 private:
+    void ApplyCurrentIndexValue(const JsonValue& value);
     void SetCurrentIndex(int32_t currentIndex);
     void RefreshChildVisibility();
     int32_t ResolveVisibleIndex(size_t childCount) const;
+    size_t ResolveCurrentIndexValidationChildCount() const;
 
     int32_t currentIndex_ = 0;
+    size_t descriptorChildCount_ = 0;
+    bool isApplyingCurrentIndexDescriptor_ = false;
+    bool hasDescriptorCurrentIndex_ = false;
+    bool hasDescriptorChildCount_ = false;
 };
 
 } // namespace NativeModule

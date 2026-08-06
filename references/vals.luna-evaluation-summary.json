@@ -1,0 +1,266 @@
+{
+  "dataset": "references/vals",
+  "totalCases": 60,
+  "assetMigration": {
+    "allowedPathReplacements": 43,
+    "blockedCases": [
+      {
+        "case": "Case-22-express-001",
+        "unresolved": [
+          {
+            "path": "/assetCandidates/0/src",
+            "src": "resources/base/media/courier_box.png"
+          }
+        ]
+      },
+      {
+        "case": "Case-22-express-006",
+        "unresolved": [
+          {
+            "path": "/assetCandidates/0/src",
+            "src": "resources/base/media/courier_box.png"
+          }
+        ]
+      }
+    ],
+    "verifiedNonPathDifferences": 0
+  },
+  "requests": {
+    "built": 58,
+    "blocked": 2,
+    "aggregate": "references/vals.card.luna.requests.jsonl"
+  },
+  "model": {
+    "label": "gpt_5_6_luna",
+    "generated": 58,
+    "outputRoot": "references/vals.luna-generated"
+  },
+  "compile": {
+    "latestRunSuccess": 15,
+    "latestRunFailed": 45,
+    "successCases": [
+      "Case-02-earphone-music-001",
+      "Case-04-focus-006",
+      "Case-07-sports-event-006",
+      "Case-08-sleep-001",
+      "Case-08-sleep-006",
+      "Case-09-weather-care-001",
+      "Case-09-weather-care-006",
+      "Case-14-commute-001",
+      "Case-16-travel-ticket-006",
+      "Case-18-carpool-006",
+      "Case-21-stocks-006",
+      "Case-26-group-buy-001",
+      "Case-26-group-buy-006",
+      "Case-27-utility-bill-006",
+      "Case-29-elderly-care-006"
+    ],
+    "failedCases": [
+      {
+        "case": "Case-01-low-power-001",
+        "reason": "automatic layout is infeasible: schedule_status: text '暂无可读日程' needs 2 lines but role=primary allows 1; charging_map: Button label '打开充电地图' needs 120.534x34vp but only 116x60vp is available"
+      },
+      {
+        "case": "Case-01-low-power-006",
+        "reason": "automatic ALT protocol is invalid: root: auto ALT containers can have at most three direct children"
+      },
+      {
+        "case": "Case-02-earphone-music-006",
+        "reason": "automatic layout is infeasible: footer: auto Row minimum width exceeds the available 116vp; connection_status: text '已连接' needs 2 lines but role=primary allows 1; music_action: Button label '进入音乐' needs 89.6896x34vp but only 52.8134x34vp is available; footer: Row requires 117vp horizontally but only 116vp is available"
+      },
+      {
+        "case": "Case-03-anti-addiction-001",
+        "reason": "option_select: auto ASC value must be a string"
+      },
+      {
+        "case": "Case-03-anti-addiction-006",
+        "reason": "automatic layout is infeasible: enter_button: Button label '进入防沉迷设置' needs 135.957x34vp but only 116x34vp is available; usage_text: text '今日已使用2小时' needs 2 lines but role=primary allows 1; warning_text: text '危险：使用时间过长' needs 2 lines but role=status allows 1"
+      },
+      {
+        "case": "Case-04-focus-001",
+        "reason": "automatic ALT protocol is invalid: root: auto ALT containers can have at most three direct children"
+      },
+      {
+        "case": "Case-05-agenda-001",
+        "reason": "automatic layout is infeasible: root: auto Row minimum width exceeds the available 116vp; meeting_line: text 'meeting line' needs 3 lines but role=primary allows 1; open_event: Button label '打开会议' needs 89.6896x34vp but only 33.69x34vp is available; root: Row requires 117vp horizontally but only 116vp is available; open_event: Button chars=1 exceeds box/font capacity 0"
+      },
+      {
+        "case": "Case-05-agenda-006",
+        "reason": "automatic ALT protocol is invalid: root: auto ALT containers can have at most three direct children"
+      },
+      {
+        "case": "Case-06-memory-clean-001",
+        "reason": "automatic layout is infeasible: root: auto Column minimum height exceeds the available 116vp; title: text requires 18vp vertically but only 13.3151vp is available; memory_ratio: ring Progress requires 64vp square; details: auto Column minimum height exceeds the available 47.3425vp; memory_amount: text requires 24vp vertically but only 17.1072vp is available; low_memory_alert: text requires 18vp vertically but only 17.1072vp is available; open_app: Button label '打开应用' needs 89.6896x34vp but only 89.6896x24.2352vp is available; root: Column requires 122vp vertically but only 116vp is available; details: Column requires 49vp vertically but only 48vp is available; statuses: Row requires 24vp vertically but only 18vp is available; open_app: Button height 25 is smaller than the 32vp intrinsic minimum"
+      },
+      {
+        "case": "Case-06-memory-clean-006",
+        "reason": "clean_option: auto ASC value must be a string"
+      },
+      {
+        "case": "Case-07-sports-event-001",
+        "reason": "automatic layout is infeasible: warning_action: Button label '查看红色警告' needs 120.534x34vp but only 116x48vp is available"
+      },
+      {
+        "case": "Case-10-rainy-taxi-001",
+        "reason": "automatic ALT protocol is invalid: root: auto ALT containers can have at most three direct children"
+      },
+      {
+        "case": "Case-10-rainy-taxi-006",
+        "reason": "automatic layout is infeasible: calendar_trip: text '读取日历行程' needs 2 lines but role=primary allows 1; taxi_action: Button label '打开打车软件' needs 120.534x34vp but only 116x60vp is available"
+      },
+      {
+        "case": "Case-11-fitness-001",
+        "reason": "ASC line 3 contains invalid property '·'"
+      },
+      {
+        "case": "Case-11-fitness-006",
+        "reason": "workout_chart: auto ASC Progress requires value and total"
+      },
+      {
+        "case": "Case-12-finance-001",
+        "reason": "automatic ALT protocol is invalid: root: auto ALT containers can have at most three direct children"
+      },
+      {
+        "case": "Case-12-finance-006",
+        "reason": "automatic layout is infeasible: root: auto Row minimum width exceeds the available 276vp; low_balance_status: text '余额偏低，请及时处理' needs 2 lines but role=status allows 1; reminder_icon: SVG icon requires 24vp square; system_action: Button label '进入系统' needs 89.6896x34vp but only 88.7722x34vp is available; root: Row requires 277vp horizontally but only 276vp is available"
+      },
+      {
+        "case": "Case-13-health-reminder-001",
+        "reason": "automatic ALT protocol is invalid: root: auto ALT containers can have at most three direct children"
+      },
+      {
+        "case": "Case-13-health-reminder-006",
+        "reason": "automatic layout is infeasible: header: auto Row minimum width exceeds the available 116vp; reminder_icon: SVG icon requires 24vp square; title: text '吃药喝水提醒' needs 2 lines but role=title allows 1; header: Row requires 117vp horizontally but only 116vp is available"
+      },
+      {
+        "case": "Case-14-commute-006",
+        "reason": "ASC line 4 contains invalid property 'App'"
+      },
+      {
+        "case": "Case-15-smart-home-001",
+        "reason": "automatic layout is infeasible: device_summary: auto Row minimum width exceeds the available 116vp; device_count: text 'device count' needs 2 lines but role=primary allows 1; device_summary: Row requires 117vp horizontally but only 116vp is available"
+      },
+      {
+        "case": "Case-15-smart-home-006",
+        "reason": "automatic ALT protocol is invalid: root: auto ALT containers can have at most three direct children"
+      },
+      {
+        "case": "Case-16-travel-ticket-001",
+        "reason": "automatic layout is infeasible: overview: auto Row minimum width exceeds the available 116vp; warning_icon: SVG icon requires 24vp square; destination_title: text '前往机场' needs 2 lines but role=primary allows 1; weather_alert: text '雷暴红色预警' needs 2 lines but role=status allows 1; overview: Row requires 117vp horizontally but only 116vp is available"
+      },
+      {
+        "case": "Case-17-queue-001",
+        "reason": "automatic layout is infeasible: root: auto Column minimum height exceeds the available 116vp; title: text requires 18vp vertically but only 17.6727vp is available; queue_info: auto Column minimum height exceeds the available 56.9455vp; arrived_status: text requires 18vp vertically but only 17.6204vp is available; queue_number: text 'queue number' needs 2 lines but role=primary allows 1; queue_number: text requires 24vp vertically but only 23.4938vp is available; go_store: Button label '到店' needs 58.8448x34vp but only 116x33.3818vp is available; root: Column requires 117vp vertically but only 116vp is available; queue_info: Column requires 58vp vertically but only 57vp is available"
+      },
+      {
+        "case": "Case-17-queue-006",
+        "reason": "automatic ALT protocol is invalid: root: auto ALT containers can have at most three direct children"
+      },
+      {
+        "case": "Case-18-carpool-001",
+        "reason": "automatic layout is infeasible: traffic_status: text '堵车中，数字实时变化' needs 2 lines but role=primary allows 1"
+      },
+      {
+        "case": "Case-19-photo-album-001",
+        "reason": "automatic ALT protocol is invalid: root: auto ALT containers can have at most three direct children"
+      },
+      {
+        "case": "Case-19-photo-album-006",
+        "reason": "automatic layout is infeasible: warning: text '危险：请确认日历权限' needs 2 lines but role=primary allows 1"
+      },
+      {
+        "case": "Case-20-notif-aggregate-001",
+        "reason": "automatic ALT protocol is invalid: content: auto ALT containers can have at most three direct children"
+      },
+      {
+        "case": "Case-20-notif-aggregate-006",
+        "reason": "automatic ALT protocol is invalid: root: auto ALT containers can have at most three direct children"
+      },
+      {
+        "case": "Case-21-stocks-001",
+        "reason": "automatic layout is infeasible: summary: Row requires 277vp horizontally but only 276vp is available"
+      },
+      {
+        "case": "Case-22-express-001",
+        "reason": "ALT file does not exist: D:\\code\\A2UI\\A2UIDesigner\\references\\vals\\Case-22-express-001\\card.luna.model.alt.txt"
+      },
+      {
+        "case": "Case-22-express-006",
+        "reason": "ALT file does not exist: D:\\code\\A2UI\\A2UIDesigner\\references\\vals\\Case-22-express-006\\card.luna.model.alt.txt"
+      },
+      {
+        "case": "Case-23-countdown-001",
+        "reason": "exam_list: auto ASC List does not support field(s): bind"
+      },
+      {
+        "case": "Case-23-countdown-006",
+        "reason": "automatic layout is infeasible: root: auto Column minimum height exceeds the available 116vp; birthday_overlay: auto Column minimum height exceeds the available 58.9091vp; birthday_title: text requires 18vp vertically but only 17.6364vp is available; countdown_value: text requires 36vp vertically but only 35.2727vp is available; completed_status: text requires 16vp vertically but only 15.7091vp is available; open_calendar: Button label '打开应用' needs 89.6896x34vp but only 276x33.3818vp is available; root: Column requires 117vp vertically but only 116vp is available; birthday_overlay: Column requires 60vp vertically but only 59vp is available"
+      },
+      {
+        "case": "Case-24-todo-001",
+        "reason": "todo_list: auto ASC List does not support field(s): bind"
+      },
+      {
+        "case": "Case-24-todo-006",
+        "reason": "automatic layout is infeasible: completion_ratio: text 'completion ratio' needs 2 lines but role=primary allows 1; footer: auto Row minimum width exceeds the available 116vp; completed_status: text '已完成' needs 2 lines but role=status allows 1; calendar_action: Button label '打开日历' needs 89.6896x34vp but only 73.4228x34vp is available; footer: Row requires 117vp horizontally but only 116vp is available"
+      },
+      {
+        "case": "Case-25-reading-001",
+        "reason": "forecast: auto ASC List does not support field(s): bind"
+      },
+      {
+        "case": "Case-25-reading-006",
+        "reason": "automatic layout is infeasible: root: auto Row minimum width exceeds the available 276vp; reading_title: text '阅读进度' needs 2 lines but role=title allows 1; reading_progress: text 'reading progress' needs 2 lines but role=primary allows 1; open_reader: Button label '打开应用' needs 89.6896x34vp but only 72.7355x34vp is available; root: Row requires 277vp horizontally but only 276vp is available"
+      },
+      {
+        "case": "Case-27-utility-bill-001",
+        "reason": "automatic layout is infeasible: alert_actions: auto Row minimum width exceeds the available 116vp; warning: text '快欠费提醒' needs 2 lines but role=status allows 1; contact: Button label '联系客服' needs 89.6896x34vp but only 59.7115x34vp is available; alert_actions: Row requires 117vp horizontally but only 116vp is available"
+      },
+      {
+        "case": "Case-28-veggie-price-001",
+        "reason": "automatic layout is infeasible: footer: auto Row minimum width exceeds the available 116vp; connection_status: text '已连接' needs 2 lines but role=status allows 1; calendar_action: Button label '查看日程' needs 89.6896x34vp but only 73.4228x34vp is available; footer: Row requires 117vp horizontally but only 116vp is available"
+      },
+      {
+        "case": "Case-28-veggie-price-006",
+        "reason": "title: auto ASC Text does not support field(s): role"
+      },
+      {
+        "case": "Case-29-elderly-care-001",
+        "reason": "automatic ALT protocol is invalid: root: auto ALT containers can have at most three direct children"
+      },
+      {
+        "case": "Case-30-pet-feeder-001",
+        "reason": "automatic layout is infeasible: root: auto Column minimum height exceeds the available 116vp; low_food_icon: SVG icon requires 24vp square; details: auto Column minimum height exceeds the available 52.0714vp; feeder_amount: text requires 24vp vertically but only 23.0357vp is available; calendar_icon: SVG icon requires 24vp square; navigate_button: Button label '导航去宠物店' needs 120.534x34vp but only 276x32.7857vp is available; root: Column requires 118vp vertically but only 116vp is available; details: Column requires 54vp vertically but only 53vp is available"
+      },
+      {
+        "case": "Case-30-pet-feeder-006",
+        "reason": "automatic layout is infeasible: header: auto Row minimum width exceeds the available 116vp; feeder_title: text '喂食器' needs 2 lines but role=primary allows 1; feeder_status: text '出粮卡住' needs 2 lines but role=status allows 1; open_weather: Button label '打开天气App' needs 117.45x34vp but only 116x60vp is available; header: Row requires 117vp horizontally but only 116vp is available"
+      }
+    ],
+    "log": "references/vals.luna-t2d.log"
+  },
+  "layoutReports": {
+    "reportedCases": 54,
+    "severity": {
+      "error": 111,
+      "warning": 26
+    },
+    "histogram": {
+      "text_line_budget": 35,
+      "button_space": 16,
+      "container_child_limit": 15,
+      "layout_constraint": 9,
+      "row_width": 23,
+      "dynamic_text_fallback": 20,
+      "button_text_overflow": 1,
+      "column_height": 16,
+      "container_overflow": 1,
+      "button_intrinsic_overflow": 1
+    }
+  },
+  "render": {
+    "attempted": 1,
+    "generated": 0,
+    "blockedReason": "Chrome and Edge headless Target crashed / GPU process fatal, also reproduces with baseline DSL."
+  }
+}

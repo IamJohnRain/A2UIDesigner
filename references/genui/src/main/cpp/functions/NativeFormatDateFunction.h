@@ -24,13 +24,20 @@ namespace NativeModule {
 
 class NativeFormatDateFunction : public NativeFunctionBase {
 public:
+    struct DateTimeParts {
+        int year = 0;
+        int month = 1;
+        int day = 1;
+        int hour = 0;
+        int minute = 0;
+        int second = 0;
+    };
+
     std::string GetName() const override;
     FunctionResult Execute(const JsonValue& resolvedArgs) override;
 
-    static bool ParseISO8601(
-        const std::string& iso, int& year, int& month, int& day, int& hour, int& minute, int& second);
-    static std::string ApplyPattern(
-        int year, int month, int day, int hour, int minute, int second, const std::string& pattern);
+    static bool ParseISO8601(const std::string& iso, DateTimeParts& parts);
+    static std::string ApplyPattern(const DateTimeParts& parts, const std::string& pattern);
 };
 
 } // namespace NativeModule

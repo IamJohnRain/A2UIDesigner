@@ -16,6 +16,7 @@
 #include "GridAdapterNode.h"
 
 #include "components/extended/ExtendedGridComponent.h"
+#include "data/DynamicValueResolver.h"
 #include "utils/LogA2UI.h"
 
 #include "A2UIArkUITypeConverter.h"
@@ -37,6 +38,38 @@ void ApplyGridItemDefaultLayoutPolicy(ArkUI_NodeHandle gridItemNode, bool wrapCo
         gridItemNode, A2UIArkUITypeConverter::ToArkUILayoutPolicy(A2UILayoutPolicy::WRAP_CONTENT));
 }
 
+void UpdateAdapterItemCounts(const std::shared_ptr<TemplateAdapterNode>& adapter, const std::string& parentPath,
+    const std::shared_ptr<DataModel>& dataModel, const char* owner)
+{
+    if (adapter == nullptr) {
+        return;
+    }
+    std::string adapterPath = adapter->GetDataPath();
+    if (adapterPath.empty()) {
+        return;
+    }
+    std::string path = adapterPath;
+    if (path[0] != '/') {
+        path = parentPath + "/" + path;
+    }
+    auto arrayOpt = dataModel->GetNode(path);
+    if (!arrayOpt.has_value()) {
+        DynamicResolveContext context = { .renderId = adapter->GetRenderId(),
+            .surfaceId = adapter->GetSurfaceId(),
+            .missingPathPolicy = MissingPathPolicy::DEFER_UNTIL_DATA_UPDATE };
+        DynamicValueResolver::ReportMissingPath(context, path);
+        adapter->UpdateItemCount(0);
+        return;
+    }
+    if (!arrayOpt.value().IsArray()) {
+        return;
+    }
+    int itemCount = arrayOpt.value().GetArraySize();
+    adapter->UpdateItemCount(itemCount);
+    LOG_A2UI(LOG_INFO, "%{public}s::UpdateNestedItemCounts: updated itemCount=%{public}d, path=%{public}s", owner,
+        itemCount, path.c_str());
+}
+
 } // namespace
 
 void GridAdapterNode::SetGridItemHeightWrapContent(bool wrapContent)
@@ -53,28 +86,7 @@ void GridAdapterNode::UpdateNestedItemCounts(
 
     auto gridComponent = std::dynamic_pointer_cast<ExtendedGridComponent>(component);
     if (gridComponent && gridComponent->IsLazyMode()) {
-        auto adapter = gridComponent->GetAdapterNode();
-        if (adapter) {
-            std::string adapterPath = adapter->GetDataPath();
-            if (!adapterPath.empty()) {
-                std::string path = adapterPath;
-                if (path[0] != '/') {
-                    path = parentPath + "/" + path;
-                }
-
-                auto arrayOpt = dataModel->GetNode(path);
-                if (arrayOpt.has_value()) {
-                    JsonValue arrayValue = arrayOpt.value();
-                    if (arrayValue.IsArray()) {
-                        int itemCount = arrayValue.GetArraySize();
-                        adapter->UpdateItemCount(itemCount);
-                        LOG_A2UI(LOG_INFO,
-                            "GridAdapterNode::UpdateNestedItemCounts: updated itemCount=%{public}d, path=%{public}s",
-                            itemCount, path.c_str());
-                    }
-                }
-            }
-        }
+        UpdateAdapterItemCounts(gridComponent->GetAdapterNode(), parentPath, dataModel, "GridAdapterNode");
     }
 
     const std::list<std::shared_ptr<Component>>& children = component->GetChildren();

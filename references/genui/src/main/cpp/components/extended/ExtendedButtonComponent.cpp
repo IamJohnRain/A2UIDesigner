@@ -18,6 +18,7 @@
 #include <cctype>
 #include <cmath>
 #include <functional>
+#include <limits>
 #include <map>
 
 #include "components/extended/ExtendedStyleResolver.h"
@@ -85,13 +86,41 @@ bool IsValidButtonFontWeightString(const std::string& value)
     return token == "normal" || token == "regular" || token == "medium" || token == "bold" || token == "bolder";
 }
 
-bool IsValidButtonFontWeightSchemaValue(const JsonValue& value)
+bool ParseButtonFontWeight(const JsonValue& value, int32_t& fontWeight)
 {
     if (value.IsString()) {
-        return IsValidButtonFontWeightString(value.GetStringValue(""));
+        if (!IsValidButtonFontWeightString(value.GetStringValue(""))) {
+            return false;
+        }
+        return StyleApplyUtils::ParseFontWeight(value, fontWeight);
     }
-    int32_t fontWeight = static_cast<int32_t>(A2UIFontWeight::NORMAL);
-    return StyleApplyUtils::ParseFontWeight(value, fontWeight);
+    if (!value.IsNumber()) {
+        return false;
+    }
+
+    constexpr int32_t minFontWeight = 100;
+    constexpr int32_t maxFontWeight = 900;
+    constexpr int32_t fontWeightStep = 100;
+    double rawValue = value.GetNumberValue(std::numeric_limits<double>::quiet_NaN());
+    if (!std::isfinite(rawValue)) {
+        return false;
+    }
+    double flooredValue = std::floor(rawValue);
+    if (flooredValue < minFontWeight || flooredValue > maxFontWeight) {
+        return false;
+    }
+    int32_t normalized = static_cast<int32_t>(flooredValue);
+    if (normalized % fontWeightStep != 0) {
+        return false;
+    }
+    fontWeight = (normalized / fontWeightStep) - 1;
+    return true;
+}
+
+bool IsValidButtonFontWeightSchemaValue(const JsonValue& value)
+{
+    int32_t fontWeight = static_cast<int32_t>(DEFAULT_BUTTON_FONT_WEIGHT);
+    return ParseButtonFontWeight(value, fontWeight);
 }
 
 } // namespace
@@ -197,127 +226,131 @@ void ExtendedButtonComponent::ValidateStylesSchema(const JsonValue& styles)
         return;
     }
 
-    auto reportInvalidNumber = [this, &styles](const char* propertyName) {
-        if (propertyName == nullptr || !styles.Has(propertyName)) {
-            return;
-        }
-        JsonValue value = styles.GetItem(propertyName);
-        if (IsDynamicValueDescriptor(value)) {
-            return;
-        }
-        float parsed = 0.0F;
-        if (!StyleApplyUtils::ParseNumber(value, parsed)) {
-            ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
-                "Property styles." + std::string(propertyName) +
-                    " expects positive number, fallback/reset has been applied",
-                "styles." + std::string(propertyName));
-            return;
-        }
-        if (parsed <= 0.0F) {
-            ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
-                "Property styles." + std::string(propertyName) +
-                    " expects positive number, fallback/reset has been applied",
-                "styles." + std::string(propertyName));
-        }
-    };
+    ValidatePositiveNumberStyle(styles, "fontSize");
+    ValidatePositiveNumberStyle(styles, "minFontSize");
+    ValidatePositiveNumberStyle(styles, "maxFontSize");
+    ValidateFontWeightStyle(styles);
+    ValidateFontScaleStyle(styles, "minFontScale", 0.0, 1.0, true);
+    ValidateFontScaleStyle(styles, "maxFontScale", 1.0, 0.0, false);
+    ValidateFontScaleModeStyle(styles);
+    ValidateFontColorStyle(styles);
+}
 
-    reportInvalidNumber("fontSize");
-    reportInvalidNumber("minFontSize");
-    reportInvalidNumber("maxFontSize");
-
-    if (styles.Has("fontWeight")) {
-        JsonValue fontWeightValue = styles.GetItem("fontWeight");
-        if (IsDynamicValueDescriptor(fontWeightValue)) {
-            // Dynamic styles are validated after resolution by DFX fallback/reset paths.
-        } else if (!fontWeightValue.IsString() && !fontWeightValue.IsNumber()) {
-            ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
-                "Property styles.fontWeight expects string or number, fallback/reset has been applied",
-                "styles.fontWeight");
-        } else if (!IsValidButtonFontWeightSchemaValue(fontWeightValue)) {
-            ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
-                "Property styles.fontWeight expects valid font weight, fallback/reset has been applied",
-                "styles.fontWeight");
-        }
+void ExtendedButtonComponent::ValidatePositiveNumberStyle(const JsonValue& styles, const char* propertyName)
+{
+    if (propertyName == nullptr || !styles.Has(propertyName)) {
+        return;
     }
-
-    auto reportMinFontScale = [this, &styles]() {
-        constexpr const char* propertyName = "minFontScale";
-        if (!styles.Has(propertyName)) {
-            return;
-        }
-        JsonValue value = styles.GetItem(propertyName);
-        if (IsDynamicValueDescriptor(value)) {
-            return;
-        }
-        if (!value.IsNumber()) {
-            ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
-                "Property styles.minFontScale expects number, fallback/reset has been applied", "styles.minFontScale");
-            return;
-        }
-        double number = value.GetNumberValue(0.0);
-        if (!std::isfinite(number) || number < 0.0 || number > 1.0) {
-            ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
-                "Property styles.minFontScale expects number in range [0, 1], fallback/reset has been applied",
-                "styles.minFontScale");
-        }
-    };
-    auto reportMaxFontScale = [this, &styles]() {
-        constexpr const char* propertyName = "maxFontScale";
-        if (!styles.Has(propertyName)) {
-            return;
-        }
-        JsonValue value = styles.GetItem(propertyName);
-        if (IsDynamicValueDescriptor(value)) {
-            return;
-        }
-        if (!value.IsNumber()) {
-            ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
-                "Property styles.maxFontScale expects number, fallback/reset has been applied", "styles.maxFontScale");
-            return;
-        }
-        double number = value.GetNumberValue(0.0);
-        if (!std::isfinite(number) || number < 1.0) {
-            ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
-                "Property styles.maxFontScale expects number greater than or equal to 1, fallback/reset has been "
-                "applied",
-                "styles.maxFontScale");
-        }
-    };
-    reportMinFontScale();
-    reportMaxFontScale();
-
-    if (styles.Has("fontScaleMode")) {
-        JsonValue fontScaleModeValue = styles.GetItem("fontScaleMode");
-        if (IsDynamicValueDescriptor(fontScaleModeValue)) {
-            // Dynamic styles are validated after resolution by DFX fallback/reset paths.
-        } else if (!fontScaleModeValue.IsString()) {
-            ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
-                "Property styles.fontScaleMode expects string, fallback to followSystem", "styles.fontScaleMode");
-        } else {
-            std::string mode = StyleApplyUtils::TrimToken(fontScaleModeValue.GetStringValue(""));
-            if (mode != "custom" && mode != "followSystem") {
-                ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
-                    "Property styles.fontScaleMode expects custom/followSystem, fallback to followSystem",
-                    "styles.fontScaleMode");
-            }
-        }
+    JsonValue value = styles.GetItem(propertyName);
+    if (IsDynamicValueDescriptor(value)) {
+        return;
     }
+    float parsed = 0.0F;
+    if (!StyleApplyUtils::ParseNumber(value, parsed)) {
+        ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
+            "Property styles." + std::string(propertyName) +
+                " expects positive number, fallback/reset has been applied",
+            "styles." + std::string(propertyName));
+        return;
+    }
+    if (parsed <= 0.0F) {
+        ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
+            "Property styles." + std::string(propertyName) +
+                " expects positive number, fallback/reset has been applied",
+            "styles." + std::string(propertyName));
+    }
+}
 
-    if (styles.Has("fontColor")) {
-        uint32_t color = 0;
-        JsonValue fontColorValue = styles.GetItem("fontColor");
-        if (IsDynamicValueDescriptor(fontColorValue)) {
-            return;
-        }
-        if (!fontColorValue.IsString()) {
-            ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
-                "Property styles.fontColor expects string color, fallback/reset has been applied", "styles.fontColor");
-            return;
-        }
-        if (!ExtendedStyleResolver::ParseColor(fontColorValue, color)) {
-            ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
-                "Property styles.fontColor expects color value, fallback/reset has been applied", "styles.fontColor");
-        }
+void ExtendedButtonComponent::ValidateFontWeightStyle(const JsonValue& styles)
+{
+    if (!styles.Has("fontWeight")) {
+        return;
+    }
+    JsonValue value = styles.GetItem("fontWeight");
+    if (IsDynamicValueDescriptor(value)) {
+        return;
+    }
+    if (!value.IsString() && !value.IsNumber()) {
+        ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
+            "Property styles.fontWeight expects string or number, fallback/reset has been applied",
+            "styles.fontWeight");
+        return;
+    }
+    if (!IsValidButtonFontWeightSchemaValue(value)) {
+        ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
+            "Property styles.fontWeight expects valid font weight, fallback/reset has been applied",
+            "styles.fontWeight");
+    }
+}
+
+void ExtendedButtonComponent::ValidateFontScaleStyle(
+    const JsonValue& styles, const char* propertyName, double minValue, double maxValue, bool hasMaxValue)
+{
+    if (propertyName == nullptr || !styles.Has(propertyName)) {
+        return;
+    }
+    JsonValue value = styles.GetItem(propertyName);
+    if (IsDynamicValueDescriptor(value)) {
+        return;
+    }
+    if (!value.IsNumber()) {
+        ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
+            "Property styles." + std::string(propertyName) + " expects number, fallback/reset has been applied",
+            "styles." + std::string(propertyName));
+        return;
+    }
+    double number = value.GetNumberValue(0.0);
+    if (std::isfinite(number) && number >= minValue && (!hasMaxValue || number <= maxValue)) {
+        return;
+    }
+    std::string message = "Property styles.maxFontScale expects number greater than or equal to 1, "
+                          "fallback/reset has been applied";
+    if (hasMaxValue) {
+        message = "Property styles.minFontScale expects number in range [0, 1], fallback/reset has been applied";
+    }
+    ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE, message, "styles." + std::string(propertyName));
+}
+
+void ExtendedButtonComponent::ValidateFontScaleModeStyle(const JsonValue& styles)
+{
+    if (!styles.Has("fontScaleMode")) {
+        return;
+    }
+    JsonValue value = styles.GetItem("fontScaleMode");
+    if (IsDynamicValueDescriptor(value)) {
+        return;
+    }
+    if (!value.IsString()) {
+        ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
+            "Property styles.fontScaleMode expects string, fallback to followSystem", "styles.fontScaleMode");
+        return;
+    }
+    std::string mode = StyleApplyUtils::TrimToken(value.GetStringValue(""));
+    if (mode != "custom" && mode != "followSystem") {
+        ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
+            "Property styles.fontScaleMode expects custom/followSystem, fallback to followSystem",
+            "styles.fontScaleMode");
+    }
+}
+
+void ExtendedButtonComponent::ValidateFontColorStyle(const JsonValue& styles)
+{
+    if (!styles.Has("fontColor")) {
+        return;
+    }
+    JsonValue value = styles.GetItem("fontColor");
+    if (IsDynamicValueDescriptor(value)) {
+        return;
+    }
+    if (!value.IsString()) {
+        ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
+            "Property styles.fontColor expects string color, fallback/reset has been applied", "styles.fontColor");
+        return;
+    }
+    uint32_t color = 0;
+    if (!ExtendedStyleResolver::ParseColor(value, color)) {
+        ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
+            "Property styles.fontColor expects color value, fallback/reset has been applied", "styles.fontColor");
     }
 }
 
@@ -329,104 +362,140 @@ void ExtendedButtonComponent::ValidateComponentSpecificStylesSchema(const JsonVa
 void ExtendedButtonComponent::ApplyComponentSpecificStyles(const JsonValue& styles, ArkUINodeApiAdapter& applier)
 {
     static_cast<void>(applier);
-    bool isDeltaUpdate = IsApplyingStyleDeltaUpdate();
+    ApplyFontSizeStyle(styles);
+    ApplyFontWeightStyle(styles);
+    ApplyMinFontSizeStyle(styles);
+    ApplyMaxFontSizeStyle(styles);
+    ApplyFontScaleLimits(styles);
+    ApplyFontScaleModeStyle(styles);
+    ApplyFontColorStyle(styles);
+    ApplyBackgroundColorStyle(styles);
+}
 
+bool ExtendedButtonComponent::ShouldApplyStyle(const JsonValue& styles, const char* styleName) const
+{
+    return !IsApplyingStyleDeltaUpdate() || (styles.IsObject() && styleName != nullptr && styles.Has(styleName));
+}
+
+void ExtendedButtonComponent::ApplyFontSizeStyle(const JsonValue& styles)
+{
+    if (!ShouldApplyStyle(styles, "fontSize")) {
+        return;
+    }
     float fontSize = 0.0F;
-    if (!isDeltaUpdate || (styles.IsObject() && styles.Has("fontSize"))) {
-        if (StyleApplyUtils::ParseNumber(styles.GetItem("fontSize"), fontSize) && fontSize > 0.0F) {
-            LOG_A2UI(LOG_DEBUG, "ExtendedButtonComponent::ApplyComponentSpecificStyles - apply fontSize=%{public}f",
-                fontSize);
-            SetFontSize(fontSize);
-        } else {
-            SetFontSize(DEFAULT_BUTTON_FONT_SIZE);
-        }
+    if (!StyleApplyUtils::ParseNumber(styles.GetItem("fontSize"), fontSize) || fontSize <= 0.0F) {
+        SetFontSize(DEFAULT_BUTTON_FONT_SIZE);
+        return;
     }
+    LOG_A2UI(LOG_DEBUG, "ExtendedButtonComponent::ApplyComponentSpecificStyles - apply fontSize=%{public}f", fontSize);
+    SetFontSize(fontSize);
+}
 
-    int32_t fontWeight = static_cast<int32_t>(A2UIFontWeight::NORMAL);
-    if (!isDeltaUpdate || (styles.IsObject() && styles.Has("fontWeight"))) {
-        if (StyleApplyUtils::ParseFontWeight(styles.GetItem("fontWeight"), fontWeight)) {
-            LOG_A2UI(LOG_DEBUG, "ExtendedButtonComponent::ApplyComponentSpecificStyles - apply fontWeight=%{public}d",
-                fontWeight);
-            SetFontWeight(static_cast<A2UIFontWeight>(fontWeight));
-        } else {
-            SetFontWeight(DEFAULT_BUTTON_FONT_WEIGHT);
-        }
+void ExtendedButtonComponent::ApplyFontWeightStyle(const JsonValue& styles)
+{
+    if (!ShouldApplyStyle(styles, "fontWeight")) {
+        return;
     }
+    int32_t fontWeight = static_cast<int32_t>(DEFAULT_BUTTON_FONT_WEIGHT);
+    if (!ParseButtonFontWeight(styles.GetItem("fontWeight"), fontWeight)) {
+        SetFontWeight(DEFAULT_BUTTON_FONT_WEIGHT);
+        return;
+    }
+    LOG_A2UI(
+        LOG_DEBUG, "ExtendedButtonComponent::ApplyComponentSpecificStyles - apply fontWeight=%{public}d", fontWeight);
+    SetFontWeight(static_cast<A2UIFontWeight>(fontWeight));
+}
 
+void ExtendedButtonComponent::ApplyMinFontSizeStyle(const JsonValue& styles)
+{
+    if (!ShouldApplyStyle(styles, "minFontSize")) {
+        return;
+    }
     float minFontSize = 0.0F;
-    if (!isDeltaUpdate || (styles.IsObject() && styles.Has("minFontSize"))) {
-        if (StyleApplyUtils::ParseNumber(styles.GetItem("minFontSize"), minFontSize) && minFontSize > 0.0F) {
-            SetMinFontSize(minFontSize);
-        } else {
-            SetMinFontSize(0.0F);
-        }
+    if (StyleApplyUtils::ParseNumber(styles.GetItem("minFontSize"), minFontSize) && minFontSize > 0.0F) {
+        SetMinFontSize(minFontSize);
+        return;
     }
+    SetMinFontSize(0.0F);
+}
 
+void ExtendedButtonComponent::ApplyMaxFontSizeStyle(const JsonValue& styles)
+{
+    if (!ShouldApplyStyle(styles, "maxFontSize")) {
+        return;
+    }
     float maxFontSize = 0.0F;
-    if (!isDeltaUpdate || (styles.IsObject() && styles.Has("maxFontSize"))) {
-        if (StyleApplyUtils::ParseNumber(styles.GetItem("maxFontSize"), maxFontSize) && maxFontSize > 0.0F) {
-            SetMaxFontSize(maxFontSize);
-        } else {
-            SetMaxFontSize(0.0F);
-        }
+    if (StyleApplyUtils::ParseNumber(styles.GetItem("maxFontSize"), maxFontSize) && maxFontSize > 0.0F) {
+        SetMaxFontSize(maxFontSize);
+        return;
     }
+    SetMaxFontSize(0.0F);
+}
 
-    if (!isDeltaUpdate || (styles.IsObject() && styles.Has("minFontScale"))) {
-        JsonValue minFontScaleValue = styles.GetItem("minFontScale");
-        if (minFontScaleValue.IsNumber()) {
-            SetMinFontScale(ClampMinFontScale(minFontScaleValue.GetNumberValue(0.0)));
-        } else {
+void ExtendedButtonComponent::ApplyFontScaleLimits(const JsonValue& styles)
+{
+    if (ShouldApplyStyle(styles, "minFontScale")) {
+        JsonValue value = styles.GetItem("minFontScale");
+        if (value.IsNumber()) {
+            SetMinFontScale(ClampMinFontScale(value.GetNumberValue(0.0)));
+        } else if (value.IsValid()) {
             SetMinFontScale(0.0F);
         }
     }
-
-    if (!isDeltaUpdate || (styles.IsObject() && styles.Has("maxFontScale"))) {
-        JsonValue maxFontScaleValue = styles.GetItem("maxFontScale");
-        if (maxFontScaleValue.IsNumber()) {
-            SetMaxFontScale(ClampMaxFontScale(maxFontScaleValue.GetNumberValue(1.0)));
-        } else {
+    if (ShouldApplyStyle(styles, "maxFontScale")) {
+        JsonValue value = styles.GetItem("maxFontScale");
+        if (value.IsNumber()) {
+            SetMaxFontScale(ClampMaxFontScale(value.GetNumberValue(1.0)));
+        } else if (value.IsValid()) {
             SetMaxFontScale(0.0F);
         }
     }
+}
 
-    if (!isDeltaUpdate || (styles.IsObject() && styles.Has("fontScaleMode"))) {
-        JsonValue fontScaleModeValue = styles.GetItem("fontScaleMode");
-        if (fontScaleModeValue.IsString()) {
-            std::string mode = StyleApplyUtils::TrimToken(fontScaleModeValue.GetStringValue(""));
-            if (mode == "custom" || mode == "followSystem") {
-                SetFontScaleMode(mode);
-            } else {
-                SetFontScaleMode(DEFAULT_FONT_SCALE_MODE);
-            }
-        } else {
-            SetFontScaleMode(DEFAULT_FONT_SCALE_MODE);
-        }
+void ExtendedButtonComponent::ApplyFontScaleModeStyle(const JsonValue& styles)
+{
+    if (!ShouldApplyStyle(styles, "fontScaleMode")) {
+        return;
     }
+    JsonValue value = styles.GetItem("fontScaleMode");
+    if (!value.IsString()) {
+        SetFontScaleMode(DEFAULT_FONT_SCALE_MODE);
+        return;
+    }
+    std::string mode = StyleApplyUtils::TrimToken(value.GetStringValue(""));
+    if (mode != "custom" && mode != "followSystem") {
+        mode = DEFAULT_FONT_SCALE_MODE;
+    }
+    SetFontScaleMode(mode);
+}
 
-    uint32_t fontColor = 0;
-    if (!isDeltaUpdate || (styles.IsObject() && styles.Has("fontColor"))) {
-        JsonValue fontColorValue = styles.GetItem("fontColor");
-        if (ExtendedStyleResolver::ParseColor(fontColorValue, fontColor)) {
-            LOG_A2UI(LOG_DEBUG, "ExtendedButtonComponent::ApplyComponentSpecificStyles - apply fontColor=%{public}u",
-                fontColor);
-            SetFontColor(fontColor, true);
-        } else {
-            ApplyDefaultFontColor();
-        }
+void ExtendedButtonComponent::ApplyFontColorStyle(const JsonValue& styles)
+{
+    if (!ShouldApplyStyle(styles, "fontColor")) {
+        return;
     }
+    uint32_t color = 0;
+    if (!ExtendedStyleResolver::ParseColor(styles.GetItem("fontColor"), color)) {
+        ApplyDefaultFontColor();
+        return;
+    }
+    LOG_A2UI(LOG_DEBUG, "ExtendedButtonComponent::ApplyComponentSpecificStyles - apply fontColor=%{public}u", color);
+    SetFontColor(color, true);
+}
 
-    uint32_t backgroundColor = 0;
-    if (!isDeltaUpdate || (styles.IsObject() && styles.Has("backgroundColor"))) {
-        JsonValue backgroundColorValue = styles.GetItem("backgroundColor");
-        if (ExtendedStyleResolver::ParseColor(backgroundColorValue, backgroundColor)) {
-            LOG_A2UI(LOG_DEBUG,
-                "ExtendedButtonComponent::ApplyComponentSpecificStyles - apply backgroundColor=%{public}u",
-                backgroundColor);
-            SetBackgroundColor(backgroundColor, true);
-        } else {
-            ApplyDefaultBackgroundColor();
-        }
+void ExtendedButtonComponent::ApplyBackgroundColorStyle(const JsonValue& styles)
+{
+    if (!ShouldApplyStyle(styles, "backgroundColor")) {
+        return;
     }
+    uint32_t color = 0;
+    if (!ExtendedStyleResolver::ParseColor(styles.GetItem("backgroundColor"), color)) {
+        ApplyDefaultBackgroundColor();
+        return;
+    }
+    LOG_A2UI(
+        LOG_DEBUG, "ExtendedButtonComponent::ApplyComponentSpecificStyles - apply backgroundColor=%{public}u", color);
+    SetBackgroundColor(color, true);
 }
 
 void ExtendedButtonComponent::OnConfigChange(const ThemeContext& context)

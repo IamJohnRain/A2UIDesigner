@@ -282,5 +282,3 @@ export class SchemaErrorInfoManager {
     return renderIds[renderIds.length - 1];
   }
 }
-
-export const SchemaErrorInfoMananger = SchemaErrorInfoManager;

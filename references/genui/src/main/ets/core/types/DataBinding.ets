@@ -14,7 +14,7 @@
  */
 
 export class A2UIDataBinding {
-  path: string = ''
+  public path: string = ''
 
   static schemaRef(): string {
     return '{ "$ref": "#/$defs/DataBinding" }'

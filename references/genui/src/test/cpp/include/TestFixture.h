@@ -18,12 +18,23 @@
 
 #include <gtest/gtest.h>
 
+#define private public
+#include "utils/SystemProperties.h"
+#undef private
+
 #include "ArkUINativeAPI.h"
 #include "NapiBridge.h"
 #include "include/mock_arkui_native_provider.h"
 #include "include/mock_napi_provider.h"
 
 namespace NativeModule {
+
+inline void ResetApiVersionForTdd()
+{
+    // SystemProperties intentionally ignores a second non-zero assignment in production.
+    // TDD must force-reset the process-wide singleton between test cases to avoid order coupling.
+    SystemProperties::GetInstance().apiVersion_ = 0;
+}
 
 class A2UITest : public ::testing::Test {
 protected:
@@ -36,10 +47,12 @@ protected:
         auto mockNapi = MockNapiProvider::Create();
         mockNapiPtr_ = mockNapi.get();
         NapiBridge::SetProvider(std::move(mockNapi));
+        ResetApiVersionForTdd();
     }
 
     void TearDown() override
     {
+        ResetApiVersionForTdd();
         if (mockArkUIPtr_ != nullptr) {
             mockArkUIPtr_->ResetAllMocks();
         }

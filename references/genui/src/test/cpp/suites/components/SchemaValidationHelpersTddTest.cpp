@@ -431,10 +431,10 @@ TEST_F(SchemaValidationHelpersTddTest, should_not_dispatch_warning_for_valid_eve
 
 TEST_F(SchemaValidationHelpersTddTest, should_cover_extended_tabs_helper_parsing_and_merge_branches)
 {
-    EXPECT_TRUE(IsExtendedTabsComponentType("Extended.Tabs"));
-    EXPECT_TRUE(IsExtendedTabsChildComponentType("Extended.Tabs"));
     EXPECT_TRUE(IsExtendedTabsChildComponentType("Extended.TabContent"));
     EXPECT_TRUE(IsExtendedTabsChildComponentType("TabContent"));
+    EXPECT_FALSE(IsExtendedTabsChildComponentType("Extended.Tabs"));
+    EXPECT_FALSE(IsExtendedTabsChildComponentType("Legacy.Tabs"));
     EXPECT_FALSE(IsExtendedTabsChildComponentType("Column"));
 
     std::unique_ptr<JsonAdapter> staticDescriptor = ParseJson(R"({
@@ -489,7 +489,7 @@ TEST_F(SchemaValidationHelpersTddTest, should_prebuild_extended_tabs_children_fo
     SurfaceSlot staticSlot;
     staticSlot.SetSurfaceId("tabs_static_surface");
     staticSlot.SetRenderId(41);
-    staticSlot.SetCatalog(BuildCatalog(A2UI_BASIC_CATALOG_ID, { { "Text", true } }));
+    staticSlot.SetCatalog(BuildCatalog(A2UI_EXTENDED_CATALOG_ID, { { "Tabs", false }, { "Text", true } }));
 
     std::unique_ptr<JsonAdapter> childDescriptors = ParseJson(R"([
         {"id":"tabHome","component":"Text","text":"Home"},
@@ -500,7 +500,7 @@ TEST_F(SchemaValidationHelpersTddTest, should_prebuild_extended_tabs_children_fo
 
     std::unique_ptr<JsonAdapter> staticTabsDescriptor = ParseJson(R"({
         "id": "tabs",
-        "component": "Extended.Tabs",
+        "component": "Tabs",
         "children": ["tabHome", "tabOrders", "tabHome"]
     })");
     ASSERT_NE(staticTabsDescriptor, nullptr);
@@ -511,7 +511,7 @@ TEST_F(SchemaValidationHelpersTddTest, should_prebuild_extended_tabs_children_fo
     SurfaceSlot templateSlot;
     templateSlot.SetSurfaceId("tabs_template_surface");
     templateSlot.SetRenderId(42);
-    templateSlot.SetCatalog(BuildCatalog(A2UI_BASIC_CATALOG_ID, { { "Text", true } }));
+    templateSlot.SetCatalog(BuildCatalog(A2UI_EXTENDED_CATALOG_ID, { { "Tabs", false }, { "Text", true } }));
     std::unique_ptr<JsonAdapter> dataModel = ParseJson(R"({
         "value": {
             "tabs": {
@@ -524,7 +524,7 @@ TEST_F(SchemaValidationHelpersTddTest, should_prebuild_extended_tabs_children_fo
 
     std::unique_ptr<JsonAdapter> templateTabsDescriptor = ParseJson(R"({
         "id": "tabs",
-        "component": "Extended.Tabs",
+        "component": "Tabs",
         "children": {
             "componentId": "tabTemplate",
             "path": "/tabs"
@@ -571,6 +571,20 @@ TEST_F(
     extendedSlot.PrepareDescriptorById(childDescriptors->GetRoot());
     PrebuildExtendedTabsChildren(extendedSlot, shortTabsDescriptor->GetRoot());
     EXPECT_NE(extendedSlot.FindComponentById("tabHome"), nullptr);
+
+    SurfaceSlot namespacedSlot;
+    namespacedSlot.SetSurfaceId("tabs_former_extended_surface");
+    namespacedSlot.SetRenderId(45);
+    namespacedSlot.SetCatalog(BuildCatalog(A2UI_EXTENDED_CATALOG_ID, { { "Extended.Tabs", false }, { "Text", true } }));
+    namespacedSlot.PrepareDescriptorById(childDescriptors->GetRoot());
+    std::unique_ptr<JsonAdapter> namespacedTabsDescriptor = ParseJson(R"({
+        "id": "tabs",
+        "component": "Extended.Tabs",
+        "children": ["tabHome"]
+    })");
+    ASSERT_NE(namespacedTabsDescriptor, nullptr);
+    PrebuildExtendedTabsChildren(namespacedSlot, namespacedTabsDescriptor->GetRoot());
+    EXPECT_EQ(namespacedSlot.FindComponentById("tabHome"), nullptr);
 
     std::unique_ptr<JsonAdapter> objectChildren = ParseJson(R"({"keep":"value"})");
     ASSERT_NE(objectChildren, nullptr);
@@ -651,6 +665,18 @@ TEST_F(SchemaValidationHelpersTddTest,
     EXPECT_NE(templateSlot.FindComponentById("/tabstabTemplate:1:tabTemplate"), nullptr);
     EXPECT_NE(templateSlot.FindComponentById("/tabstabTemplate:0:pageText"), nullptr);
     EXPECT_NE(templateSlot.FindComponentById("/tabstabTemplate:1:pageText"), nullptr);
+
+    std::unique_ptr<JsonAdapter> missingPathDescriptor = ParseJson(R"({
+        "id": "tabsMissingPath",
+        "component": "Tabs",
+        "children": {
+            "componentId": "tabTemplate",
+            "path": "/missing"
+        }
+    })");
+    ASSERT_NE(missingPathDescriptor, nullptr);
+    PrebuildExtendedTabsChildren(templateSlot, missingPathDescriptor->GetRoot());
+    EXPECT_EQ(templateSlot.FindComponentById("/missingtabTemplate:0:tabTemplate"), nullptr);
 
     SurfaceSlot missingTemplateSlot;
     missingTemplateSlot.SetSurfaceId("tabs_template_missing_surface");

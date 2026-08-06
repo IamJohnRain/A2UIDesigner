@@ -20,6 +20,7 @@
 #include <list>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 
@@ -35,6 +36,9 @@ namespace NativeModule {
 
 class DataModel;
 class SurfaceSlot;
+class FunctionCallInfo;
+struct StyleParseResult;
+struct StyleResolveResult;
 
 class ExtendedComponent : public A2UIComponent {
 public:
@@ -63,6 +67,7 @@ protected:
     virtual void OnFontSizeScaleChanged(float newScale);
     void OnDataUpdate(const std::string& property, const JsonValue& value) override;
     void OnConfigChange(const ThemeContext& context) override;
+    void OnAttachToParent() override;
     void CollectChildListDescriptor(const JsonValue& descriptor) override;
     bool ExpandTemplateChildren(
         const ChildListDescriptor& childList, SurfaceSlot& surfaceSlot, std::list<std::string>& childIds) override;
@@ -93,6 +98,22 @@ protected:
         const std::string& styleName, std::initializer_list<const char*> allowedValues) const;
     void ValidateDynamicStyleNumberProperty(const JsonValue& styles, const std::set<std::string>& dynamicStyleKeys,
         const std::string& styleName, bool requirePositive = false) const;
+    void ReportDynamicStyleUndefinedField(const std::string& propertyPath) const;
+    void ValidateDynamicStyleNumberRange(const JsonValue& styles, const std::set<std::string>& dynamicStyleKeys,
+        const std::string& styleName, double minValue, std::optional<double> maxValue) const;
+    void ValidateDynamicStyleBool(
+        const JsonValue& styles, const std::set<std::string>& dynamicStyleKeys, const std::string& styleName) const;
+    void ValidateDynamicStyleStringColorValue(const JsonValue& value, const std::string& propertyPath) const;
+    void ValidateDynamicStyleStringColor(
+        const JsonValue& styles, const std::set<std::string>& dynamicStyleKeys, const std::string& styleName) const;
+    void ValidateDynamicStyleFontWeight(const JsonValue& styles, const std::set<std::string>& dynamicStyleKeys,
+        const std::string& styleName, const std::set<std::string>& allowedStringValues) const;
+    void ValidateDynamicStyleCancelButton(
+        const JsonValue& styles, const std::set<std::string>& dynamicStyleKeys, const std::string& styleName) const;
+    void ValidateDynamicStyleMark(
+        const JsonValue& styles, const std::set<std::string>& dynamicStyleKeys, const std::string& styleName) const;
+    void ValidateDynamicStyleUnderlineColor(
+        const JsonValue& styles, const std::set<std::string>& dynamicStyleKeys) const;
     static bool IsDynamicValueDescriptor(const JsonValue& value);
 
 #ifdef TDD_BUILD
@@ -105,11 +126,33 @@ protected:
 private:
     friend class SurfaceSlot;
 
+    enum class FlexShrinkStyleState { UNSPECIFIED, EXPLICIT_VALUE, PARENT_DEFAULT };
+
     bool ApplyExtendedDescriptor(const JsonValue& descriptor, const RenderContext& context);
     void ApplyResolvedStyles(const JsonValue& styles);
+    void UpdateFlexShrinkStyleState(const StyleResolveResult& resolveResult);
+    void UpdateFlexShrinkStyleState(const std::string& styleName, const JsonValue& styleValue);
+    void ApplyParentFlexShrinkDefault();
+    void ReportResolvedStyleIssues(const StyleParseResult& parseResult, const StyleResolveResult& resolveResult);
+    void ApplyResolvedStyleBindings(const StyleResolveResult& resolveResult);
+    void ApplyResolvedStyleObject(const StyleResolveResult& resolveResult, const std::string& parentComponentType);
     void ApplySingleResolvedStyle(const std::string& styleName, const JsonValue& styleValue);
+    bool ApplyResolvedStyleForBinding(
+        const DataBinding& binding, const std::string& property, const std::string& styleName, const JsonValue& value);
     void ParseAndRegisterEventHandlers(const JsonValue& descriptor);
     void RegisterAppearHandler();
+    void ValidateButtonDynamicStyles(const JsonValue& styles, const std::set<std::string>& dynamicStyleKeys);
+    void ValidateTextInputDynamicStyles(const JsonValue& styles, const std::set<std::string>& dynamicStyleKeys);
+    void ValidateToggleDynamicStyles(const JsonValue& styles, const std::set<std::string>& dynamicStyleKeys);
+    void ValidateRadioDynamicStyles(const JsonValue& styles, const std::set<std::string>& dynamicStyleKeys);
+    void ValidateCheckboxDynamicStyles(const JsonValue& styles, const std::set<std::string>& dynamicStyleKeys);
+    void ValidateCheckboxGroupDynamicStyles(const JsonValue& styles, const std::set<std::string>& dynamicStyleKeys);
+    void DispatchActionInfoFunctionCall(const std::string& actionName, const std::shared_ptr<ActionInfo>& actionInfo,
+        const JsonValue& extraContext) const;
+    bool InvokeFunctionCall(const std::shared_ptr<FunctionCallInfo>& functionCall,
+        const std::shared_ptr<DataModel>& dataModel, const JsonValue& extraContext) const;
+    void DispatchActionInfoEvent(const std::string& actionName, const std::shared_ptr<ActionInfo>& actionInfo,
+        const JsonValue& extraContext) const;
     static JsonValue MergeEventContext(const JsonValue& baseContext, const JsonValue& extraContext);
 
     EventHandlerMap eventHandlers_;
@@ -117,6 +160,7 @@ private:
     std::shared_ptr<ArkUINodeApiAdapter> nodeApplier_;
     std::set<std::string> appliedStyleKeys_;
     bool isApplyingStyleDeltaUpdate_ = false;
+    FlexShrinkStyleState flexShrinkStyleState_ = FlexShrinkStyleState::UNSPECIFIED;
 
     // Cached shadow JSON for theme re-application
     JsonValue cachedShadowValue_;

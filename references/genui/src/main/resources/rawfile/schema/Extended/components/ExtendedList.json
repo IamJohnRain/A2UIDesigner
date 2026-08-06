@@ -1,6 +1,21 @@
 {
   "type": "object",
   "$defs": {
+    "NonNegativeNumberValue": {
+      "oneOf": [
+        {
+          "type": "number",
+          "minimum": 0
+        },
+        {
+          "type": "string",
+          "pattern": "^(0|[1-9]\\d*)(?:\\.\\d+)?$"
+        },
+        {
+          "$ref": "../common_types.json#/$defs/ExtendedDynamicValueRef"
+        }
+      ]
+    },
     "ListDirectionLiteral": {
       "type": "string",
       "enum": [
@@ -25,14 +40,24 @@
         "paraller"
       ]
     },
+    "DynamicNestedScrollMode": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/NestedScrollMode"
+        },
+        {
+          "$ref": "../common_types.json#/$defs/ExtendedDynamicValueRef"
+        }
+      ]
+    },
     "NestedScrollOptions": {
       "type": "object",
       "properties": {
         "scrollForward": {
-          "$ref": "#/$defs/NestedScrollMode"
+          "$ref": "#/$defs/DynamicNestedScrollMode"
         },
         "scrollBackward": {
-          "$ref": "#/$defs/NestedScrollMode"
+          "$ref": "#/$defs/DynamicNestedScrollMode"
         }
       },
       "additionalProperties": false
@@ -56,7 +81,7 @@
           "description": "Child component IDs or a template child list."
         },
         "space": {
-          "$ref": "../common_types.json#/$defs/DynamicNumber",
+          "$ref": "#/$defs/NonNegativeNumberValue",
           "description": "Main-axis spacing between list items."
         },
         "styles": {
@@ -69,21 +94,7 @@
                   "$ref": "#/$defs/ListDirectionLiteral"
                 },
                 {
-                  "$ref": "../common_types.json#/$defs/DataBinding"
-                },
-                {
-                  "allOf": [
-                    {
-                      "$ref": "../common_types.json#/$defs/FunctionCall"
-                    },
-                    {
-                      "properties": {
-                        "returnType": {
-                          "const": "string"
-                        }
-                      }
-                    }
-                  ]
+                  "$ref": "../common_types.json#/$defs/ExtendedDynamicValueRef"
                 }
               ]
             },
@@ -94,21 +105,7 @@
                   "$ref": "#/$defs/ScrollBarLiteral"
                 },
                 {
-                  "$ref": "../common_types.json#/$defs/DataBinding"
-                },
-                {
-                  "allOf": [
-                    {
-                      "$ref": "../common_types.json#/$defs/FunctionCall"
-                    },
-                    {
-                      "properties": {
-                        "returnType": {
-                          "const": "string"
-                        }
-                      }
-                    }
-                  ]
+                  "$ref": "../common_types.json#/$defs/ExtendedDynamicValueRef"
                 }
               ]
             },
@@ -122,21 +119,7 @@
                   "$ref": "#/$defs/NestedScrollMode"
                 },
                 {
-                  "$ref": "../common_types.json#/$defs/DataBinding"
-                },
-                {
-                  "allOf": [
-                    {
-                      "$ref": "../common_types.json#/$defs/FunctionCall"
-                    },
-                    {
-                      "properties": {
-                        "returnType": {
-                          "const": "object"
-                        }
-                      }
-                    }
-                  ]
+                  "$ref": "../common_types.json#/$defs/ExtendedDynamicValueRef"
                 }
               ]
             }

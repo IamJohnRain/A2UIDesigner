@@ -68,14 +68,17 @@ struct Token {
 
 class Lexer {
 public:
-    std::vector<Token> Tokenize(const std::string& input);
+    std::vector<Token> Tokenize(const std::string& input) const;
 
 private:
-    Token ScanString(const std::string& input, size_t& pos, int32_t& line, int32_t& column);
-    Token ScanNumber(const std::string& input, size_t& pos, int32_t& line, int32_t& column);
-    void ScanDollar(const std::string& input, size_t& pos, int32_t& line, int32_t& column, std::vector<Token>& tokens);
-    Token ScanIdentifier(const std::string& input, size_t& pos, int32_t& line, int32_t& column);
-    Token ScanOperator(const std::string& input, size_t& pos, int32_t& line, int32_t& column);
+    Token ScanString(const std::string& input, size_t& pos, int32_t& line, int32_t& column) const;
+    Token ScanNumber(const std::string& input, size_t& pos, int32_t& line, int32_t& column) const;
+    void ScanDollar(
+        const std::string& input, size_t& pos, int32_t& line, int32_t& column, std::vector<Token>& tokens) const;
+    Token ScanIdentifier(const std::string& input, size_t& pos, int32_t& line, int32_t& column) const;
+    Token ScanOperator(const std::string& input, size_t& pos, int32_t& line, int32_t& column) const;
+    void ScanNextToken(
+        const std::string& input, size_t& pos, int32_t& line, int32_t& column, std::vector<Token>& tokens) const;
 };
 
 } // namespace NativeModule

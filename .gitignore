@@ -1,2 +1,9 @@
 .edge-cdp
 references/vals
+references/vals.luna-generated*/
+references/vals.card.luna.requests.jsonl
+references/CreateMyCard
+references/arkui_ace_engine
+.env.toml
+tmp/
+references/testset

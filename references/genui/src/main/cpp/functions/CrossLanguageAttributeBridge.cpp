@@ -84,6 +84,28 @@ bool CrossLanguageAttributeBridge::Dispatch(const CrossLanguageAttributeRequest&
         return false;
     }
 
+    PopulateRequestObject(obj, request);
+
+    napi_value global = nullptr;
+    napi.GetGlobal(napiEnv_, &global);
+
+    napi_value result = nullptr;
+    if (!IsNapiOk(napi.CallFunction(napiEnv_, global, callback, 1, &obj, &result))) {
+        LOG_A2UI(LOG_ERROR, "CrossLanguageAttributeBridge::Dispatch: call bridge failed");
+        return false;
+    }
+
+    LOG_A2UI(LOG_DEBUG,
+        "CrossLanguageAttributeBridge::Dispatch: success, renderId=%{public}d, componentId=%{public}s, "
+        "attribute=%{public}s",
+        request.renderId, request.componentId.c_str(), request.attributeName.c_str());
+    return true;
+}
+
+void CrossLanguageAttributeBridge::PopulateRequestObject(
+    napi_value obj, const CrossLanguageAttributeRequest& request) const
+{
+    auto& napi = NapiBridge::GetInstance().Provider();
     napi_value value = nullptr;
     napi.CreateInt32(napiEnv_, request.renderId, &value);
     napi.SetNamedProperty(napiEnv_, obj, "renderId", value);
@@ -117,21 +139,6 @@ bool CrossLanguageAttributeBridge::Dispatch(const CrossLanguageAttributeRequest&
     value = nullptr;
     napi.GetBoolean(napiEnv_, request.reset, &value);
     napi.SetNamedProperty(napiEnv_, obj, "reset", value);
-
-    napi_value global = nullptr;
-    napi.GetGlobal(napiEnv_, &global);
-
-    napi_value result = nullptr;
-    if (!IsNapiOk(napi.CallFunction(napiEnv_, global, callback, 1, &obj, &result))) {
-        LOG_A2UI(LOG_ERROR, "CrossLanguageAttributeBridge::Dispatch: call bridge failed");
-        return false;
-    }
-
-    LOG_A2UI(LOG_DEBUG,
-        "CrossLanguageAttributeBridge::Dispatch: success, renderId=%{public}d, componentId=%{public}s, "
-        "attribute=%{public}s",
-        request.renderId, request.componentId.c_str(), request.attributeName.c_str());
-    return true;
 }
 
 } // namespace NativeModule

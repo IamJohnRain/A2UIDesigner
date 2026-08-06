@@ -1837,6 +1837,39 @@ TEST_F(ExtendedComponentCoreTddTest, ApplyResolvedStyles_SecondInitClearsOldStyl
     // No crash = pass
 }
 
+TEST_F(ExtendedComponentCoreTddTest, ApplyResolvedStyles_ResetsTextInputWordBreakWithTextInputAttribute)
+{
+    TestableExtendedComponent comp;
+    ArkUI_NodeHandle node = reinterpret_cast<ArkUI_NodeHandle>(0x1234);
+    comp.SetNativeViewForTest(node);
+    comp.SetComponentTypeForTest("TextInput");
+    RenderContext ctx;
+    ctx.renderId = 1;
+    ctx.surfaceId = "test";
+
+    auto initialDescriptor =
+        JsonAdapter::Parse(R"({"id":"test","component":"TextInput","styles":{"wordBreak":"break-all"}})");
+    ASSERT_NE(initialDescriptor, nullptr);
+    ASSERT_TRUE(comp.CallInitFromDescriptor(initialDescriptor->GetRoot(), ctx));
+
+    mockArkUIPtr_->resetAttributeRecords_.clear();
+    auto resetDescriptor = JsonAdapter::Parse(R"({"id":"test","component":"TextInput","styles":{}})");
+    ASSERT_NE(resetDescriptor, nullptr);
+    ASSERT_TRUE(comp.CallUpdateFromDescriptor(resetDescriptor->GetRoot(), ctx));
+
+    bool resetTextInputWordBreak = false;
+    bool resetTextWordBreak = false;
+    for (const auto& record : mockArkUIPtr_->resetAttributeRecords_) {
+        if (record.nodeHandle != node) {
+            continue;
+        }
+        resetTextInputWordBreak = resetTextInputWordBreak || record.attribute == NODE_TEXT_INPUT_WORD_BREAK;
+        resetTextWordBreak = resetTextWordBreak || record.attribute == NODE_TEXT_WORD_BREAK;
+    }
+    EXPECT_TRUE(resetTextInputWordBreak);
+    EXPECT_FALSE(resetTextWordBreak);
+}
+
 // =============================================================================
 // ApplySingleResolvedStyle — full path with Put failure defense
 // (Can't easily force Put to fail, but we can exercise the normal Put path)

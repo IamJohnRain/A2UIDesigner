@@ -62,6 +62,7 @@ enum class StylePropertyName {
     SHADOW,
     LAYOUT_WEIGHT,
     CONSTRAINT_SIZE,
+    ASPECT_RATIO,
     UNKNOWN
 };
 

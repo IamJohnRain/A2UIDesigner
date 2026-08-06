@@ -37,7 +37,8 @@ namespace {
 
 constexpr uint32_t RADIO_LIGHT_CHECKED_BACKGROUND_COLOR = 0xFF0A59F7u;
 constexpr uint32_t RADIO_DARK_CHECKED_BACKGROUND_COLOR = 0xFF317AF7u;
-constexpr uint32_t DEFAULT_RADIO_UNCHECKED_BORDER_COLOR = 0x33FFFFFFu;
+constexpr uint32_t RADIO_LIGHT_UNCHECKED_BORDER_COLOR = 0x33FFFFFFu;
+constexpr uint32_t RADIO_DARK_UNCHECKED_BORDER_COLOR = 0x33FFFFFFu;
 constexpr uint32_t DEFAULT_RADIO_INDICATOR_COLOR = 0xFFFFFFFFu;
 JsonValue BuildRadioChangeEventContext(bool isChecked)
 {
@@ -53,6 +54,11 @@ JsonValue BuildRadioChangeEventContext(bool isChecked)
 uint32_t GetDefaultRadioCheckedBackgroundColor(ThemeMode mode)
 {
     return mode == ThemeMode::DARK ? RADIO_DARK_CHECKED_BACKGROUND_COLOR : RADIO_LIGHT_CHECKED_BACKGROUND_COLOR;
+}
+
+uint32_t GetDefaultRadioUncheckedBorderColor(ThemeMode mode)
+{
+    return mode == ThemeMode::DARK ? RADIO_DARK_UNCHECKED_BORDER_COLOR : RADIO_LIGHT_UNCHECKED_BORDER_COLOR;
 }
 
 SurfaceSlot* FindOwningSurface(const RenderContext& renderContext)
@@ -118,6 +124,7 @@ PropertyDeclaration ExtendedRadioComponent::GetPrivatePropertyDeclaration(const 
                     .type = PropertyValueType::STRING,
                     .allowDynamic = true,
                     .allowExpression = true,
+                    .resetOnTypeMismatch = true,
                     .fallbackString = "",
                     .applyValue = [&component](
                                       const JsonValue& value) { component.SetValue(value.GetStringValue("")); } };
@@ -138,6 +145,7 @@ PropertyDeclaration ExtendedRadioComponent::GetPrivatePropertyDeclaration(const 
                     .type = PropertyValueType::STRING,
                     .allowDynamic = true,
                     .allowExpression = true,
+                    .resetOnTypeMismatch = true,
                     .fallbackString = "",
                     .applyValue = [&component](
                                       const JsonValue& value) { component.SetGroup(value.GetStringValue("")); } };
@@ -197,8 +205,8 @@ void ExtendedRadioComponent::ApplyComponentSpecificStyles(const JsonValue& style
 
     ApplyStyleColor(styles, "checkedBackgroundColor", GetDefaultRadioCheckedBackgroundColor(themeMode),
         checkedBackgroundColor_, checkedBackgroundColorOverridden_);
-    ApplyStyleColor(styles, "unCheckedBorderColor", DEFAULT_RADIO_UNCHECKED_BORDER_COLOR, uncheckedBackgroundColor_,
-        uncheckedBackgroundColorOverridden_);
+    ApplyStyleColor(styles, "unCheckedBorderColor", GetDefaultRadioUncheckedBorderColor(themeMode),
+        uncheckedBackgroundColor_, uncheckedBackgroundColorOverridden_);
     ApplyStyleColor(
         styles, "indicatorColor", DEFAULT_RADIO_INDICATOR_COLOR, indicatorColor_, indicatorColorOverridden_);
     ApplyRadioStyle();
@@ -210,7 +218,7 @@ void ExtendedRadioComponent::OnConfigChange(const ThemeContext& context)
         checkedBackgroundColor_ = GetDefaultRadioCheckedBackgroundColor(context.colorMode);
     }
     if (!uncheckedBackgroundColorOverridden_) {
-        uncheckedBackgroundColor_ = DEFAULT_RADIO_UNCHECKED_BORDER_COLOR;
+        uncheckedBackgroundColor_ = GetDefaultRadioUncheckedBorderColor(context.colorMode);
     }
     if (!indicatorColorOverridden_) {
         indicatorColor_ = DEFAULT_RADIO_INDICATOR_COLOR;

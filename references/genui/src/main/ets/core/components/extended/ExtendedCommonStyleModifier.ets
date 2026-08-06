@@ -21,6 +21,8 @@ import { A2UIFunctionCall } from '../../types/FunctionCall';
 import { A2UIValueType } from '../../types/types';
 import { A2UIResolveContext, ResolveResult } from '../../types/runtime/ResolveContext';
 import { DynamicValueResolver } from '../../types/runtime/DynamicValueResolver';
+import { TypeGuards } from '../../types/runtime/TypeGuards';
+import { SchemaErrorCode, SchemaErrorInfoManager } from '../../schema/SchemaErrorInfoManager';
 
 type ExtendedLengthValue = Length | LayoutPolicy;
 type ExtendedBackgroundImageSizeValue = SizeOptions | ImageSize;
@@ -42,8 +44,13 @@ export interface ExtendedCommonStyleOptions {
   padding?: Length | Padding;
   layoutWeight?: number | string;
   flexShrink?: number;
+  aspectRatio?: number;
   shadow?: ExtendedShadowValue;
   linearGradient?: LinearGradientOptions;
+}
+
+export interface ExtendedCommonStyleState {
+  options?: ExtendedCommonStyleOptions;
 }
 
 const COMMON_STYLE_TAG: string = 'ExtendedCommonStyleModifier';
@@ -54,8 +61,21 @@ const COLOR_PATTERN: RegExp = /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
 export class ExtendedCommonStyleModifier<T extends CommonMethod<T>> implements AttributeModifier<T> {
   private readonly options: ExtendedCommonStyleOptions;
 
-  constructor(attribute: CustomComponentAttribute | undefined) {
-    this.options = resolveExtendedCommonStyleOptions(attribute);
+  constructor(
+    attribute: CustomComponentAttribute | undefined,
+    defaults: ExtendedCommonStyleOptions = {},
+    state?: ExtendedCommonStyleState
+  ) {
+    let result = resolveExtendedCommonStyleOptionsWithStatus(attribute, defaults.backgroundColor);
+    this.options = mergeExtendedCommonStyleOptions(
+      defaults,
+      result.options,
+      state?.options,
+      result.failedDynamicProperties
+    );
+    if (state !== undefined) {
+      state.options = this.options;
+    }
   }
 
   applyNormalAttribute(instance: T): void {
@@ -64,22 +84,124 @@ export class ExtendedCommonStyleModifier<T extends CommonMethod<T>> implements A
 }
 
 export function buildExtendedCommonStyleModifier<T extends CommonMethod<T>>(
-  attribute: CustomComponentAttribute | undefined
+  attribute: CustomComponentAttribute | undefined,
+  defaults: ExtendedCommonStyleOptions = {},
+  state?: ExtendedCommonStyleState
 ): AttributeModifier<T> {
-  return new ExtendedCommonStyleModifier<T>(attribute);
+  return new ExtendedCommonStyleModifier<T>(attribute, defaults, state);
+}
+
+export function mergeExtendedCommonStyleOptions(
+  defaults: ExtendedCommonStyleOptions,
+  resolved: ExtendedCommonStyleOptions,
+  previous?: ExtendedCommonStyleOptions,
+  failedDynamicProperties: string[] = []
+): ExtendedCommonStyleOptions {
+  let merged: ExtendedCommonStyleOptions = {
+    width: resolved.width ?? defaults.width,
+    height: resolved.height ?? defaults.height,
+    constraintSize: resolved.constraintSize ?? defaults.constraintSize,
+    backgroundImage: resolved.backgroundImage ?? defaults.backgroundImage,
+    backgroundImageSize: resolved.backgroundImageSize ?? defaults.backgroundImageSize,
+    margin: resolved.margin ?? defaults.margin,
+    borderRadius: resolved.borderRadius ?? defaults.borderRadius,
+    visibility: resolved.visibility ?? defaults.visibility,
+    clip: resolved.clip ?? defaults.clip,
+    backgroundColor: resolved.backgroundColor ?? defaults.backgroundColor,
+    borderWidth: resolved.borderWidth ?? defaults.borderWidth,
+    borderColor: resolved.borderColor ?? defaults.borderColor,
+    padding: resolved.padding ?? defaults.padding,
+    layoutWeight: resolved.layoutWeight ?? defaults.layoutWeight,
+    flexShrink: resolved.flexShrink ?? defaults.flexShrink,
+    aspectRatio: resolved.aspectRatio ?? defaults.aspectRatio,
+    shadow: resolved.shadow ?? defaults.shadow,
+    linearGradient: resolved.linearGradient ?? defaults.linearGradient
+  };
+  if (previous === undefined) {
+    return merged;
+  }
+
+  if (failedDynamicProperties.indexOf('width') >= 0 && previous.width !== undefined) {
+    merged.width = previous.width;
+  }
+  if (failedDynamicProperties.indexOf('height') >= 0 && previous.height !== undefined) {
+    merged.height = previous.height;
+  }
+  if (failedDynamicProperties.indexOf('constraintSize') >= 0 && previous.constraintSize !== undefined) {
+    merged.constraintSize = previous.constraintSize;
+  }
+  if (failedDynamicProperties.indexOf('backgroundImage') >= 0 && previous.backgroundImage !== undefined) {
+    merged.backgroundImage = previous.backgroundImage;
+  }
+  if (failedDynamicProperties.indexOf('backgroundImageSize') >= 0 && previous.backgroundImageSize !== undefined) {
+    merged.backgroundImageSize = previous.backgroundImageSize;
+  }
+  if (failedDynamicProperties.indexOf('margin') >= 0 && previous.margin !== undefined) {
+    merged.margin = previous.margin;
+  }
+  if (failedDynamicProperties.indexOf('borderRadius') >= 0 && previous.borderRadius !== undefined) {
+    merged.borderRadius = previous.borderRadius;
+  }
+  if (failedDynamicProperties.indexOf('visibility') >= 0 && previous.visibility !== undefined) {
+    merged.visibility = previous.visibility;
+  }
+  if (failedDynamicProperties.indexOf('clip') >= 0 && previous.clip !== undefined) {
+    merged.clip = previous.clip;
+  }
+  if (failedDynamicProperties.indexOf('backgroundColor') >= 0 && previous.backgroundColor !== undefined) {
+    merged.backgroundColor = previous.backgroundColor;
+  }
+  if (failedDynamicProperties.indexOf('borderWidth') >= 0 && previous.borderWidth !== undefined) {
+    merged.borderWidth = previous.borderWidth;
+  }
+  if (failedDynamicProperties.indexOf('borderColor') >= 0 && previous.borderColor !== undefined) {
+    merged.borderColor = previous.borderColor;
+  }
+  if (failedDynamicProperties.indexOf('padding') >= 0 && previous.padding !== undefined) {
+    merged.padding = previous.padding;
+  }
+  if (failedDynamicProperties.indexOf('layoutWeight') >= 0 && previous.layoutWeight !== undefined) {
+    merged.layoutWeight = previous.layoutWeight;
+  }
+  if (failedDynamicProperties.indexOf('flexShrink') >= 0 && previous.flexShrink !== undefined) {
+    merged.flexShrink = previous.flexShrink;
+  }
+  if (failedDynamicProperties.indexOf('aspectRatio') >= 0 && previous.aspectRatio !== undefined) {
+    merged.aspectRatio = previous.aspectRatio;
+  }
+  if (failedDynamicProperties.indexOf('shadow') >= 0 && previous.shadow !== undefined) {
+    merged.shadow = previous.shadow;
+  }
+  if (failedDynamicProperties.indexOf('linearGradient') >= 0 && previous.linearGradient !== undefined) {
+    merged.linearGradient = previous.linearGradient;
+  }
+  return merged;
+}
+
+interface ExtendedCommonStyleResolveResult {
+  options: ExtendedCommonStyleOptions;
+  failedDynamicProperties: string[];
+}
+
+function resolveExtendedCommonStyleOptionsWithStatus(
+  attribute: CustomComponentAttribute | undefined,
+  backgroundColorFallback: ResourceColor = 'transparent'
+): ExtendedCommonStyleResolveResult {
+  let customProps = parseCustomProps(attribute, COMMON_STYLE_TAG);
+  let styles = resolveStyles(customProps) ?? {};
+
+  let resolver = new ExtendedCommonStyleResolver(attribute, styles, backgroundColorFallback);
+  return {
+    options: resolver.resolve(),
+    failedDynamicProperties: resolver.getFailedDynamicProperties()
+  };
 }
 
 export function resolveExtendedCommonStyleOptions(
-  attribute: CustomComponentAttribute | undefined
+  attribute: CustomComponentAttribute | undefined,
+  backgroundColorFallback: ResourceColor = 'transparent'
 ): ExtendedCommonStyleOptions {
-  let customProps = parseCustomProps(attribute, COMMON_STYLE_TAG);
-  let styles = resolveStyles(customProps);
-  if (styles === undefined) {
-    return {};
-  }
-
-  let resolver = new ExtendedCommonStyleResolver(attribute, styles);
-  return resolver.resolve();
+  return resolveExtendedCommonStyleOptionsWithStatus(attribute, backgroundColorFallback).options;
 }
 
 export function applyExtendedCommonStyleOptions<T extends CommonMethod<T>>(
@@ -131,6 +253,9 @@ export function applyExtendedCommonStyleOptions<T extends CommonMethod<T>>(
   if (options.flexShrink !== undefined) {
     instance.flexShrink(options.flexShrink);
   }
+  if (options.aspectRatio !== undefined) {
+    instance.aspectRatio(options.aspectRatio);
+  }
   if (options.shadow !== undefined) {
     instance.shadow(options.shadow);
   }
@@ -165,10 +290,21 @@ function isNonNegativeNumber(value: number): boolean {
 class ExtendedCommonStyleResolver {
   private readonly attribute: CustomComponentAttribute | undefined;
   private readonly styles: Record<string, Object>;
+  private readonly backgroundColorFallback: ResourceColor;
+  private readonly failedDynamicProperties: string[] = [];
 
-  constructor(attribute: CustomComponentAttribute | undefined, styles: Record<string, Object>) {
+  constructor(
+    attribute: CustomComponentAttribute | undefined,
+    styles: Record<string, Object>,
+    backgroundColorFallback: ResourceColor
+  ) {
     this.attribute = attribute;
     this.styles = styles;
+    this.backgroundColorFallback = backgroundColorFallback;
+  }
+
+  getFailedDynamicProperties(): string[] {
+    return this.failedDynamicProperties.slice();
   }
 
   resolve(): ExtendedCommonStyleOptions {
@@ -189,6 +325,7 @@ class ExtendedCommonStyleResolver {
     this.resolvePadding(options);
     this.resolveLayoutWeight(options);
     this.resolveFlexShrink(options);
+    this.resolveAspectRatio(options);
     this.resolveShadow(options);
     this.resolveLinearGradient(options);
     this.normalizeZeroConstraintBounds(options);
@@ -230,8 +367,13 @@ class ExtendedCommonStyleResolver {
 
   private resolveBackgroundImageSize(options: ExtendedCommonStyleOptions): void {
     let raw: Object | undefined = undefined;
+    let hasConfiguredSize: boolean = false;
     for (const key of BACKGROUND_IMAGE_SIZE_KEYS) {
-      raw = this.readStyle(key);
+      if (!hasOwnProperty(this.styles, key)) {
+        continue;
+      }
+      hasConfiguredSize = true;
+      raw = this.readStyle(key, 'backgroundImageSize');
       if (raw !== undefined) {
         break;
       }
@@ -240,6 +382,8 @@ class ExtendedCommonStyleResolver {
     let resolved = this.resolveBackgroundImageSizeValue(raw);
     if (resolved !== undefined) {
       options.backgroundImageSize = resolved;
+    } else if (hasConfiguredSize) {
+      options.backgroundImageSize = ImageSize.Auto;
     }
   }
 
@@ -280,7 +424,7 @@ class ExtendedCommonStyleResolver {
     if (raw === undefined) {
       return;
     }
-    options.backgroundColor = this.resolveColor(raw) ?? 'transparent';
+    options.backgroundColor = this.resolveColor(raw) ?? this.backgroundColorFallback;
   }
 
   private resolveBorderWidth(options: ExtendedCommonStyleOptions): void {
@@ -324,16 +468,59 @@ class ExtendedCommonStyleResolver {
   }
 
   private resolveFlexShrink(options: ExtendedCommonStyleOptions): void {
+    let hasConfiguredValue = hasOwnProperty(this.styles, 'flexShrink');
     let raw = this.readStyle('flexShrink');
     if (raw === undefined) {
+      if (hasConfiguredValue || this.attribute?.properties?.resetFlexShrinkToParentDefault === true) {
+        let parentDefault = this.resolveParentFlexShrinkDefault();
+        if (parentDefault !== undefined) {
+          options.flexShrink = parentDefault;
+        }
+      }
       return;
     }
     let value = this.resolveNumber(raw);
-    if (value === undefined || value < 0 || value > 1) {
-      options.flexShrink = 1;
+    if (value === undefined || value < 0) {
+      options.flexShrink = this.resolveParentFlexShrinkDefault() ?? 0;
       return;
     }
     options.flexShrink = value;
+  }
+
+  private resolveParentFlexShrinkDefault(): number | undefined {
+    let value = this.attribute?.properties?.flexShrinkParentDefault;
+    return value === 0 || value === 1 ? value : undefined;
+  }
+
+  private resolveAspectRatio(options: ExtendedCommonStyleOptions): void {
+    let raw = this.readStyle('aspectRatio');
+    if (raw === undefined) {
+      return;
+    }
+    let componentType = this.attribute?.type ?? '';
+    let value = this.resolveNumber(raw);
+    if (value !== undefined && value > 0) {
+      options.aspectRatio = value;
+    } else if (value !== undefined) {
+      SchemaErrorInfoManager.getInstance().recordSchemaWarning(
+        SchemaErrorCode.INVALID_VALUE,
+        `Property aspectRatio got invalid number value, fallback to default value`,
+        'styles.aspectRatio',
+        'component',
+        componentType
+      );
+      options.aspectRatio = 1;
+    } else {
+      let typeName = typeof raw === 'object' && raw === null ? 'null' : typeof raw;
+      SchemaErrorInfoManager.getInstance().recordSchemaWarning(
+        SchemaErrorCode.TYPE_MISMATCH,
+        `Property aspectRatio expects number value, got type '${typeName}', fallback to default value`,
+        'styles.aspectRatio',
+        'component',
+        componentType
+      );
+      options.aspectRatio = 1;
+    }
   }
 
   private resolveShadow(options: ExtendedCommonStyleOptions): void {
@@ -374,17 +561,33 @@ class ExtendedCommonStyleResolver {
     }
   }
 
-  private readStyle(key: string): Object | undefined {
+  private readStyle(key: string, optionKey: string = key): Object | undefined {
     if (!hasOwnProperty(this.styles, key)) {
       return undefined;
     }
     let raw = this.styles[key];
-    return this.resolveDynamicValue(raw);
+    let resolved = this.resolveDynamicValue(raw);
+    if (resolved === undefined && this.isDynamicStyleValue(raw) &&
+      this.failedDynamicProperties.indexOf(optionKey) < 0) {
+      this.failedDynamicProperties.push(optionKey);
+    }
+    return resolved;
+  }
+
+  private isDynamicStyleValue(value: Object | undefined): boolean {
+    if (typeof value === 'string') {
+      let trimmed = value.trim();
+      return trimmed.startsWith('{{') && trimmed.endsWith('}}');
+    }
+    return TypeGuards.isDataBinding(value) || TypeGuards.isFunctionCall(value);
   }
 
   private resolveDynamicValue(value: Object | undefined): Object | undefined {
     if (value === undefined) {
       return undefined;
+    }
+    if (this.attribute?.resolver !== undefined) {
+      return this.attribute.resolver.evaluateValue<Object | undefined>(value as A2UIValueType);
     }
     let resolveContext = this.buildResolveContext();
     let result = DynamicValueResolver.resolveValue(value as A2UIDynamicValue, resolveContext);
@@ -530,9 +733,6 @@ class ExtendedCommonStyleResolver {
   }
 
   private resolveColor(value: Object | undefined): ResourceColor | undefined {
-    if (typeof value === 'number' && Number.isFinite(value)) {
-      return value;
-    }
     if (typeof value !== 'string') {
       return undefined;
     }
@@ -617,15 +817,22 @@ class ExtendedCommonStyleResolver {
       return undefined;
     }
     let record = value as Record<string, Object>;
-    let width = hasOwnProperty(record, 'width') ? this.resolveLength(this.resolveDynamicValue(record['width'])) : undefined;
-    let height = hasOwnProperty(record, 'height') ? this.resolveLength(this.resolveDynamicValue(record['height'])) : undefined;
-    if (width === undefined || height === undefined) {
+    let hasWidth = hasOwnProperty(record, 'width');
+    let hasHeight = hasOwnProperty(record, 'height');
+    if (!hasWidth && !hasHeight) {
       return undefined;
     }
-    return {
-      width: width,
-      height: height
-    } as SizeOptions;
+    let width = hasWidth ? this.resolveLength(this.resolveDynamicValue(record['width'])) : undefined;
+    let height = hasHeight ? this.resolveLength(this.resolveDynamicValue(record['height'])) : undefined;
+    // An absent or empty-string dimension maps to LENGTH 0, matching NODE_BACKGROUND_IMAGE_SIZE
+    // where ParseJsDimensionVp("") / a missing property resolve to value=0/unit=LENGTH. The rendering
+    // layer then derives that dimension from the other one by the source-image aspect ratio, instead
+    // of falling back to COVER/CONTAIN/AUTO. See image_painter.cpp CalculateBgImageSize.
+    let sizeOptions: SizeOptions = {
+      width: width !== undefined ? width : 0,
+      height: height !== undefined ? height : 0
+    };
+    return sizeOptions;
   }
 
   private resolveVisibilityValue(value: Object | undefined): Visibility | undefined {
@@ -813,7 +1020,7 @@ class ExtendedCommonStyleResolver {
     }
 
     let stops = this.resolveGradientStops(record);
-    let colors: Array<[ResourceColor, number]> = [];
+    let colors: [ResourceColor, number][] = [];
     let colorItems = colorsValue as Object[];
     for (let i = 0; i < colorItems.length; i++) {
       let colorItem = colorItems[i];

@@ -1,26 +1,28 @@
+/*
+ * Copyright (c) 2026 Huawei Device Co., Ltd.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 #include <cctype>
 #include <cmath>
 #include <set>
 
+#include "components/TypeValidation.h"
 #include "components/custom/CustomComponent.h"
-#include "components/custom/CustomComponentExpressionBinding.h"
-#include "styles/StyleApplyUtils.h"
-
-#include "SchemaErrorCodes.h"
 
 namespace NativeModule {
 
 namespace {
-
-bool IsDynamicDescriptorObject(const JsonValue& value)
-{
-    return value.IsObject() && (value.Has("path") || value.Has("call"));
-}
-
-bool IsEmptyStringValue(const JsonValue& value)
-{
-    return value.IsString() && StyleApplyUtils::TrimToken(value.GetStringValue("")).empty();
-}
 
 bool IsAllowedExtendedTabType(const std::string& value)
 {
@@ -57,42 +59,38 @@ bool IsValidFontWeightValue(const JsonValue& value)
     }
 
     static const std::set<std::string> allowedKeywords = { "bold", "normal", "bolder", "lighter", "medium", "regular" };
-    if (allowedKeywords.count(token) > 0) {
-        return true;
-    }
-
-    float parsedNumber = 0.0F;
-    return StyleApplyUtils::ParseNumber(value, parsedNumber) && IsValidFontWeightNumber(parsedNumber);
+    return allowedKeywords.count(token) > 0;
 }
 
 } // namespace
 
 void CustomComponent::NormalizeExtendedTabContentProperty(const std::string& propertyName, JsonValue& value)
 {
+    auto report = [this](const std::string& code, const std::string& message, const std::string& path) {
+        ReportCustomSchemaWarning(code, message, path);
+    };
+
     if (propertyName == "title" || propertyName == "icon" || propertyName == "selectedSrc") {
         if (value.IsString() || value.IsObject()) {
             return;
         }
 
-        ReportCustomSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
-            "Property " + propertyName + " expects string value or dynamic descriptor, got type '" +
-                std::string(value.GetTypeName()) + "', fallback/reset has been applied",
-            propertyName);
+        ReportTypeMismatchAndReset(report, value, "string", propertyName);
+        return;
+    }
+
+    if (propertyName == "child") {
         value = JsonValue();
         return;
     }
 
     if (propertyName == "tabType") {
-        if (IsExpressionStringValue(value) || IsDynamicDescriptorObject(value)) {
+        if (IsDynamicValue(value)) {
             return;
         }
 
         if (!value.IsString()) {
-            ReportCustomSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
-                "Property tabType expects string value, got type '" + std::string(value.GetTypeName()) +
-                    "', fallback/reset has been applied",
-                "tabType");
-            value = JsonValue();
+            ReportTypeMismatchAndReset(report, value, "string", "tabType");
             return;
         }
 
@@ -100,18 +98,6 @@ void CustomComponent::NormalizeExtendedTabContentProperty(const std::string& pro
         if (!token.empty() && !IsAllowedExtendedTabType(token)) {
             ReportCustomSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
                 "Property tabType has invalid value and has been reset to default", "tabType");
-            value = JsonValue();
-        }
-        return;
-    }
-
-    if (propertyName == "child") {
-        if (!value.IsString()) {
-            value = JsonValue();
-            return;
-        }
-
-        if (StyleApplyUtils::TrimToken(value.GetStringValue("")).empty()) {
             value = JsonValue();
         }
         return;
@@ -128,51 +114,72 @@ void CustomComponent::NormalizeExtendedTabContentStyles(JsonValue& value)
         return;
     }
 
-    auto dropInvalidNumberStyle = [this, &value](const char* styleName) {
+    NormalizeExtendedTabContentNumberStyles(value);
+    NormalizeExtendedTabContentStringStyles(value);
+    NormalizeExtendedTabContentFontWeightStyle(value);
+}
+
+void CustomComponent::NormalizeExtendedTabContentNumberStyles(JsonValue& value)
+{
+    auto report = [this](const std::string& code, const std::string& message, const std::string& path) {
+        ReportCustomSchemaWarning(code, message, path);
+    };
+
+    auto dropInvalidNumberStyle = [this, &value, &report](const char* styleName) {
         if (styleName == nullptr || !value.Has(styleName)) {
             return;
         }
 
         JsonValue styleValue = value.GetItem(styleName);
-        if (IsDynamicDescriptorObject(styleValue) || IsExpressionStringValue(styleValue)) {
+        if (IsDynamicValue(styleValue)) {
             return;
         }
-        float parsedNumber = 0.0F;
-        if (StyleApplyUtils::ParseNumber(styleValue, parsedNumber)) {
+        if (IsLiteralNumber(styleValue)) {
+            if (styleValue.GetNumberValue(-1.0) >= 0.0) {
+                return;
+            }
+            std::string propertyPath = std::string("styles.") + styleName;
+            ReportCustomSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
+                "Property " + propertyPath + " must be greater than or equal to 0, fallback/reset has been applied",
+                propertyPath);
+            value.Remove(styleName);
             return;
         }
 
         std::string propertyPath = std::string("styles.") + styleName;
-        ReportCustomSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
-            "Property " + propertyPath + " expects number value, got type '" + styleValue.GetTypeName() +
-                "', fallback/reset has been applied",
-            propertyPath);
-        value.Remove(styleName);
+        ReportTypeMismatchAndReset(
+            report, [&value, styleName]() { value.Remove(styleName); }, styleValue, "number", propertyPath);
     };
 
     dropInvalidNumberStyle("fontSize");
     dropInvalidNumberStyle("iconSize");
     dropInvalidNumberStyle("space");
+}
 
-    auto dropInvalidNonEmptyStringStyle = [this, &value](const char* styleName) {
+void CustomComponent::NormalizeExtendedTabContentStringStyles(JsonValue& value)
+{
+    auto report = [this](const std::string& code, const std::string& message, const std::string& path) {
+        ReportCustomSchemaWarning(code, message, path);
+    };
+
+    auto dropInvalidNonEmptyStringStyle = [this, &value, &report](const char* styleName) {
         if (styleName == nullptr || !value.Has(styleName)) {
             return;
         }
 
         JsonValue styleValue = value.GetItem(styleName);
-        if (styleValue.IsString() && !IsEmptyStringValue(styleValue)) {
-            return;
-        }
-        if (styleValue.IsObject()) {
+        if (IsDynamicValue(styleValue)) {
             return;
         }
 
         std::string propertyPath = std::string("styles.") + styleName;
-        ReportCustomSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
-            "Property " + propertyPath + " expects non-empty string value, got type '" +
-                std::string(styleValue.GetTypeName()) + "', fallback/reset has been applied",
-            propertyPath);
-        value.Remove(styleName);
+
+        if (IsNonEmptyLiteralString(styleValue)) {
+            return;
+        }
+
+        ReportTypeMismatchAndReset(
+            report, [&value, styleName]() { value.Remove(styleName); }, styleValue, "non-empty string", propertyPath);
     };
 
     dropInvalidNonEmptyStringStyle("selectedColor");
@@ -181,13 +188,20 @@ void CustomComponent::NormalizeExtendedTabContentStyles(JsonValue& value)
     dropInvalidNonEmptyStringStyle("selectedBackgroundColor");
     dropInvalidNonEmptyStringStyle("defaultBorderColor");
     dropInvalidNonEmptyStringStyle("selectedBorderColor");
+}
+
+void CustomComponent::NormalizeExtendedTabContentFontWeightStyle(JsonValue& value)
+{
+    auto report = [this](const std::string& code, const std::string& message, const std::string& path) {
+        ReportCustomSchemaWarning(code, message, path);
+    };
 
     if (!value.Has("fontWeight")) {
         return;
     }
 
     JsonValue fontWeightValue = value.GetItem("fontWeight");
-    if (IsDynamicDescriptorObject(fontWeightValue) || IsExpressionStringValue(fontWeightValue)) {
+    if (IsDynamicValue(fontWeightValue)) {
         return;
     }
     if (IsValidFontWeightValue(fontWeightValue)) {
@@ -198,13 +212,11 @@ void CustomComponent::NormalizeExtendedTabContentStyles(JsonValue& value)
     if (fontWeightValue.IsString() || fontWeightValue.IsNumber()) {
         ReportCustomSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
             "Property " + propertyPath + " expects valid font weight, fallback/reset has been applied", propertyPath);
+        value.Remove("fontWeight");
     } else {
-        ReportCustomSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
-            "Property " + propertyPath + " expects string or number value, got type '" + fontWeightValue.GetTypeName() +
-                "', fallback/reset has been applied",
-            propertyPath);
+        ReportTypeMismatchAndReset(
+            report, [&value]() { value.Remove("fontWeight"); }, fontWeightValue, "string or number", propertyPath);
     }
-    value.Remove("fontWeight");
 }
 
 } // namespace NativeModule

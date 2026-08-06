@@ -31,6 +31,7 @@ interface PendingCrossLanguageAttributeRequest {
 
 export class CrossLanguageAttributeBridge {
   private static readonly defaultFontScaleResetValue: number = 0.0;
+  private static readonly defaultProgressStrokeWidthResetValue: number = 4.0;
   private static uiContextByRenderId: Map<number, UIContext> = new Map();
   private static pendingRequestsByRenderId: Map<number, PendingCrossLanguageAttributeRequest[]> = new Map();
 
@@ -129,8 +130,6 @@ export class CrossLanguageAttributeBridge {
         );
         return true;
       }
-      // constraintSize is a CommonMethod method. FrameNode.commonAttribute provides
-      // access to CommonAttribute (CommonMethod) without needing component-specific type dispatch.
       frameNode.commonAttribute.constraintSize(options);
       return true;
     }
@@ -148,9 +147,17 @@ export class CrossLanguageAttributeBridge {
         );
         return true;
       }
-      // backgroundImageSize is a CommonMethod method. FrameNode.commonAttribute provides
-      // access to CommonAttribute (CommonMethod) without needing component-specific type dispatch.
-      frameNode.commonAttribute.backgroundImageSize(sizeOptions);
+      const attr = CrossLanguageAttributeBridge.getComponentAttribute(frameNode, componentType);
+      if (attr === null || attr === undefined) {
+        if (logOnFailure) {
+          console.warn(
+            `[CrossLanguageAttributeBridge] applyAttribute: getComponentAttribute returned null ` +
+              `for backgroundImageSize, componentType=${componentType}, id=${componentId}`
+          );
+        }
+        return false;
+      }
+      attr.backgroundImageSize(sizeOptions);
       return true;
     }
 
@@ -230,6 +237,25 @@ export class CrossLanguageAttributeBridge {
         textInputAttr.maxFontScale(
           reset ? CrossLanguageAttributeBridge.defaultFontScaleResetValue : floatValue
         );
+      }
+      return true;
+    }
+
+    if (componentType === 'Progress') {
+      let progressAttr = typeNode.getAttribute(frameNode, 'Progress');
+      if (progressAttr === null || progressAttr === undefined) {
+        if (logOnFailure) {
+          console.warn(
+            `[CrossLanguageAttributeBridge] applyAttribute: failed to get Progress attribute for id=${componentId}`
+          );
+        }
+        return false;
+      }
+      if (attributeName === 'strokeWidth') {
+        progressAttr.style({
+          strokeWidth: reset ? CrossLanguageAttributeBridge.defaultProgressStrokeWidthResetValue
+            : floatValue
+        });
       }
       return true;
     }
@@ -371,7 +397,7 @@ export class CrossLanguageAttributeBridge {
       return;
     }
 
-    const attr = CrossLanguageAttributeBridge.getLayoutPolicyAttr(frameNode, componentType);
+    const attr = CrossLanguageAttributeBridge.getComponentAttribute(frameNode, componentType);
     if (attr === null || attr === undefined) {
       console.warn(
         `[CrossLanguageAttributeBridge] applyAttribute: layoutPolicy getAttribute returned null, ` +
@@ -386,7 +412,7 @@ export class CrossLanguageAttributeBridge {
     }
   }
 
-  private static getLayoutPolicyAttr(frameNode: FrameNode, componentType: string) {
+  private static getComponentAttribute(frameNode: FrameNode, componentType: string) {
     switch (componentType) {
       case 'Button': return typeNode.getAttribute(frameNode, 'Button');
       case 'Checkbox': return typeNode.getAttribute(frameNode, 'Checkbox');

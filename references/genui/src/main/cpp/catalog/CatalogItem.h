@@ -41,11 +41,15 @@ public:
     bool IsInnerNative() const;
     void SetInnerNative(bool isInnerNative);
 
+    bool ShouldPreserveDynamicDescriptors() const;
+    void SetPreserveDynamicDescriptors(bool preserveDynamicDescriptors);
+
 private:
     CatalogCategory category_;
     CatalogItemType type_;
     std::string name_;
     bool isInnerNative_;
+    bool preserveDynamicDescriptors_;
 };
 
 } // namespace NativeModule

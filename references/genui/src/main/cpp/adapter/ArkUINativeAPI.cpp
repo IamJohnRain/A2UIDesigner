@@ -22,7 +22,6 @@ namespace NativeModule {
 
 ArkUINativeAPI::ArkUINativeAPI()
 {
-// OH_ArkUI_GetModuleInterface(ARKUI_NATIVE_NODE, ArkUI_NativeNodeAPI_1, nativeNodeApi_);
 #ifndef TDD_BUILD
     provider_ = std::make_unique<ArkUINativeProvider>();
 #endif

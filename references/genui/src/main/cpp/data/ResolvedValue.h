@@ -34,14 +34,14 @@ struct ResolvedValue {
     std::string functionName;
     std::string errorMessage;
 
-    static ResolvedValue OkLiteral(const JsonValue& value);
-    static ResolvedValue OkExpression(const JsonValue& value);
-    static ResolvedValue OkPath(const JsonValue& value, const std::string& path);
-    static ResolvedValue OkFunctionCall(const JsonValue& value, const std::string& functionName);
-    static ResolvedValue FailExpression(const std::string& errorMessage);
-    static ResolvedValue FailPath(const std::string& path, const std::string& errorMessage);
-    static ResolvedValue FailFunctionCall(const std::string& functionName, const std::string& errorMessage);
-    static ResolvedValue FailInvalid(const std::string& errorMessage);
+    static ResolvedValue OkLiteral(const JsonValue& valueVal);
+    static ResolvedValue OkExpression(const JsonValue& valueVal);
+    static ResolvedValue OkPath(const JsonValue& valueVal, const std::string& pathVal);
+    static ResolvedValue OkFunctionCall(const JsonValue& valueVal, const std::string& functionNameVal);
+    static ResolvedValue FailExpression(const std::string& errorMessageVal);
+    static ResolvedValue FailPath(const std::string& pathVal, const std::string& errorMessageVal);
+    static ResolvedValue FailFunctionCall(const std::string& functionNameVal, const std::string& errorMessageVal);
+    static ResolvedValue FailInvalid(const std::string& errorMessageVal);
 };
 
 } // namespace NativeModule

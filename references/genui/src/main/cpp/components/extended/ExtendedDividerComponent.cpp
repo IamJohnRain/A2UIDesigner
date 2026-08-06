@@ -139,12 +139,9 @@ std::string ExtendedDividerComponent::GetStrokeWidthUnitForTest() const
 }
 #endif
 
-void ExtendedDividerComponent::ApplyPrivateAttributes(const JsonValue& descriptor)
+void ExtendedDividerComponent::ApplyStrokeWidthPrivateAttribute(const JsonValue& styles, const std::string& componentId)
 {
     static constexpr const char* STROKE_WIDTH_UNIT_LABELS[] = { "vp", "fp", "px", "%" };
-    JsonValue styles = descriptor.GetItem("styles");
-    const std::string componentId = GetComponentId();
-
     JsonValue strokeWidthValue = styles.GetItem("strokeWidth");
     bool strokeWidthUsesDeferredResolve =
         IsPathBindingDescriptorValue(strokeWidthValue) || IsExpressionCandidate(strokeWidthValue);
@@ -192,35 +189,10 @@ void ExtendedDividerComponent::ApplyPrivateAttributes(const JsonValue& descripto
         LogDividerDfxEvent(componentId, "ApplyPrivateAttributes", "strokeWidth", strokeWidthValue, false,
             DividerDfxDecision::FALLBACK, "usingDefault=1px");
     }
+}
 
-    JsonValue verticalValue = styles.GetItem("vertical");
-    bool verticalUsesDeferredResolve =
-        IsPathBindingDescriptorValue(verticalValue) || IsExpressionCandidate(verticalValue);
-    DividerDfxDecision verticalDecision =
-        styles.IsObject() && styles.Has("vertical") ? DividerDfxDecision::APPLIED : DividerDfxDecision::FALLBACK;
-    if (verticalDecision == DividerDfxDecision::APPLIED) {
-        if (verticalValue.IsBool() || verticalUsesDeferredResolve) {
-            ApplyDeclaredPropertyOrFallback(styles, "vertical");
-        } else {
-            RemoveBindingsForProperty("vertical");
-            ApplyRuntimeProperty("vertical", JsonValue(), false);
-            ReportStyleWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH, "vertical",
-                std::string("Property vertical expects boolean value, got type '") + verticalValue.GetTypeName() +
-                    "', fallback to default value");
-            LogDividerDfxEvent(componentId, "ApplyPrivateAttributes", "vertical", verticalValue, false,
-                DividerDfxDecision::FALLBACK, "vertical=" + std::string(ToBoolLabel(vertical_)));
-        }
-
-        if (verticalValue.IsBool() || verticalUsesDeferredResolve) {
-            LogDividerDfxEvent(componentId, "ApplyPrivateAttributes", "vertical", verticalValue, false,
-                DividerDfxDecision::APPLIED, "vertical=" + std::string(ToBoolLabel(vertical_)));
-        }
-    } else {
-        ApplyRuntimeProperty("vertical", JsonValue(), false);
-        LogDividerDfxEvent(componentId, "ApplyPrivateAttributes", "vertical", verticalValue, false,
-            DividerDfxDecision::FALLBACK, "vertical=" + std::string(ToBoolLabel(vertical_)));
-    }
-
+void ExtendedDividerComponent::ApplyColorPrivateAttribute(const JsonValue& styles, const std::string& componentId)
+{
     JsonValue colorValue = styles.GetItem("color");
     bool colorUsesDeferredResolve = IsPathBindingDescriptorValue(colorValue) || IsExpressionCandidate(colorValue);
     DividerDfxDecision colorDecision =
@@ -259,6 +231,44 @@ void ExtendedDividerComponent::ApplyPrivateAttributes(const JsonValue& descripto
         LogDividerDfxEvent(componentId, "ApplyPrivateAttributes", "color", colorValue, false,
             DividerDfxDecision::FALLBACK, "useDefaultColor=true, color=" + std::to_string(color_));
     }
+}
+
+void ExtendedDividerComponent::ApplyPrivateAttributes(const JsonValue& descriptor)
+{
+    JsonValue styles = descriptor.GetItem("styles");
+    const std::string componentId = GetComponentId();
+
+    ApplyStrokeWidthPrivateAttribute(styles, componentId);
+
+    JsonValue verticalValue = styles.GetItem("vertical");
+    bool verticalUsesDeferredResolve =
+        IsPathBindingDescriptorValue(verticalValue) || IsExpressionCandidate(verticalValue);
+    DividerDfxDecision verticalDecision =
+        styles.IsObject() && styles.Has("vertical") ? DividerDfxDecision::APPLIED : DividerDfxDecision::FALLBACK;
+    if (verticalDecision == DividerDfxDecision::APPLIED) {
+        if (verticalValue.IsBool() || verticalUsesDeferredResolve) {
+            ApplyDeclaredPropertyOrFallback(styles, "vertical");
+        } else {
+            RemoveBindingsForProperty("vertical");
+            ApplyRuntimeProperty("vertical", JsonValue(), false);
+            ReportStyleWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH, "vertical",
+                std::string("Property vertical expects boolean value, got type '") + verticalValue.GetTypeName() +
+                    "', fallback to default value");
+            LogDividerDfxEvent(componentId, "ApplyPrivateAttributes", "vertical", verticalValue, false,
+                DividerDfxDecision::FALLBACK, "vertical=" + std::string(ToBoolLabel(vertical_)));
+        }
+
+        if (verticalValue.IsBool() || verticalUsesDeferredResolve) {
+            LogDividerDfxEvent(componentId, "ApplyPrivateAttributes", "vertical", verticalValue, false,
+                DividerDfxDecision::APPLIED, "vertical=" + std::string(ToBoolLabel(vertical_)));
+        }
+    } else {
+        ApplyRuntimeProperty("vertical", JsonValue(), false);
+        LogDividerDfxEvent(componentId, "ApplyPrivateAttributes", "vertical", verticalValue, false,
+            DividerDfxDecision::FALLBACK, "vertical=" + std::string(ToBoolLabel(vertical_)));
+    }
+
+    ApplyColorPrivateAttribute(styles, componentId);
 }
 
 void ExtendedDividerComponent::ApplyComponentSpecificStyles(const JsonValue& styles, ArkUINodeApiAdapter&)

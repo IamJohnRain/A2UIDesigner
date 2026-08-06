@@ -48,6 +48,8 @@ private:
     CrossLanguageAttributeBridge(const CrossLanguageAttributeBridge&) = delete;
     CrossLanguageAttributeBridge& operator=(const CrossLanguageAttributeBridge&) = delete;
 
+    void PopulateRequestObject(napi_value obj, const CrossLanguageAttributeRequest& request) const;
+
     napi_env napiEnv_ = nullptr;
     napi_ref callbackRef_ = nullptr;
 };

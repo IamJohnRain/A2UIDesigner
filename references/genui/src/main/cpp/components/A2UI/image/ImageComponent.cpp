@@ -92,57 +92,61 @@ namespace NativeModule {
 
 ImageComponent::ImageComponent() : A2UIComponent(ArkUINodeApiAdapter::CreateNode(A2UINodeType::IMAGE)) {}
 
+PropertyDeclaration ImageComponent::CreateUrlPropertyDeclaration()
+{
+    return PropertyDeclaration { .name = "url",
+        .type = PropertyValueType::STRING,
+        .allowDynamic = true,
+        .fallbackString = "",
+        .applyValue = [this](const JsonValue& value) { SetSrc(value.GetStringValue("")); } };
+}
+
+PropertyDeclaration ImageComponent::CreateDescriptionPropertyDeclaration()
+{
+    return PropertyDeclaration { .name = "description",
+        .type = PropertyValueType::STRING,
+        .allowDynamic = true,
+        .fallbackString = "",
+        .applyValue = [this](const JsonValue& value) { SetAlt(value.GetStringValue("")); } };
+}
+
+PropertyDeclaration ImageComponent::CreateFitPropertyDeclaration()
+{
+    std::string defaultFit = ResolveDefaultFitValueForVariant(g_imageFitFallbackVariant);
+    return PropertyDeclaration { .name = "fit",
+        .type = PropertyValueType::ENUM_STRING,
+        .allowDynamic = false,
+        .fallbackString = defaultFit,
+        .enumAllowed = { "contain", "cover", "fill", "scaleDown", "none" },
+        .enumFallback = defaultFit,
+        .applyValue = [this, defaultFit](
+                          const JsonValue& value) { SetObjectFit(ParseObjectFit(value.GetStringValue(defaultFit))); } };
+}
+
+PropertyDeclaration ImageComponent::CreateVariantPropertyDeclaration()
+{
+    return PropertyDeclaration { .name = "variant",
+        .type = PropertyValueType::ENUM_STRING,
+        .allowDynamic = false,
+        .fallbackString = "mediumFeature",
+        .enumAllowed = { "icon", "avatar", "smallFeature", "mediumFeature", "largeFeature", "header" },
+        .enumFallback = "mediumFeature",
+        .applyValue = [this](const JsonValue& value) { ApplyVariantPreset(value.GetStringValue("mediumFeature")); } };
+}
+
 PropertyDeclaration ImageComponent::GetPrivatePropertyDeclaration(const std::string& propertyName)
 {
-    static const std::map<std::string, std::function<PropertyDeclaration(ImageComponent&)>> declarations = {
-        { "url",
-            [](ImageComponent& imageComponent) {
-                return PropertyDeclaration { .name = "url",
-                    .type = PropertyValueType::STRING,
-                    .allowDynamic = true,
-                    .fallbackString = "",
-                    .applyValue = [&imageComponent](
-                                      const JsonValue& value) { imageComponent.SetSrc(value.GetStringValue("")); } };
-            } },
-        { "description",
-            [](ImageComponent& imageComponent) {
-                return PropertyDeclaration { .name = "description",
-                    .type = PropertyValueType::STRING,
-                    .allowDynamic = true,
-                    .fallbackString = "",
-                    .applyValue = [&imageComponent](
-                                      const JsonValue& value) { imageComponent.SetAlt(value.GetStringValue("")); } };
-            } },
-        { "fit",
-            [](ImageComponent& imageComponent) {
-                std::string defaultFit = ResolveDefaultFitValueForVariant(g_imageFitFallbackVariant);
-                return PropertyDeclaration { .name = "fit",
-                    .type = PropertyValueType::ENUM_STRING,
-                    .allowDynamic = false,
-                    .fallbackString = defaultFit,
-                    .enumAllowed = { "contain", "cover", "fill", "scaleDown", "none" },
-                    .enumFallback = defaultFit,
-                    .applyValue = [&imageComponent, defaultFit](const JsonValue& value) {
-                        imageComponent.SetObjectFit(imageComponent.ParseObjectFit(value.GetStringValue(defaultFit)));
-                    } };
-            } },
-        { "variant",
-            [](ImageComponent& imageComponent) {
-                return PropertyDeclaration { .name = "variant",
-                    .type = PropertyValueType::ENUM_STRING,
-                    .allowDynamic = false,
-                    .fallbackString = "mediumFeature",
-                    .enumAllowed = { "icon", "avatar", "smallFeature", "mediumFeature", "largeFeature", "header" },
-                    .enumFallback = "mediumFeature",
-                    .applyValue = [&imageComponent](const JsonValue& value) {
-                        imageComponent.ApplyVariantPreset(value.GetStringValue("mediumFeature"));
-                    } };
-            } }
-    };
-
-    auto it = declarations.find(propertyName);
-    if (it != declarations.end()) {
-        return it->second(*this);
+    if (propertyName == "url") {
+        return CreateUrlPropertyDeclaration();
+    }
+    if (propertyName == "description") {
+        return CreateDescriptionPropertyDeclaration();
+    }
+    if (propertyName == "fit") {
+        return CreateFitPropertyDeclaration();
+    }
+    if (propertyName == "variant") {
+        return CreateVariantPropertyDeclaration();
     }
     return {};
 }

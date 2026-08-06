@@ -1,0 +1,16 @@
+{
+  "type": "object",
+  "description": "Stops execution of the current event handler chain.",
+  "properties": {
+    "call": {
+      "const": "break"
+    },
+    "returnType": {
+      "const": "void"
+    }
+  },
+  "required": [
+    "call"
+  ],
+  "unevaluatedProperties": false
+}

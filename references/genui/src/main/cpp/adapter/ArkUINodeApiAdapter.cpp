@@ -20,6 +20,7 @@
 #include <utility>
 
 #include "A2UIArkUITypeConverter.h"
+#include "ArkUIConstraintSizeAdapter.h"
 #include "ArkUINativeAPI.h"
 
 namespace NativeModule {
@@ -89,6 +90,30 @@ int32_t ResetAttributeInternal(ArkUI_NodeHandle node, ArkUI_NodeAttributeType at
         return -1;
     }
     return api->resetAttribute(node, attribute);
+}
+
+int32_t SetParentLayoutAttribute(ArkUI_NodeHandle node, ArkUI_NodeAttributeType attribute, ArkUI_AttributeItem* item)
+{
+    ArkUI_NodeHandle content = ArkUIConstraintSizeAdapter::GetContentNode(node);
+    ArkUI_NodeHandle mount = ArkUIConstraintSizeAdapter::GetMountNode(content);
+    int32_t contentResult = SetAttributeInternal(content, attribute, item);
+    if (mount == content) {
+        return contentResult;
+    }
+    int32_t mountResult = SetAttributeInternal(mount, attribute, item);
+    return contentResult != A2UI_ERROR_CODE_NO_ERROR ? contentResult : mountResult;
+}
+
+int32_t ResetParentLayoutAttribute(ArkUI_NodeHandle node, ArkUI_NodeAttributeType attribute)
+{
+    ArkUI_NodeHandle content = ArkUIConstraintSizeAdapter::GetContentNode(node);
+    ArkUI_NodeHandle mount = ArkUIConstraintSizeAdapter::GetMountNode(content);
+    int32_t contentResult = ResetAttributeInternal(content, attribute);
+    if (mount == content) {
+        return contentResult;
+    }
+    int32_t mountResult = ResetAttributeInternal(mount, attribute);
+    return contentResult != A2UI_ERROR_CODE_NO_ERROR ? contentResult : mountResult;
 }
 
 int32_t SetFloatAttribute(ArkUI_NodeHandle nodeHandle, ArkUI_NodeAttributeType attribute, float value)
@@ -405,7 +430,10 @@ int32_t ArkUINodeApiAdapter::DialogEnableCustomStyle(A2UINativeDialogHandle hand
     return api->enableCustomStyle(ToArkUINativeDialogHandle(handle), enable);
 }
 
-ArkUINodeApiAdapter::~ArkUINodeApiAdapter() = default;
+ArkUINodeApiAdapter::~ArkUINodeApiAdapter()
+{
+    ArkUIConstraintSizeAdapter::Dispose(GetRootNode());
+}
 
 ArkUINodeApiAdapter::ArkUINodeApiAdapter(RootNodeGetter rootNodeGetter, ComponentIdGetter componentIdGetter,
     EdgeSetter marginSetter, ResetAction resetCommonMargin, ActionRegistrar onClickRegistrar)
@@ -639,7 +667,9 @@ int32_t ArkUINodeApiAdapter::SetNodeEnabled(ArkUI_NodeHandle nodeHandle, bool va
 
 int32_t ArkUINodeApiAdapter::SetNodeFlexShrink(ArkUI_NodeHandle nodeHandle, float value)
 {
-    return SetFloatAttribute(nodeHandle, NODE_FLEX_SHRINK, value);
+    ArkUI_NumberValue values[] = { { .f32 = value } };
+    ArkUI_AttributeItem item = { values, 1 };
+    return SetParentLayoutAttribute(nodeHandle, NODE_FLEX_SHRINK, &item);
 }
 
 int32_t ArkUINodeApiAdapter::SetNodeFontColor(ArkUI_NodeHandle nodeHandle, uint32_t value)
@@ -725,50 +755,35 @@ A2UIObjectFit ArkUINodeApiAdapter::ParseImageObjectFit(
     std::string normalizedFit = NormalizeImageObjectFitToken(fit);
     if (normalizedFit == "contain") {
         return A2UIObjectFit::CONTAIN;
-    }
-    if (normalizedFit == "cover") {
+    } else if (normalizedFit == "cover") {
         return A2UIObjectFit::COVER;
-    }
-    if (normalizedFit == "auto") {
+    } else if (normalizedFit == "auto") {
         return A2UIObjectFit::AUTO;
-    }
-    if (normalizedFit == "fill") {
+    } else if (normalizedFit == "fill") {
         return A2UIObjectFit::FILL;
-    }
-    if (normalizedFit == "scaledown") {
+    } else if (normalizedFit == "scaledown") {
         return A2UIObjectFit::SCALE_DOWN;
-    }
-    if (normalizedFit == "none") {
+    } else if (normalizedFit == "none") {
         return A2UIObjectFit::NONE;
-    }
-    if (normalizedFit == "topstart") {
+    } else if (normalizedFit == "topstart") {
         return A2UIObjectFit::NONE_AND_ALIGN_TOP_START;
-    }
-    if (normalizedFit == "top") {
+    } else if (normalizedFit == "top") {
         return A2UIObjectFit::NONE_AND_ALIGN_TOP;
-    }
-    if (normalizedFit == "topend") {
+    } else if (normalizedFit == "topend") {
         return A2UIObjectFit::NONE_AND_ALIGN_TOP_END;
-    }
-    if (normalizedFit == "start") {
+    } else if (normalizedFit == "start") {
         return A2UIObjectFit::NONE_AND_ALIGN_START;
-    }
-    if (normalizedFit == "center") {
+    } else if (normalizedFit == "center") {
         return A2UIObjectFit::NONE_AND_ALIGN_CENTER;
-    }
-    if (normalizedFit == "end") {
+    } else if (normalizedFit == "end") {
         return A2UIObjectFit::NONE_AND_ALIGN_END;
-    }
-    if (normalizedFit == "bottomstart") {
+    } else if (normalizedFit == "bottomstart") {
         return A2UIObjectFit::NONE_AND_ALIGN_BOTTOM_START;
-    }
-    if (normalizedFit == "bottom") {
+    } else if (normalizedFit == "bottom") {
         return A2UIObjectFit::NONE_AND_ALIGN_BOTTOM;
-    }
-    if (normalizedFit == "bottomend") {
+    } else if (normalizedFit == "bottomend") {
         return A2UIObjectFit::NONE_AND_ALIGN_BOTTOM_END;
-    }
-    if (normalizedFit == "matrix") {
+    } else if (normalizedFit == "matrix") {
         if (apiVersion < MIN_API_VERSION_IMAGE_OBJECT_FIT_MATRIX) {
             return fallbackObjectFit;
         }
@@ -779,7 +794,9 @@ A2UIObjectFit ArkUINodeApiAdapter::ParseImageObjectFit(
 
 int32_t ArkUINodeApiAdapter::SetNodeLayoutWeight(ArkUI_NodeHandle nodeHandle, uint32_t value)
 {
-    return SetUint32Attribute(nodeHandle, NODE_LAYOUT_WEIGHT, value);
+    ArkUI_NumberValue values[] = { { .u32 = value } };
+    ArkUI_AttributeItem item = { values, 1 };
+    return SetParentLayoutAttribute(nodeHandle, NODE_LAYOUT_WEIGHT, &item);
 }
 
 int32_t ArkUINodeApiAdapter::SetNodeLinearGradient(ArkUI_NodeHandle nodeHandle, float angle, int32_t direction,
@@ -969,6 +986,12 @@ int32_t ArkUINodeApiAdapter::SetNodeTextInputShowUnderline(ArkUI_NodeHandle node
     return SetBoolAttribute(nodeHandle, NODE_TEXT_INPUT_SHOW_UNDERLINE, value);
 }
 
+int32_t ArkUINodeApiAdapter::SetNodeTextInputStyle(ArkUI_NodeHandle nodeHandle, bool inlineStyle)
+{
+    int32_t style = inlineStyle ? ARKUI_TEXTINPUT_STYLE_INLINE : ARKUI_TEXTINPUT_STYLE_DEFAULT;
+    return SetInt32Attribute(nodeHandle, NODE_TEXT_INPUT_STYLE, style);
+}
+
 int32_t ArkUINodeApiAdapter::SetNodeTextInputText(ArkUI_NodeHandle nodeHandle, const std::string& value)
 {
     return SetStringAttribute(nodeHandle, NODE_TEXT_INPUT_TEXT, value);
@@ -1137,14 +1160,16 @@ int32_t ArkUINodeApiAdapter::SetNodeMargin(
     ArkUI_NodeHandle nodeHandle, float top, float right, float bottom, float left)
 {
     ArkUI_NumberValue values[] = { { .f32 = top }, { .f32 = right }, { .f32 = bottom }, { .f32 = left } };
-    return SetNumberArrayAttribute(nodeHandle, NODE_MARGIN, values, 4);
+    ArkUI_AttributeItem item = { values, 4 };
+    return SetParentLayoutAttribute(nodeHandle, NODE_MARGIN, &item);
 }
 
 int32_t ArkUINodeApiAdapter::SetNodeMarginPercent(
     ArkUI_NodeHandle nodeHandle, float top, float right, float bottom, float left)
 {
     ArkUI_NumberValue values[] = { { .f32 = top }, { .f32 = right }, { .f32 = bottom }, { .f32 = left } };
-    return SetNumberArrayAttribute(nodeHandle, NODE_MARGIN_PERCENT, values, 4);
+    ArkUI_AttributeItem item = { values, 4 };
+    return SetParentLayoutAttribute(nodeHandle, NODE_MARGIN_PERCENT, &item);
 }
 
 int32_t ArkUINodeApiAdapter::SetNodePadding(
@@ -1159,6 +1184,21 @@ int32_t ArkUINodeApiAdapter::SetNodePaddingPercent(
 {
     ArkUI_NumberValue values[] = { { .f32 = top }, { .f32 = right }, { .f32 = bottom }, { .f32 = left } };
     return SetNumberArrayAttribute(nodeHandle, NODE_PADDING_PERCENT, values, 4);
+}
+
+int32_t ArkUINodeApiAdapter::SetNodePixelRoundNoForceRound(ArkUI_NodeHandle nodeHandle, int32_t apiVersion)
+{
+    if (nodeHandle == nullptr || apiVersion < MIN_API_VERSION_PIXEL_ROUND) {
+        return -1;
+    }
+    ArkUI_PixelRoundPolicy* policy = ArkUIOHApiAdapter::CreatePixelRoundPolicyNoForceRound();
+    if (policy == nullptr) {
+        return -1;
+    }
+    ArkUI_AttributeItem item = { nullptr, 0, nullptr, policy };
+    int32_t result = SetAttributeInternal(nodeHandle, NODE_PIXEL_ROUND, &item);
+    ArkUIOHApiAdapter::DisposePixelRoundPolicy(policy);
+    return result;
 }
 
 int32_t ArkUINodeApiAdapter::SetNodeRadioStyle(ArkUI_NodeHandle nodeHandle, uint32_t checkedBackgroundColor,
@@ -1456,7 +1496,7 @@ int32_t ArkUINodeApiAdapter::ResetNodeFlexOption(ArkUI_NodeHandle nodeHandle)
 
 int32_t ArkUINodeApiAdapter::ResetNodeFlexShrink(ArkUI_NodeHandle nodeHandle)
 {
-    return ResetAttributeInternal(nodeHandle, NODE_FLEX_SHRINK);
+    return ResetParentLayoutAttribute(nodeHandle, NODE_FLEX_SHRINK);
 }
 
 int32_t ArkUINodeApiAdapter::ResetNodeFlexSpace(ArkUI_NodeHandle nodeHandle)
@@ -1541,7 +1581,7 @@ int32_t ArkUINodeApiAdapter::ResetNodeImageSrc(ArkUI_NodeHandle nodeHandle)
 
 int32_t ArkUINodeApiAdapter::ResetNodeLayoutWeight(ArkUI_NodeHandle nodeHandle)
 {
-    return ResetAttributeInternal(nodeHandle, NODE_LAYOUT_WEIGHT);
+    return ResetParentLayoutAttribute(nodeHandle, NODE_LAYOUT_WEIGHT);
 }
 
 int32_t ArkUINodeApiAdapter::ResetNodeLinearGradient(ArkUI_NodeHandle nodeHandle)
@@ -1584,12 +1624,12 @@ int32_t ArkUINodeApiAdapter::ResetNodeMargin(ArkUI_NodeHandle nodeHandle)
     if (nodeHandle == GetRootNode() && resetCommonMargin_ != nullptr) {
         resetCommonMargin_();
     }
-    return ResetAttributeInternal(nodeHandle, NODE_MARGIN);
+    return ResetParentLayoutAttribute(nodeHandle, NODE_MARGIN);
 }
 
 int32_t ArkUINodeApiAdapter::ResetNodeMarginPercent(ArkUI_NodeHandle nodeHandle)
 {
-    return ResetAttributeInternal(nodeHandle, NODE_MARGIN_PERCENT);
+    return ResetParentLayoutAttribute(nodeHandle, NODE_MARGIN_PERCENT);
 }
 
 int32_t ArkUINodeApiAdapter::ResetNodeOpacity(ArkUI_NodeHandle nodeHandle)

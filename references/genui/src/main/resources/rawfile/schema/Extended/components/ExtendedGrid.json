@@ -1,5 +1,39 @@
 {
   "type": "object",
+  "$defs": {
+    "NonNegativeNumberValue": {
+      "oneOf": [
+        {
+          "type": "number",
+          "minimum": 0
+        },
+        {
+          "$ref": "../common_types.json#/$defs/ExtendedDynamicValueRef"
+        }
+      ]
+    },
+    "ResponsiveTemplateValue": {
+      "type": "object",
+      "properties": {
+        "xs": { "$ref": "../common_types.json#/$defs/ExtendedDynamicString" },
+        "sm": { "$ref": "../common_types.json#/$defs/ExtendedDynamicString" },
+        "md": { "$ref": "../common_types.json#/$defs/ExtendedDynamicString" },
+        "lg": { "$ref": "../common_types.json#/$defs/ExtendedDynamicString" },
+        "xl": { "$ref": "../common_types.json#/$defs/ExtendedDynamicString" }
+      },
+      "additionalProperties": false
+    },
+    "GridTemplateValue": {
+      "oneOf": [
+        {
+          "$ref": "../common_types.json#/$defs/ExtendedDynamicString"
+        },
+        {
+          "$ref": "#/$defs/ResponsiveTemplateValue"
+        }
+      ]
+    }
+  },
   "allOf": [
     {
       "$ref": "../common_types.json#/$defs/ComponentCommon"
@@ -21,22 +55,20 @@
           "type": "object",
           "properties": {
             "columnsTemplate": {
-              "$ref": "../common_types.json#/$defs/DynamicString",
+              "$ref": "#/$defs/GridTemplateValue",
               "description": "Grid column template such as 1fr 1fr 2fr."
             },
             "rowsTemplate": {
-              "$ref": "../common_types.json#/$defs/DynamicString",
+              "$ref": "#/$defs/GridTemplateValue",
               "description": "Grid row template such as 1fr 1fr 2fr."
             },
             "columnsGap": {
-              "$ref": "../common_types.json#/$defs/DynamicNumber",
-              "description": "Gap between columns.",
-              "minimum": 0
+              "$ref": "#/$defs/NonNegativeNumberValue",
+              "description": "Gap between columns."
             },
             "rowsGap": {
-              "$ref": "../common_types.json#/$defs/DynamicNumber",
-              "description": "Gap between rows.",
-              "minimum": 0
+              "$ref": "#/$defs/NonNegativeNumberValue",
+              "description": "Gap between rows."
             }
           },
           "additionalProperties": true

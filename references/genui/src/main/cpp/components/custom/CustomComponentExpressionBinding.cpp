@@ -1,9 +1,26 @@
+/*
+ * Copyright (c) 2026 Huawei Device Co., Ltd.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 #include "components/custom/CustomComponentExpressionBinding.h"
 
 #include <algorithm>
 #include <vector>
 
 #include "components/custom/CustomComponent.h"
+#include "utils/JsonAdapter.h"
+#include "utils/LogA2UI.h"
 
 #ifdef ENABLE_EXPRESSION_ENGINE
 #include "expression/DependencyCollector.h"
@@ -127,6 +144,76 @@ void RefreshCustomExpressionBindings(
 #else
     (void)value;
 #endif
+}
+
+JsonValue CustomComponent::CloneExpressionValue(const JsonValue& node) const
+{
+    std::unique_ptr<JsonAdapter> cloned = JsonAdapter::Clone(node);
+    return cloned != nullptr ? cloned->GetRoot() : JsonValue();
+}
+
+JsonValue CustomComponent::ResolveExpressionsInObject(const JsonValue& node, const std::string& path) const
+{
+    std::unique_ptr<JsonAdapter> adapter = JsonAdapter::CreateObject();
+    if (adapter == nullptr) {
+        return JsonValue();
+    }
+
+    JsonValue result = adapter->GetRoot();
+    for (JsonValue child = node.GetChild(); child.IsValid(); child = child.GetNext()) {
+        JsonValue resolvedChild = ResolveExpressionsInValue(child, path + "." + child.GetKey());
+        if (resolvedChild.IsValid()) {
+            result.Put(child.GetKey().c_str(), resolvedChild);
+        }
+    }
+    return result;
+}
+
+JsonValue CustomComponent::ResolveExpressionsInArray(const JsonValue& node, const std::string& path) const
+{
+    std::unique_ptr<JsonAdapter> adapter = JsonAdapter::CreateArray();
+    if (adapter == nullptr) {
+        return JsonValue();
+    }
+
+    JsonValue result = adapter->GetRoot();
+    for (int index = 0; index < node.GetArraySize(); ++index) {
+        JsonValue resolvedItem =
+            ResolveExpressionsInValue(node.GetArrayItem(index), path + "[" + std::to_string(index) + "]");
+        if (resolvedItem.IsValid()) {
+            result.Append(resolvedItem);
+        }
+    }
+    return result;
+}
+
+JsonValue CustomComponent::ResolveExpressionsInValue(const JsonValue& node, const std::string& path) const
+{
+    if (!node.IsValid()) {
+        return JsonValue();
+    }
+#ifdef ENABLE_EXPRESSION_ENGINE
+    if (node.IsString()) {
+        std::string raw = node.GetStringValue("");
+        if (ExpressionEngine::IsExpression(raw)) {
+            JsonValue resolved = EvaluateCustomExpression(raw);
+            if (resolved.IsValid()) {
+                return resolved;
+            }
+            LOG_A2UI(LOG_WARN,
+                "CustomComponent: expression resolve failed, raw value kept, type=%{public}s, path=%{public}s",
+                descriptor_.type.c_str(), path.c_str());
+        }
+        return CloneExpressionValue(node);
+    }
+    if (node.IsObject()) {
+        return ResolveExpressionsInObject(node, path);
+    }
+    if (node.IsArray()) {
+        return ResolveExpressionsInArray(node, path);
+    }
+#endif
+    return CloneExpressionValue(node);
 }
 
 } // namespace NativeModule

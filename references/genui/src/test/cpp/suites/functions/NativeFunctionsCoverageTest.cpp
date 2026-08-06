@@ -508,40 +508,43 @@ TEST_F(NativeFormatDateFunctionTest, should_parse_iso_with_hours_minutes_only)
 
 TEST_F(NativeFormatDateFunctionTest, ParseISO8601_should_reject_too_short_input)
 {
-    int year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0;
-    EXPECT_FALSE(NativeFormatDateFunction::ParseISO8601("short", year, month, day, hour, minute, second));
+    NativeFormatDateFunction::DateTimeParts parts;
+    EXPECT_FALSE(NativeFormatDateFunction::ParseISO8601("short", parts));
 }
 
 TEST_F(NativeFormatDateFunctionTest, ParseISO8601_should_reject_bad_separators)
 {
-    int year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0;
-    EXPECT_FALSE(NativeFormatDateFunction::ParseISO8601("2026/01/16", year, month, day, hour, minute, second));
+    NativeFormatDateFunction::DateTimeParts parts;
+    EXPECT_FALSE(NativeFormatDateFunction::ParseISO8601("2026/01/16", parts));
 }
 
 TEST_F(NativeFormatDateFunctionTest, ParseISO8601_should_parse_valid_date)
 {
-    int year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0;
-    EXPECT_TRUE(NativeFormatDateFunction::ParseISO8601("2026-01-16", year, month, day, hour, minute, second));
-    EXPECT_EQ(year, 2026);
-    EXPECT_EQ(month, 1);
-    EXPECT_EQ(day, 16);
+    NativeFormatDateFunction::DateTimeParts parts;
+    EXPECT_TRUE(NativeFormatDateFunction::ParseISO8601("2026-01-16", parts));
+    EXPECT_EQ(parts.year, 2026);
+    EXPECT_EQ(parts.month, 1);
+    EXPECT_EQ(parts.day, 16);
 }
 
 TEST_F(NativeFormatDateFunctionTest, ParseISO8601_should_parse_full_datetime)
 {
-    int year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0;
-    EXPECT_TRUE(NativeFormatDateFunction::ParseISO8601("2026-01-16T14:30:07", year, month, day, hour, minute, second));
-    EXPECT_EQ(year, 2026);
-    EXPECT_EQ(month, 1);
-    EXPECT_EQ(day, 16);
-    EXPECT_EQ(hour, 14);
-    EXPECT_EQ(minute, 30);
-    EXPECT_EQ(second, 7);
+    NativeFormatDateFunction::DateTimeParts parts;
+    EXPECT_TRUE(NativeFormatDateFunction::ParseISO8601("2026-01-16T14:30:07", parts));
+    EXPECT_EQ(parts.year, 2026);
+    EXPECT_EQ(parts.month, 1);
+    EXPECT_EQ(parts.day, 16);
+    EXPECT_EQ(parts.hour, 14);
+    EXPECT_EQ(parts.minute, 30);
+    EXPECT_EQ(parts.second, 7);
 }
 
 TEST_F(NativeFormatDateFunctionTest, ApplyPattern_should_handle_various_patterns)
 {
-    std::string result = NativeFormatDateFunction::ApplyPattern(2026, 1, 16, 14, 30, 7, "yyyy/MM/dd HH:mm:ss");
+    NativeFormatDateFunction::DateTimeParts parts = {
+        .year = 2026, .month = 1, .day = 16, .hour = 14, .minute = 30, .second = 7
+    };
+    std::string result = NativeFormatDateFunction::ApplyPattern(parts, "yyyy/MM/dd HH:mm:ss");
     EXPECT_EQ(result, "2026/01/16 14:30:07");
 }
 
@@ -2611,7 +2614,8 @@ TEST_F(NativeFormatDateFunctionTest, should_parse_iso_with_11_chars_T_but_no_tim
 
 TEST_F(NativeFormatDateFunctionTest, should_format_yyyy_with_short_year)
 {
-    std::string result = NativeFormatDateFunction::ApplyPattern(26, 1, 1, 0, 0, 0, "yyyy");
+    NativeFormatDateFunction::DateTimeParts parts = { .year = 26 };
+    std::string result = NativeFormatDateFunction::ApplyPattern(parts, "yyyy");
     EXPECT_EQ(result, "0026");
 }
 
@@ -2627,7 +2631,10 @@ TEST_F(NativeFormatDateFunctionTest, should_format_day_abbrev_for_monday)
 
 TEST_F(NativeFormatDateFunctionTest, should_handle_literal_text_in_pattern)
 {
-    std::string result = NativeFormatDateFunction::ApplyPattern(2026, 1, 16, 14, 30, 7, "|yyyy|");
+    NativeFormatDateFunction::DateTimeParts parts = {
+        .year = 2026, .month = 1, .day = 16, .hour = 14, .minute = 30, .second = 7
+    };
+    std::string result = NativeFormatDateFunction::ApplyPattern(parts, "|yyyy|");
     EXPECT_EQ(result, "|2026|");
 }
 
@@ -3203,6 +3210,7 @@ TEST_F(FormatStringDataModelTest, should_resolve_bool_from_data_model)
 TEST_F(FormatStringDataModelTest, should_resolve_missing_path_as_empty)
 {
     DynamicResolveContext ctx = MakeContext();
+    ctx.renderId = -1;
     auto adapter = JsonAdapter::Parse(R"({"value":"Missing: ${nonexistent}"})");
     ASSERT_NE(adapter, nullptr);
     FunctionResult result = function_.ExecuteWithContext(adapter->GetRoot(), ctx);
@@ -3394,33 +3402,36 @@ TEST_F(NativeEmailFunctionTest, should_reject_email_with_space_in_domain)
 
 TEST_F(NativeFormatDateFunctionTest, ParseISO8601_should_parse_T_with_hours_only_12_chars)
 {
-    int year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0;
-    EXPECT_TRUE(NativeFormatDateFunction::ParseISO8601("2026-01-16T14", year, month, day, hour, minute, second));
-    EXPECT_EQ(year, 2026);
-    EXPECT_EQ(month, 1);
-    EXPECT_EQ(day, 16);
-    EXPECT_EQ(hour, 0);
-    EXPECT_EQ(minute, 0);
+    NativeFormatDateFunction::DateTimeParts parts;
+    EXPECT_TRUE(NativeFormatDateFunction::ParseISO8601("2026-01-16T14", parts));
+    EXPECT_EQ(parts.year, 2026);
+    EXPECT_EQ(parts.month, 1);
+    EXPECT_EQ(parts.day, 16);
+    EXPECT_EQ(parts.hour, 0);
+    EXPECT_EQ(parts.minute, 0);
 }
 
 TEST_F(NativeFormatDateFunctionTest, ParseISO8601_should_parse_hours_minutes_only)
 {
-    int year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0;
-    EXPECT_TRUE(NativeFormatDateFunction::ParseISO8601("2026-01-16T14:30", year, month, day, hour, minute, second));
-    EXPECT_EQ(hour, 14);
-    EXPECT_EQ(minute, 30);
-    EXPECT_EQ(second, 0);
+    NativeFormatDateFunction::DateTimeParts parts;
+    EXPECT_TRUE(NativeFormatDateFunction::ParseISO8601("2026-01-16T14:30", parts));
+    EXPECT_EQ(parts.hour, 14);
+    EXPECT_EQ(parts.minute, 30);
+    EXPECT_EQ(parts.second, 0);
 }
 
 TEST_F(NativeFormatDateFunctionTest, ParseISO8601_should_reject_invalid_hour_minute)
 {
-    int year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0;
-    EXPECT_FALSE(NativeFormatDateFunction::ParseISO8601("2026-01-16TAB:cd", year, month, day, hour, minute, second));
+    NativeFormatDateFunction::DateTimeParts parts;
+    EXPECT_FALSE(NativeFormatDateFunction::ParseISO8601("2026-01-16TAB:cd", parts));
 }
 
 TEST_F(NativeFormatDateFunctionTest, should_format_yyyy_for_year_26)
 {
-    std::string result = NativeFormatDateFunction::ApplyPattern(26, 1, 16, 14, 30, 7, "yyyy");
+    NativeFormatDateFunction::DateTimeParts parts = {
+        .year = 26, .month = 1, .day = 16, .hour = 14, .minute = 30, .second = 7
+    };
+    std::string result = NativeFormatDateFunction::ApplyPattern(parts, "yyyy");
     EXPECT_EQ(result, "0026");
 }
 

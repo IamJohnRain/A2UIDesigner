@@ -17,7 +17,9 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <map>
+#include <sstream>
 #include <string>
 
 #include "components/ChildListSchemaValidationUtils.h"
@@ -50,6 +52,30 @@ struct ExtendedGridLazyAdapterConfig {
     SurfaceContext surfaceContext;
 };
 
+void InitializeLazyAdapterTemplate(GridAdapterNode& adapterNode, const ExtendedGridLazyAdapterConfig& config,
+    const ChildListDescriptor& childList, int itemCount)
+{
+    adapterNode.Initialize(config.templateComponentId, config.templatePath, itemCount, childList.resolvedIndexVarName,
+        childList.resolvedItemVarName);
+}
+
+void ConfigureLazyAdapterData(GridAdapterNode& adapterNode, const ExtendedGridLazyAdapterConfig& config,
+    const std::map<std::string, JsonValue>& inheritedLocalVariables)
+{
+    adapterNode.SetDataModel(config.dataModel);
+    adapterNode.SetTemplateDescriptor(config.templateDescriptor);
+    adapterNode.SetAllDescriptors(config.allDescriptors);
+    adapterNode.SetInheritedLocalVariables(inheritedLocalVariables);
+}
+
+void ConfigureLazyAdapterSurface(
+    GridAdapterNode& adapterNode, const ExtendedGridLazyAdapterConfig& config, bool wrapContentHeight)
+{
+    adapterNode.SetSurfaceInfo(config.surfaceId, config.renderId);
+    adapterNode.SetSurfaceContext(config.surfaceContext);
+    adapterNode.SetGridItemHeightWrapContent(wrapContentHeight);
+}
+
 bool IsDynamicStyleMember(const JsonValue& value)
 {
     return value.IsObject() && (value.Has("path") || value.Has("call"));
@@ -78,7 +104,8 @@ std::unique_ptr<JsonAdapter> ResolveDynamicStyleObjectMembers(
     DynamicResolveContext context = { .renderId = renderContext.renderId,
         .surfaceId = renderContext.surfaceId,
         .componentId = componentId,
-        .allowExpression = true };
+        .allowExpression = true,
+        .missingPathPolicy = MissingPathPolicy::DEFER_UNTIL_DATA_UPDATE };
     for (JsonValue child = styleObjectValue.GetChild(); child.IsValid(); child = child.GetNext()) {
         std::string key = child.GetKey();
         if (key.empty()) {
@@ -106,6 +133,43 @@ float NormalizeGridGap(float gap)
     return gap < 0.0F ? 0.0F : gap;
 }
 
+bool IsSupportedGridFractionToken(const std::string& token)
+{
+    if (token.size() <= 2 || token.compare(token.size() - 2, 2, "fr") != 0) {
+        return false;
+    }
+
+    bool hasDigit = false;
+    bool hasDecimalPoint = false;
+    for (size_t index = 0; index < token.size() - 2; ++index) {
+        const char current = token[index];
+        if (current >= '0' && current <= '9') {
+            hasDigit = true;
+            continue;
+        }
+        if (current == '.' && !hasDecimalPoint) {
+            hasDecimalPoint = true;
+            continue;
+        }
+        return false;
+    }
+    return hasDigit;
+}
+
+bool IsSupportedGridTemplate(const std::string& templateValue)
+{
+    std::istringstream stream(templateValue);
+    std::string token;
+    bool hasToken = false;
+    while (stream >> token) {
+        hasToken = true;
+        if (!IsSupportedGridFractionToken(token)) {
+            return false;
+        }
+    }
+    return hasToken;
+}
+
 void ApplyGridItemHeightPolicy(ArkUI_NodeHandle gridItemNode, bool wrapContent)
 {
     if (gridItemNode == nullptr) {
@@ -125,7 +189,7 @@ std::string ResolveGridTemplateOrDefault(const JsonValue& value)
         return DEFAULT_GRID_TEMPLATE;
     }
     std::string templateValue = value.GetStringValue("");
-    if (templateValue.empty()) {
+    if (!IsSupportedGridTemplate(templateValue)) {
         return DEFAULT_GRID_TEMPLATE;
     }
     return templateValue;
@@ -147,6 +211,53 @@ size_t BreakpointToIndex(Breakpoint breakpoint)
         default:
             return 1;
     }
+}
+
+std::optional<int> PrepareGridAdapterConfig(ExtendedGridLazyAdapterConfig& config, const ChildListDescriptor& childList,
+    SurfaceSlot& surfaceSlot, const std::string& componentId)
+{
+    const std::map<std::string, JsonValue>& descriptorStore = surfaceSlot.GetAllComponentDescriptorStore();
+    auto templateIt = descriptorStore.find(childList.templateComponentId);
+    if (templateIt == descriptorStore.end()) {
+        LOG_A2UI(LOG_WARN,
+            "ExtendedGridComponent::SetupLazyAdapter: template not found, componentId=%{public}s, "
+            "templateId=%{public}s",
+            componentId.c_str(), childList.templateComponentId.c_str());
+        return std::nullopt;
+    }
+    config.templateComponentId = childList.templateComponentId;
+    config.templatePath = childList.templatePath;
+    config.dataModel = surfaceSlot.GetOrCreateDataModel();
+    config.templateDescriptor = templateIt->second;
+    config.allDescriptors = descriptorStore;
+    config.surfaceId = surfaceSlot.GetSurfaceId();
+    config.renderId = surfaceSlot.GetRenderId();
+    config.surfaceContext = surfaceSlot.GetSurfaceContext();
+    int itemCount = 0;
+    bool isRelativePath = !config.templatePath.empty() && config.templatePath[0] != '/';
+    if (!isRelativePath) {
+        if (config.dataModel == nullptr) {
+            LOG_A2UI(LOG_ERROR,
+                "ExtendedGridComponent::SetupLazyAdapter: data model is null, templateComponentId=%{public}s",
+                config.templateComponentId.c_str());
+            return std::nullopt;
+        }
+        auto arrayOpt = config.dataModel->GetNode(config.templatePath);
+        if (!arrayOpt.has_value()) {
+            DynamicResolveContext context = { .renderId = config.renderId,
+                .surfaceId = config.surfaceId,
+                .componentId = componentId,
+                .missingPathPolicy = MissingPathPolicy::DEFER_UNTIL_DATA_UPDATE };
+            DynamicValueResolver::ReportMissingPath(context, config.templatePath);
+            LOG_A2UI(LOG_ERROR, "ExtendedGridComponent::SetupLazyAdapter: data path not found, path=%{public}s",
+                config.templatePath.c_str());
+            return itemCount;
+        }
+        if (arrayOpt.value().IsArray()) {
+            itemCount = arrayOpt.value().GetArraySize();
+        }
+    }
+    return itemCount;
 }
 
 } // namespace
@@ -192,66 +303,24 @@ bool ExtendedGridComponent::SetupLazyAdapter(const ChildListDescriptor& childLis
     if (nativeView_ == nullptr) {
         return false;
     }
-    const std::map<std::string, JsonValue>& descriptorStore = surfaceSlot.GetAllComponentDescriptorStore();
-    auto templateIt = descriptorStore.find(childList.templateComponentId);
-    if (templateIt == descriptorStore.end()) {
-        LOG_A2UI(LOG_WARN,
-            "ExtendedGridComponent::SetupLazyAdapter: template not found, componentId=%{public}s, "
-            "templateId=%{public}s",
-            GetComponentId().c_str(), childList.templateComponentId.c_str());
+    ExtendedGridLazyAdapterConfig config;
+    auto itemCountOpt = PrepareGridAdapterConfig(config, childList, surfaceSlot, GetComponentId());
+    if (!itemCountOpt.has_value()) {
         return false;
     }
+    int itemCount = *itemCountOpt;
 
-    ExtendedGridLazyAdapterConfig config;
-    config.templateComponentId = childList.templateComponentId;
-    config.templatePath = childList.templatePath;
-    config.dataModel = surfaceSlot.GetOrCreateDataModel();
-    config.templateDescriptor = templateIt->second;
-    config.allDescriptors = descriptorStore;
-    config.surfaceId = surfaceSlot.GetSurfaceId();
-    config.renderId = surfaceSlot.GetRenderId();
-    config.surfaceContext = surfaceSlot.GetSurfaceContext();
-
-    int itemCount = 0;
-    bool isRelativePath = !config.templatePath.empty() && config.templatePath[0] != '/';
-    if (!isRelativePath) {
-        if (config.dataModel == nullptr) {
-            LOG_A2UI(LOG_ERROR,
-                "ExtendedGridComponent::SetupLazyAdapter: data model is null, templateComponentId=%{public}s",
-                config.templateComponentId.c_str());
-            return false;
-        }
-        auto arrayOpt = config.dataModel->GetNode(config.templatePath);
-        if (!arrayOpt.has_value()) {
-            LOG_A2UI(LOG_ERROR, "ExtendedGridComponent::SetupLazyAdapter: data path not found, path=%{public}s",
-                config.templatePath.c_str());
-            return false;
-        }
-        itemCount = arrayOpt.value().GetArraySize();
-    }
-
+    bool wrapContentHeight = ShouldGridItemsWrapContentHeight();
     if (adapterNode_ == nullptr) {
         auto adapterNode = std::make_shared<GridAdapterNode>();
-        adapterNode->Initialize(config.templateComponentId, config.templatePath, itemCount,
-            childList.resolvedIndexVarName, childList.resolvedItemVarName);
-        adapterNode->SetDataModel(config.dataModel);
-        adapterNode->SetTemplateDescriptor(config.templateDescriptor);
-        adapterNode->SetAllDescriptors(config.allDescriptors);
-        adapterNode->SetInheritedLocalVariables(GetLocalVariables());
-        adapterNode->SetSurfaceInfo(config.surfaceId, config.renderId);
-        adapterNode->SetSurfaceContext(config.surfaceContext);
-        adapterNode->SetGridItemHeightWrapContent(ShouldGridItemsWrapContentHeight());
+        InitializeLazyAdapterTemplate(*adapterNode, config, childList, itemCount);
+        ConfigureLazyAdapterData(*adapterNode, config, GetLocalVariables());
+        ConfigureLazyAdapterSurface(*adapterNode, config, wrapContentHeight);
         adapterNode_ = adapterNode;
     } else {
-        adapterNode_->Initialize(config.templateComponentId, config.templatePath, itemCount,
-            childList.resolvedIndexVarName, childList.resolvedItemVarName);
-        adapterNode_->SetDataModel(config.dataModel);
-        adapterNode_->SetTemplateDescriptor(config.templateDescriptor);
-        adapterNode_->SetAllDescriptors(config.allDescriptors);
-        adapterNode_->SetInheritedLocalVariables(GetLocalVariables());
-        adapterNode_->SetSurfaceInfo(config.surfaceId, config.renderId);
-        adapterNode_->SetSurfaceContext(config.surfaceContext);
-        adapterNode_->SetGridItemHeightWrapContent(ShouldGridItemsWrapContentHeight());
+        InitializeLazyAdapterTemplate(*adapterNode_, config, childList, itemCount);
+        ConfigureLazyAdapterData(*adapterNode_, config, GetLocalVariables());
+        ConfigureLazyAdapterSurface(*adapterNode_, config, wrapContentHeight);
         adapterNode_->IncrementTemplateVersion();
         adapterNode_->UpdateItemCount(itemCount);
         adapterNode_->ReloadAllItems();
@@ -272,6 +341,7 @@ bool ExtendedGridComponent::SetupLazyAdapter(const ChildListDescriptor& childLis
 void ExtendedGridComponent::ApplyPrivateAttributes(const JsonValue& descriptor)
 {
     static_cast<void>(descriptor);
+    ArkUINodeApiAdapter::SetNodePixelRoundNoForceRound(nativeView_, GetRenderContext().apiVersion);
     ArkUINodeApiAdapter::SetNodeGridAlignItems(nativeView_, GRID_ITEM_ALIGNMENT_DEFAULT_VALUE);
     ApplyColumnsTemplateForContext(ResolveThemeContext());
     SetColumnsGap(0.0F);
@@ -299,7 +369,7 @@ void ExtendedGridComponent::ValidateComponentSpecificStylesSchema(const JsonValu
 
         const std::string propertyPath = "styles." + std::string(styleName);
         if (value.IsString()) {
-            if (value.GetStringValue("").empty()) {
+            if (!IsSupportedGridTemplate(value.GetStringValue(""))) {
                 ReportStyleInvalidValue(propertyPath);
             }
             return;
@@ -326,7 +396,7 @@ void ExtendedGridComponent::ValidateComponentSpecificStylesSchema(const JsonValu
                 ReportStyleTypeMismatch(breakpointPath, "string");
                 return;
             }
-            if (breakpointValue.GetStringValue("").empty()) {
+            if (!IsSupportedGridTemplate(breakpointValue.GetStringValue(""))) {
                 ReportStyleInvalidValue(breakpointPath);
                 return;
             }
@@ -355,8 +425,8 @@ void ExtendedGridComponent::ValidateComponentSpecificDynamicStylesDfx(
         JsonValue value = styles.GetItem(styleName);
         const std::string propertyPath = "styles." + std::string(styleName);
         if (value.IsString()) {
-            if (value.GetStringValue("").empty()) {
-                ReportDynamicStyleInvalidValue(propertyPath, "is empty");
+            if (!IsSupportedGridTemplate(value.GetStringValue(""))) {
+                ReportDynamicStyleInvalidValue(propertyPath, "is not a supported fr template");
             }
             return;
         }
@@ -378,8 +448,8 @@ void ExtendedGridComponent::ValidateComponentSpecificDynamicStylesDfx(
                 ReportDynamicStyleTypeMismatch(breakpointPath, "string");
                 return;
             }
-            if (breakpointValue.GetStringValue("").empty()) {
-                ReportDynamicStyleInvalidValue(breakpointPath, "is empty");
+            if (!IsSupportedGridTemplate(breakpointValue.GetStringValue(""))) {
+                ReportDynamicStyleInvalidValue(breakpointPath, "is not a supported fr template");
                 return;
             }
             hasAnyResponsiveValue = true;
@@ -398,8 +468,12 @@ void ExtendedGridComponent::ValidateComponentSpecificDynamicStylesDfx(
 
 void ExtendedGridComponent::OnConfigChange(const ThemeContext& context)
 {
-    ApplyColumnsTemplateForContext(context);
-    ApplyRowsTemplateForContext(context);
+    ThemeContext componentContext = context;
+    if (componentBreakpoint_.has_value()) {
+        componentContext.breakpoint = componentBreakpoint_.value();
+    }
+    ApplyColumnsTemplateForContext(componentContext);
+    ApplyRowsTemplateForContext(componentContext);
 }
 
 PropertyDeclaration ExtendedGridComponent::GetPrivatePropertyDeclaration(const std::string& propertyName)
@@ -407,13 +481,8 @@ PropertyDeclaration ExtendedGridComponent::GetPrivatePropertyDeclaration(const s
     return ExtendedComponent::GetPrivatePropertyDeclaration(propertyName);
 }
 
-void ExtendedGridComponent::ApplyComponentSpecificStyles(const JsonValue& styles, ArkUINodeApiAdapter& applier)
+void ExtendedGridComponent::ApplyColumnsTemplateStyle(const JsonValue& styles, bool isDeltaUpdate)
 {
-    static_cast<void>(applier);
-    if (!styles.IsObject()) {
-        return;
-    }
-    bool isDeltaUpdate = IsApplyingStyleDeltaUpdate();
     if (styles.Has("columnsTemplate")) {
         JsonValue columnsTemplateValue = styles.GetItem("columnsTemplate");
         std::unique_ptr<JsonAdapter> resolvedColumnsTemplate =
@@ -433,6 +502,16 @@ void ExtendedGridComponent::ApplyComponentSpecificStyles(const JsonValue& styles
         columnsTemplateConfig_.responsiveValues.fill("");
         ApplyColumnsTemplateForContext(ResolveThemeContext());
     }
+}
+
+void ExtendedGridComponent::ApplyComponentSpecificStyles(const JsonValue& styles, ArkUINodeApiAdapter& applier)
+{
+    static_cast<void>(applier);
+    if (!styles.IsObject()) {
+        return;
+    }
+    bool isDeltaUpdate = IsApplyingStyleDeltaUpdate();
+    ApplyColumnsTemplateStyle(styles, isDeltaUpdate);
     if (styles.Has("rowsTemplate")) {
         JsonValue rowsTemplateValue = styles.GetItem("rowsTemplate");
         std::unique_ptr<JsonAdapter> resolvedRowsTemplate =
@@ -463,6 +542,51 @@ void ExtendedGridComponent::ApplyComponentSpecificStyles(const JsonValue& styles
     } else if (!isDeltaUpdate) {
         SetRowsGap(0.0F);
     }
+}
+
+void ExtendedGridComponent::RegisterComponentSpecificListeners()
+{
+    bool useAreaChange = GetRenderContext().apiVersion < MIN_API_VERSION_SIZE_CHANGE;
+    RegisterNodeEventHandlerWithEvent(
+        useAreaChange ? A2UINodeEventType::ON_AREA_CHANGE : A2UINodeEventType::ON_SIZE_CHANGE,
+        [this, useAreaChange](A2UINodeEvent* event) { HandleSizeChange(event, useAreaChange); });
+}
+
+void ExtendedGridComponent::HandleSizeChange(A2UINodeEvent* event, bool isAreaChange)
+{
+    if (event == nullptr) {
+        LOG_A2UI(LOG_WARN, "ExtendedGridComponent::HandleSizeChange: event is null, componentId=%{public}s",
+            GetComponentId().c_str());
+        return;
+    }
+    A2UINodeComponentEvent* componentEvent = ArkUIOHApiAdapter::NodeEventGetNodeComponentEvent(event);
+    if (componentEvent == nullptr) {
+        LOG_A2UI(LOG_WARN, "ExtendedGridComponent::HandleSizeChange: component event is null, componentId=%{public}s",
+            GetComponentId().c_str());
+        return;
+    }
+
+    float oldWidth = componentEvent->data[0].f32;
+    float newWidth = componentEvent->data[isAreaChange ? 6 : 2].f32;
+    if (!std::isfinite(newWidth)) {
+        LOG_A2UI(LOG_WARN, "ExtendedGridComponent::HandleSizeChange: width is not finite, componentId=%{public}s",
+            GetComponentId().c_str());
+        return;
+    }
+    if (newWidth <= 0.0F || oldWidth == newWidth) {
+        return;
+    }
+
+    Breakpoint breakpoint = ResolveBreakpointFromWidth(newWidth);
+    if (componentBreakpoint_.has_value() && componentBreakpoint_.value() == breakpoint) {
+        return;
+    }
+    componentBreakpoint_ = breakpoint;
+    LOG_A2UI(LOG_INFO,
+        "ExtendedGridComponent::HandleSizeChange: breakpoint updated, componentId=%{public}s, "
+        "newWidth=%{public}f, breakpoint=%{public}d",
+        GetComponentId().c_str(), newWidth, static_cast<int32_t>(breakpoint));
+    OnConfigChange(ResolveThemeContext());
 }
 
 void ExtendedGridComponent::OnAddChild(const std::shared_ptr<Component>& child, size_t index)
@@ -599,10 +723,14 @@ void ExtendedGridComponent::ApplyRowsTemplateForContext(const ThemeContext& cont
 ThemeContext ExtendedGridComponent::ResolveThemeContext() const
 {
     std::shared_ptr<ThemeManager> themeManager = GetThemeManager();
+    ThemeContext context;
     if (themeManager != nullptr) {
-        return themeManager->GetContext();
+        context = themeManager->GetContext();
     }
-    return ThemeContext();
+    if (componentBreakpoint_.has_value()) {
+        context.breakpoint = componentBreakpoint_.value();
+    }
+    return context;
 }
 
 bool ExtendedGridComponent::ParseTemplateConfig(const JsonValue& value, GridTemplateConfig& config)
@@ -631,6 +759,9 @@ bool ExtendedGridComponent::ParseTemplateConfig(const JsonValue& value, GridTemp
         std::string templateValue = breakpointValue.GetStringValue("");
         if (templateValue.empty()) {
             continue;
+        }
+        if (!IsSupportedGridTemplate(templateValue)) {
+            return false;
         }
         parsedConfig.responsiveValues[index] = templateValue;
         hasAnyResponsiveValue = true;

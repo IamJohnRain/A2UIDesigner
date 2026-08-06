@@ -35,6 +35,18 @@ float ClampValue(float value, float min, float max)
     }
     return value;
 }
+
+PropertyDeclaration BuildMaxPropertyDeclaration(SliderComponent& sliderComponent)
+{
+    auto applyValue = [&sliderComponent](const JsonValue& value) {
+        sliderComponent.SetMaxValue(static_cast<float>(value.GetNumberValue(100.0)));
+    };
+    return PropertyDeclaration { .name = "max",
+        .type = PropertyValueType::NUMBER,
+        .allowDynamic = true,
+        .fallbackNumber = 100.0,
+        .applyValue = applyValue };
+}
 } // namespace
 
 SliderComponent::SliderComponent()
@@ -51,43 +63,37 @@ PropertyDeclaration SliderComponent::GetPrivatePropertyDeclaration(const std::st
     static const std::map<std::string, std::function<PropertyDeclaration(SliderComponent&)>> declarations = {
         { "label",
             [](SliderComponent& sliderComponent) {
+                auto applyValue = [&sliderComponent](
+                                      const JsonValue& value) { sliderComponent.SetLabel(value.GetStringValue("")); };
                 return PropertyDeclaration { .name = "label",
                     .type = PropertyValueType::STRING,
                     .allowDynamic = true,
                     .fallbackString = "",
-                    .applyValue = [&sliderComponent](
-                                      const JsonValue& value) { sliderComponent.SetLabel(value.GetStringValue("")); } };
+                    .applyValue = applyValue };
             } },
         { "value",
             [](SliderComponent& sliderComponent) {
+                auto applyValue = [&sliderComponent](const JsonValue& value) {
+                    sliderComponent.SetValue(static_cast<float>(value.GetNumberValue(0.0)));
+                };
                 return PropertyDeclaration { .name = "value",
                     .type = PropertyValueType::NUMBER,
                     .allowDynamic = true,
                     .fallbackNumber = 0.0,
-                    .applyValue = [&sliderComponent](const JsonValue& value) {
-                        sliderComponent.SetValue(static_cast<float>(value.GetNumberValue(0.0)));
-                    } };
+                    .applyValue = applyValue };
             } },
         { "min",
             [](SliderComponent& sliderComponent) {
+                auto applyValue = [&sliderComponent](const JsonValue& value) {
+                    sliderComponent.SetMinValue(static_cast<float>(value.GetNumberValue(0.0)));
+                };
                 return PropertyDeclaration { .name = "min",
                     .type = PropertyValueType::NUMBER,
                     .allowDynamic = true,
                     .fallbackNumber = 0.0,
-                    .applyValue = [&sliderComponent](const JsonValue& value) {
-                        sliderComponent.SetMinValue(static_cast<float>(value.GetNumberValue(0.0)));
-                    } };
+                    .applyValue = applyValue };
             } },
-        { "max",
-            [](SliderComponent& sliderComponent) {
-                return PropertyDeclaration { .name = "max",
-                    .type = PropertyValueType::NUMBER,
-                    .allowDynamic = true,
-                    .fallbackNumber = 100.0,
-                    .applyValue = [&sliderComponent](const JsonValue& value) {
-                        sliderComponent.SetMaxValue(static_cast<float>(value.GetNumberValue(100.0)));
-                    } };
-            } }
+        { "max", [](SliderComponent& sc) { return BuildMaxPropertyDeclaration(sc); } }
     };
 
     auto it = declarations.find(propertyName);

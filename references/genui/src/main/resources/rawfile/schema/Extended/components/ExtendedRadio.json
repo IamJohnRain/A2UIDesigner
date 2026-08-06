@@ -32,7 +32,7 @@
         },
         "unCheckedBorderColor": {
           "type": "string",
-          "description": "Border color in the unselected state. Hex color string. Default follows the switch-off outline theme color. Dark theme: #66FFFFFF. Light theme: #66000000."
+          "description": "Border color in the unselected state. Hex color string. The default for both dark and light themes is #33FFFFFF."
         },
         "indicatorColor": {
           "type": "string",

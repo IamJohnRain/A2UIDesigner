@@ -136,29 +136,36 @@ export class FunctionBridge {
     if (functionCall.call.length === 0) {
       return undefined;
     }
-    let functionItem: InnerFunctionItem | undefined =
-      FunctionBridge.findExecutableCatalogFunctionItem(renderId, functionCall.call);
-    if (functionItem === undefined || functionItem.functionCall === undefined) {
-      return undefined;
-    }
-
-    let args: LocalFunctionArgs = functionCall.args as LocalFunctionArgs;
-    let returnType: string = functionCall.returnType ?? 'any';
-    let context: LocalFunctionContext = {
+    let request: LocalFunctionRequest = {
       surfaceId: surfaceId,
       componentId: componentId,
       renderId: renderId,
-      returnType: returnType,
-      onError: (_errorMessage: string): void => {},
-      resolver: FunctionBridge.createDynamicValueResolver(surfaceId, componentId, renderId)
+      functionName: functionCall.call,
+      args: functionCall.args as A2UIValueType,
+      returnType: functionCall.returnType ?? 'any'
     };
-    try {
-      let result: LocalFunctionResult = functionItem.functionCall(args, context);
-      return FunctionBridge.validateReturnType(returnType, result) ? result : undefined;
-    } catch (error) {
-      console.warn(`[FunctionBridge] invoke failed: ${JSON.stringify(error)}`);
-      return undefined;
-    }
+    let response: LocalFunctionResponse = FunctionBridge.invokeLocalFunction(request);
+    return response.success ? response.value : undefined;
+  }
+
+  public static reportDynamicValueResolveError(
+    surfaceId: string,
+    componentId: string,
+    renderId: number | undefined,
+    errorMessage: string
+  ): void {
+    let request: LocalFunctionRequest = {
+      surfaceId: surfaceId,
+      componentId: componentId,
+      renderId: renderId,
+      functionName: '<dynamic-value>',
+      returnType: 'any'
+    };
+    FunctionBridge.notifyLocalFunctionError(
+      request,
+      SurfaceErrorCode.DYNAMIC_VALUE_RESOLVE_FAILED,
+      errorMessage
+    );
   }
 
   public static setHostContext(hostContext: common.UIAbilityContext): void {

@@ -30,10 +30,6 @@ std::string StyleApplyUtils::TrimToken(const std::string& value)
 
 bool StyleApplyUtils::ParseColor(const JsonValue& value, uint32_t& color)
 {
-    if (value.IsNumber()) {
-        color = value.GetUint32Value(0);
-        return true;
-    }
     if (!value.IsString()) {
         return false;
     }

@@ -31,6 +31,7 @@
 
 #include "SurfaceSlot.h"
 #include "TestFixture.h"
+#include "mock_arkui_native_provider.h"
 
 using namespace NativeModule;
 
@@ -74,6 +75,17 @@ void ResetCrossLanguageAttributeBridge()
     auto* bridge = reinterpret_cast<CrossLanguageAttributeBridgeMirror*>(&CrossLanguageAttributeBridge::GetInstance());
     bridge->napiEnv_ = nullptr;
     bridge->callbackRef_ = nullptr;
+}
+
+const MockArkUINativeProvider::SetAttributeRecord* FindLastAttributeForNode(
+    const MockArkUINativeProvider& provider, ArkUI_NodeHandle node, int32_t attribute)
+{
+    for (auto iter = provider.setAttributeRecords_.rbegin(); iter != provider.setAttributeRecords_.rend(); ++iter) {
+        if (iter->nodeHandle == node && iter->attribute == attribute) {
+            return &(*iter);
+        }
+    }
+    return nullptr;
 }
 
 } // namespace
@@ -595,6 +607,35 @@ TEST_F(FontScaleModeTextInputTest, should_apply_minFontSize_and_maxFontSize_when
     ASSERT_NE(input, nullptr);
     EXPECT_FLOAT_EQ(input->GetMinFontSizeForTest(), 10.0F);
     EXPECT_FLOAT_EQ(input->GetMaxFontSizeForTest(), 28.0F);
+}
+
+TEST_F(FontScaleModeTextInputTest, should_switch_to_inline_style_when_max_lines_or_word_break_is_set)
+{
+    slot_.SetCatalog(BuildExtendedProtocolCatalog({ "TextInput" }));
+    std::unique_ptr<JsonAdapter> message = JsonAdapter::Parse(R"({
+        "components": [{
+            "id": "max-lines",
+            "component": "TextInput",
+            "text": "hello",
+            "styles": { "maxLines": 2 }
+        }, {
+            "id": "word-break",
+            "component": "TextInput",
+            "text": "world",
+            "styles": { "wordBreak": "breakWord" }
+        }]
+    })");
+    ASSERT_NE(message, nullptr);
+    ASSERT_TRUE(slot_.UpdateComponents(message->GetRoot()));
+
+    for (const char* id : { "max-lines", "word-break" }) {
+        auto input = std::dynamic_pointer_cast<ExtendedTextInputComponent>(slot_.FindComponentById(id));
+        ASSERT_NE(input, nullptr);
+        const auto* style = FindLastAttributeForNode(*mockArkUIPtr_, input->GetNativeView(), NODE_TEXT_INPUT_STYLE);
+        ASSERT_NE(style, nullptr);
+        ASSERT_FALSE(style->values.empty());
+        EXPECT_EQ(style->values[0].i32, ARKUI_TEXTINPUT_STYLE_INLINE);
+    }
 }
 
 TEST_F(FontScaleModeTextInputTest, should_store_followSystem_mode_when_fontScaleMode_is_followSystem)

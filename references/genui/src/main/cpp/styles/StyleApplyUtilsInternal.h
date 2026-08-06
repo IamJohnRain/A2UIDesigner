@@ -34,15 +34,8 @@ inline std::string NormalizeHexColor(const std::string& rawValue)
     if (rawValue.empty() || rawValue[0] != '#') {
         return "";
     }
-
     std::string hex = rawValue.substr(1);
-    if (hex.size() == 6) {
-        return "FF" + hex;
-    }
-    if (hex.size() == 8) {
-        return hex;
-    }
-    return "";
+    return (hex.size() == 6) ? ("FF" + hex) : ((hex.size() == 8) ? hex : "");
 }
 
 inline bool ParseFloatToken(const std::string& token, float& value)

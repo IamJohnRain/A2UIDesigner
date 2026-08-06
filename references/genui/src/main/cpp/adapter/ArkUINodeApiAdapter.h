@@ -26,6 +26,9 @@
 namespace NativeModule {
 
 constexpr int32_t MIN_API_VERSION_LAYOUT_POLICY = 21;
+constexpr int32_t MIN_API_VERSION_PIXEL_ROUND = 21;
+constexpr int32_t MIN_API_VERSION_SIZE_CHANGE = 21;
+constexpr int32_t MIN_API_VERSION_CUSTOM_MEASURE = 12;
 
 class ArkUINodeApiAdapter {
 public:
@@ -145,6 +148,8 @@ public:
     static int32_t SetNodeOpacity(ArkUI_NodeHandle nodeHandle, float value);
     static int32_t SetNodePadding(ArkUI_NodeHandle nodeHandle, float top, float right, float bottom, float left);
     static int32_t SetNodePaddingPercent(ArkUI_NodeHandle nodeHandle, float top, float right, float bottom, float left);
+    static int32_t SetNodePixelRoundNoForceRound(
+        ArkUI_NodeHandle nodeHandle, int32_t apiVersion = MIN_API_VERSION_PIXEL_ROUND);
     static int32_t SetNodeProgressColor(ArkUI_NodeHandle nodeHandle, uint32_t value);
     static int32_t SetNodeProgressTotal(ArkUI_NodeHandle nodeHandle, float value);
     static int32_t SetNodeProgressType(ArkUI_NodeHandle nodeHandle, int32_t value);
@@ -184,6 +189,7 @@ public:
     static int32_t SetNodeTextInputPlaceholderColor(ArkUI_NodeHandle nodeHandle, uint32_t value);
     static int32_t SetNodeTextInputSelectedBackgroundColor(ArkUI_NodeHandle nodeHandle, uint32_t value);
     static int32_t SetNodeTextInputShowUnderline(ArkUI_NodeHandle nodeHandle, bool value);
+    static int32_t SetNodeTextInputStyle(ArkUI_NodeHandle nodeHandle, bool inlineStyle);
     static int32_t SetNodeTextInputText(ArkUI_NodeHandle nodeHandle, const std::string& value);
     static int32_t SetNodeTextInputType(ArkUI_NodeHandle nodeHandle, A2UITextInputType value);
     static int32_t SetNodeTextInputUnderlineColor(

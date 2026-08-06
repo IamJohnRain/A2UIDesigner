@@ -21,18 +21,23 @@ import { SchemaResourceLoader } from '../../schema/SchemaResourceLoader';
 import {
   parseCustomProps,
   resolveDynamicBooleanOptionValue,
-  resolveDynamicNumberOptionValue,
   resolveDynamicStringOptionValue,
-  dispatchComponentEvent
+  dispatchComponentEvent,
+  resolveCustomComponentWarningPathPrefix
 } from '../A2UI/CustomComponentUtils';
 import { ExtendedTabsRegistry, ExtendedTabMetadata } from './ExtendedTabsRegistry';
-import { buildExtendedCommonStyleModifier } from './ExtendedCommonStyleModifier';
+import {
+  buildExtendedCommonStyleModifier,
+  ExtendedCommonStyleState
+} from './ExtendedCommonStyleModifier';
 import { ThemeMode } from '../../base/NativeEngineBridge';
 import { A2UIFunctionCall, A2UIFunctionArgs, A2UIFunctionReturnType } from '../../types/FunctionCall';
 import { A2UIResolveContext } from '../../types/runtime/ResolveContext';
 import { A2UIDynamicValue } from '../../types/DynamicValue';
+import { A2UIDynamicNumber } from '../../types/DynamicNumber';
 import { DynamicValueResolver } from '../../types/runtime/DynamicValueResolver';
 import { FunctionBridge } from '../../functions/FunctionBridge';
+import { SchemaErrorCode, SchemaErrorInfoManager } from '../../schema/SchemaErrorInfoManager';
 
 const EXTENDED_TABS_TYPE: string = 'Tabs';
 const DEFAULT_SELECTED_COLOR_LIGHT: string = '#1F64FF';
@@ -45,6 +50,13 @@ const DEFAULT_TAB_FONT_WEIGHT: number = 500;
 const DEFAULT_TAB_TYPE: string = '';
 const DEFAULT_TAB_ICON_SIZE: number = 16;
 const DEFAULT_TAB_SPACE: number = 0;
+const DEFAULT_SELECTED_BACKGROUND_COLOR_LIGHT: string = '#00000000';
+const DEFAULT_SELECTED_BACKGROUND_COLOR_DARK: string = '#00000000';
+const DEFAULT_SELECTED_BORDER_COLOR_LIGHT: string = '#FF0A59F7';
+const DEFAULT_SELECTED_BORDER_COLOR_DARK: string = '#FF317AF7';
+const DEFAULT_UNSELECTED_BACKGROUND_COLOR: string = '#00000000';
+const DEFAULT_UNSELECTED_BORDER_COLOR: string = '#00000000';
+const CAPSULE_TAB_BORDER_RADIUS: number = 18;
 const TABS_ON_CHANGE_PROP_NAME: string = 'onChange';
 
 interface ExtendedTabsResolvedItem {
@@ -58,6 +70,12 @@ interface ExtendedTabsResolvedChild {
   childId: string;
   slotKey: string;
   fallbackTitle?: string;
+}
+
+export interface ExtendedTabsIndexRangeResult {
+  resolvedIndex: number;
+  shouldReportWarning: boolean;
+  warningMessage: string;
 }
 
 function mergeExtendedTabsMetadataWithFallback(
@@ -91,6 +109,70 @@ function mergeExtendedTabsMetadataWithFallback(
   };
 }
 
+export function normalizeExtendedTabsIndexValue(value: number | undefined, fallback: number): number {
+  if (value !== undefined && Number.isFinite(value) && Number.isInteger(value) && value >= 0) {
+    return value;
+  }
+  return fallback;
+}
+
+export function resolveExtendedTabsBorderRadius(tabType: string): number {
+  return tabType === 'capsule' ? CAPSULE_TAB_BORDER_RADIUS : 0;
+}
+
+export function buildExtendedTabsTemplateInstanceChildId(
+  templateComponentId: string,
+  templatePath: string,
+  index: number
+): string {
+  return `${templatePath}${templateComponentId}:${index}:${templateComponentId}`;
+}
+
+export function normalizeExtendedTabsIndexForItemCount(
+  value: number,
+  itemCount: number
+): ExtendedTabsIndexRangeResult {
+  if (itemCount <= 0 || value < itemCount) {
+    return {
+      resolvedIndex: itemCount <= 0 ? 0 : value,
+      shouldReportWarning: false,
+      warningMessage: ''
+    };
+  }
+
+  let fallbackIndex: number = itemCount - 1;
+  return {
+    resolvedIndex: fallbackIndex,
+    shouldReportWarning: true,
+    warningMessage: `Property tabIndex value ${value} is invalid. ` +
+      `Valid values are from 0 to ${fallbackIndex}. Fallback to ${fallbackIndex}.`
+  };
+}
+
+export function dispatchExtendedTabsIndexRangeWarning(
+  attribute: CustomComponentAttribute | undefined,
+  message: string
+): void {
+  let schemaErrorInfoManager: SchemaErrorInfoManager = SchemaErrorInfoManager.getInstance();
+  let warningPath: string = `${resolveCustomComponentWarningPathPrefix(attribute)}.tabIndex`;
+  schemaErrorInfoManager.withSchemaWarningContext<void>(
+    attribute?.renderId,
+    attribute?.surfaceId,
+    (): void => {
+      let captureResult = schemaErrorInfoManager.captureWarnings<void>(() => {
+        schemaErrorInfoManager.recordSchemaWarning(
+          SchemaErrorCode.INVALID_VALUE,
+          message,
+          warningPath,
+          'component',
+          EXTENDED_TABS_TYPE
+        );
+      });
+      schemaErrorInfoManager.dispatchCapturedWarnings(attribute?.surfaceId, captureResult.warnings);
+    }
+  );
+}
+
 @Component
 struct ExtendedTabsBarItem {
   @Link currentIndex: number;
@@ -103,6 +185,10 @@ struct ExtendedTabsBarItem {
   @Prop tabType: string = DEFAULT_TAB_TYPE;
   @Prop selectedColor: string = DEFAULT_SELECTED_COLOR_LIGHT;
   @Prop unSelectedColor: string = DEFAULT_UNSELECTED_COLOR_LIGHT;
+  @Prop defaultBackgroundColor: string = DEFAULT_UNSELECTED_BACKGROUND_COLOR;
+  @Prop selectedBackgroundColor: string = DEFAULT_SELECTED_BACKGROUND_COLOR_LIGHT;
+  @Prop defaultBorderColor: string = DEFAULT_UNSELECTED_BORDER_COLOR;
+  @Prop selectedBorderColor: string = DEFAULT_SELECTED_BORDER_COLOR_LIGHT;
   @Prop fontSize: number = 16;
   @Prop fontWeight: number | string = DEFAULT_TAB_FONT_WEIGHT;
   @Prop iconSize: number = DEFAULT_TAB_ICON_SIZE;
@@ -111,24 +197,27 @@ struct ExtendedTabsBarItem {
   build() {
     Column() {
       Row({ space: this.space }) {
-        if (this.resolveIconSource(this.currentIndex === this.index).length > 0) {
-          Image(this.resolveIconSource(this.currentIndex === this.index))
+        if (this.resolveIconSource(this.isSelected()).length > 0) {
+          Image(this.resolveIconSource(this.isSelected()))
             .width(this.iconSize)
             .height(this.iconSize)
         }
         Text(this.title)
           .fontSize(this.fontSize)
           .fontWeight(this.fontWeight)
-          .fontColor(this.resolveTitleColor(this.currentIndex === this.index))
+          .fontColor(this.resolveTitleColor(this.isSelected()))
       }
       .padding({ left: 12, right: 12, top: 8, bottom: 8 })
       .constraintSize({ minHeight: 36 })
+      .backgroundColor(this.resolveTitleBackgroundColor(this.isSelected()))
+      .border(this.resolveTitleBorderOptions(this.isSelected()))
+      .borderRadius(resolveExtendedTabsBorderRadius(this.tabType))
 
       if (this.shouldRenderUnderline()) {
         Row()
           .width(this.resolveUnderlineWidth())
           .height(2)
-          .backgroundColor(this.currentIndex === this.index ? this.resolveTitleColor(true) : 'transparent')
+          .backgroundColor(this.isSelected() ? this.resolveTitleColor(true) : 'transparent')
       }
     }
     .alignItems(HorizontalAlign.Center)
@@ -138,6 +227,10 @@ struct ExtendedTabsBarItem {
       }
       dispatchComponentEvent(this.attribute, 'onClick');
     })
+  }
+
+  private isSelected(): boolean {
+    return this.currentIndex === this.index;
   }
 
   private resolveIconSource(selected: boolean): string {
@@ -156,6 +249,33 @@ struct ExtendedTabsBarItem {
 
   private isUnderlineType(): boolean {
     return this.tabType === 'underline';
+  }
+
+  private resolveTitleBackgroundColor(selected: boolean): ResourceColor {
+    if (selected) {
+      return this.selectedBackgroundColor ?? this.defaultBackgroundColor ?? 'transparent';
+    }
+    return this.defaultBackgroundColor ?? 'transparent';
+  }
+
+  private resolveTitleBorderOptions(selected: boolean): BorderOptions {
+    let borderColor = this.resolveTitleBorderColor(selected);
+    if (borderColor === undefined) {
+      return {
+        width: 0
+      };
+    }
+    return {
+      width: 1,
+      color: borderColor
+    };
+  }
+
+  private resolveTitleBorderColor(selected: boolean): ResourceColor | undefined {
+    if (selected) {
+      return this.selectedBorderColor ?? this.defaultBorderColor;
+    }
+    return this.defaultBorderColor;
   }
 
   private shouldRenderUnderline(): boolean {
@@ -192,6 +312,7 @@ struct ExtendedTabsBarItem {
 @Component
 export struct ExtendedTabs {
   private readonly tag: string = 'ExtendedTabs';
+  private commonStyleState: ExtendedCommonStyleState = {};
   @Prop @Watch('onAttributeChange') attribute: CustomComponentAttribute | undefined = undefined;
   @State @Watch('onCurrentIndexChange') currentIndex: number = 0;
   @State tabItems: ExtendedTabsResolvedItem[] = [];
@@ -201,6 +322,7 @@ export struct ExtendedTabs {
   private knownTabContentChildIds: Set<string> = new Set();
   private enableOnChangeDispatch: boolean = false;
   private lastDispatchedIndex: number = -1;
+  private lastInvalidTabIndexSignature: string = '';
 
   aboutToAppear(): void {
     this.listenerOwnerKey = this.resolveListenerOwnerKey();
@@ -222,6 +344,7 @@ export struct ExtendedTabs {
     this.knownTabContentChildIds.clear();
     this.enableOnChangeDispatch = false;
     this.lastDispatchedIndex = -1;
+    this.lastInvalidTabIndexSignature = '';
   }
 
   onAttributeChange(): void {
@@ -240,47 +363,42 @@ export struct ExtendedTabs {
   }
 
   build() {
-    Column() {
-      if (this.tabItems.length > 0) {
-        Tabs({ index: this.currentIndex }) {
-          ForEach(this.tabItems, (tab: ExtendedTabsResolvedItem, index: number) => {
-            TabContent() {
-              Column() {
-                if (tab.slot !== undefined) {
-                  ContentSlot(tab.slot)
-                }
-              }
-              .width('100%')
-              .height('100%')
+    if (this.tabItems.length > 0) {
+      Tabs({ index: this.currentIndex }) {
+        ForEach(this.tabItems, (tab: ExtendedTabsResolvedItem, index: number) => {
+          TabContent() {
+            if (tab.slot !== undefined) {
+              ContentSlot(tab.slot)
             }
-            .tabBar(this.buildTabBar(tab, index))
-          })
-        }
-        .vertical(this.resolveVertical())
-        .barPosition(this.resolveBarPosition())
-        .scrollable(this.resolveScrollable())
-        .barMode(BarMode.Fixed)
-        .barBackgroundColor(this.resolveTabBarBackgroundColor())
-        .animationDuration(200)
-        .width('100%')
-        .layoutWeight(1)
-        .onChange((index: number) => {
-          this.currentIndex = index;
-          // Force tab bar rebuild for custom underline/capsule visuals.
-          this.tabItems = this.tabItems.slice();
+          }
+          .tabBar(this.buildTabBar(tab, index))
         })
       }
+      .vertical(this.resolveVertical())
+      .barPosition(this.resolveBarPosition())
+      .scrollable(this.resolveScrollable())
+      .barMode(BarMode.Fixed)
+      .barBackgroundColor(this.resolveTabBarBackgroundColor())
+      .animationDuration(200)
+      .onChange((index: number) => {
+        this.currentIndex = index;
+        // Force tab bar rebuild for custom underline/capsule visuals.
+        this.tabItems = this.tabItems.slice();
+      })
+      .onAppear(() => {
+        dispatchComponentEvent(this.attribute, 'onAppear');
+      })
+      .accessibilityText(this.resolveAccessibilityLabel())
+      .accessibilityDescription(this.resolveAccessibilityDescription())
+      .id(this.attribute?.id ?? '')
+      .attributeModifier(buildExtendedCommonStyleModifier<TabsAttribute>(
+        this.attribute,
+        {
+          layoutWeight: this.resolveWeight()
+        },
+        this.commonStyleState
+      ))
     }
-    .width('100%')
-    .height('100%')
-    .layoutWeight(this.resolveWeight())
-    .onAppear(() => {
-      dispatchComponentEvent(this.attribute, 'onAppear');
-    })
-    .accessibilityText(this.resolveAccessibilityLabel())
-    .accessibilityDescription(this.resolveAccessibilityDescription())
-    .id(this.attribute?.id ?? '')
-    .attributeModifier(buildExtendedCommonStyleModifier<ColumnAttribute>(this.attribute))
   }
 
   @Builder
@@ -296,6 +414,13 @@ export struct ExtendedTabs {
       tabType: this.resolveMetadata(tab, index).tabType,
       selectedColor: this.resolveMetadata(tab, index).selectedColor ?? this.resolveDefaultSelectedColor(),
       unSelectedColor: this.resolveMetadata(tab, index).unSelectedColor ?? this.resolveDefaultUnselectedColor(),
+      defaultBackgroundColor: this.resolveMetadata(tab, index).defaultBackgroundColor ??
+        DEFAULT_UNSELECTED_BACKGROUND_COLOR,
+      selectedBackgroundColor: this.resolveMetadata(tab, index).selectedBackgroundColor ??
+        this.resolveDefaultSelectedBackgroundColor(),
+      defaultBorderColor: this.resolveMetadata(tab, index).defaultBorderColor ?? DEFAULT_UNSELECTED_BORDER_COLOR,
+      selectedBorderColor: this.resolveMetadata(tab, index).selectedBorderColor ??
+        this.resolveDefaultSelectedBorderColor(),
       fontSize: this.resolveMetadata(tab, index).fontSize ?? 16,
       fontWeight: this.resolveMetadata(tab, index).fontWeight ?? DEFAULT_TAB_FONT_WEIGHT,
       iconSize: this.resolveMetadata(tab, index).iconSize ?? DEFAULT_TAB_ICON_SIZE,
@@ -320,22 +445,39 @@ export struct ExtendedTabs {
     return this.isDarkMode() ? DEFAULT_UNSELECTED_COLOR_DARK : DEFAULT_UNSELECTED_COLOR_LIGHT;
   }
 
+  private resolveDefaultSelectedBackgroundColor(): string {
+    return this.isDarkMode() ? DEFAULT_SELECTED_BACKGROUND_COLOR_DARK :
+      DEFAULT_SELECTED_BACKGROUND_COLOR_LIGHT;
+  }
+
+  private resolveDefaultSelectedBorderColor(): string {
+    return this.isDarkMode() ? DEFAULT_SELECTED_BORDER_COLOR_DARK : DEFAULT_SELECTED_BORDER_COLOR_LIGHT;
+  }
+
   private syncTabsState(): void {
     let items: ExtendedTabsResolvedItem[] = this.resolveTabItems();
     this.tabItems = items;
     if (items.length === 0) {
       this.currentIndex = 0;
       this.lastBoundTabIndex = undefined;
+      this.lastInvalidTabIndexSignature = '';
       return;
     }
 
-    let targetIndex: number = this.resolveTabIndex();
+    let customProps = parseCustomProps(this.attribute, this.tag);
+    let hasExplicitTabIndex: boolean = customProps !== undefined && this.hasObjectKey(customProps, 'tabIndex');
+    let targetIndex: number = this.resolveTabIndex(customProps);
     if (targetIndex < 0) {
       targetIndex = 0;
     }
-    if (targetIndex >= items.length) {
-      targetIndex = items.length - 1;
+    let rangeResult: ExtendedTabsIndexRangeResult =
+      normalizeExtendedTabsIndexForItemCount(targetIndex, items.length);
+    if (hasExplicitTabIndex && rangeResult.shouldReportWarning) {
+      this.dispatchTabIndexRangeWarning(targetIndex, items.length, rangeResult.warningMessage);
+    } else {
+      this.lastInvalidTabIndexSignature = '';
     }
+    targetIndex = rangeResult.resolvedIndex;
     // Keep user-selected tab when metadata updates but bound tabIndex has not changed.
     let shouldApplyBoundIndex: boolean = this.lastBoundTabIndex === undefined || targetIndex !== this.lastBoundTabIndex;
     if (shouldApplyBoundIndex) {
@@ -542,8 +684,7 @@ export struct ExtendedTabs {
   }
 
   private buildTemplateInstanceChildId(templateComponentId: string, templatePath: string, index: number): string {
-    let templateIdPrefix = templatePath.startsWith('/') ? templatePath.slice(1) : templatePath;
-    return `${templateIdPrefix}${templateComponentId}:${index}:${templateComponentId}`;
+    return buildExtendedTabsTemplateInstanceChildId(templateComponentId, templatePath, index);
   }
 
   private resolveArrayByPath(path: string): Object[] {
@@ -625,13 +766,21 @@ export struct ExtendedTabs {
     return (slots as Record<string, NodeContent>)[slotKey];
   }
 
-  private resolveTabIndex(): number {
-    let customProps = parseCustomProps(this.attribute, this.tag);
+  private resolveTabIndex(customProps: Record<string, Object> | undefined): number {
     if (customProps === undefined) {
       return this.currentIndex;
     }
-    let resolved: number | undefined = resolveDynamicNumberOptionValue(customProps['tabIndex'], this.attribute);
-    return resolved !== undefined ? Math.floor(resolved) : this.currentIndex;
+    let resolved: number | undefined = this.resolveStrictDynamicNumberOptionValue(customProps['tabIndex']);
+    return normalizeExtendedTabsIndexValue(resolved, this.currentIndex);
+  }
+
+  private dispatchTabIndexRangeWarning(tabIndex: number, itemCount: number, message: string): void {
+    let warningSignature: string = `${tabIndex}:${itemCount}`;
+    if (this.lastInvalidTabIndexSignature === warningSignature) {
+      return;
+    }
+    this.lastInvalidTabIndexSignature = warningSignature;
+    dispatchExtendedTabsIndexRangeWarning(this.attribute, message);
   }
 
   private resolveVertical(): boolean {
@@ -656,6 +805,38 @@ export struct ExtendedTabs {
     return this.isDarkMode() ? DEFAULT_TAB_BAR_BACKGROUND_COLOR_DARK : DEFAULT_TAB_BAR_BACKGROUND_COLOR_LIGHT;
   }
 
+  private resolveStrictDynamicNumberOptionValue(value: Object | undefined): number | undefined {
+    if (value === undefined) {
+      return undefined;
+    }
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+    let resolveContext: A2UIResolveContext | undefined = this.buildResolveContext();
+    let resolved: number = DynamicValueResolver.resolveNumber(value as A2UIDynamicNumber, Number.NaN, resolveContext);
+    if (!Number.isNaN(resolved) && Number.isFinite(resolved)) {
+      return resolved;
+    }
+    return undefined;
+  }
+
+  private buildResolveContext(): A2UIResolveContext | undefined {
+    if (this.attribute === undefined) {
+      return undefined;
+    }
+    let surfaceId: string = this.attribute.surfaceId ?? '';
+    let componentId: string = this.attribute.id ?? '';
+    let renderId: number = this.attribute.renderId ?? -1;
+    return {
+      renderId: renderId,
+      surfaceId: surfaceId,
+      componentId: componentId,
+      dataModel: this.attribute.dataModel,
+      invokeFunction: (functionCall: A2UIFunctionCall): A2UIValueType =>
+        FunctionBridge.invoke(functionCall, surfaceId, componentId, renderId)
+    } as A2UIResolveContext;
+  }
+
   private resolveBarPosition(): BarPosition {
     let customProps = parseCustomProps(this.attribute, this.tag);
     if (customProps === undefined) {
@@ -666,7 +847,7 @@ export struct ExtendedTabs {
       return BarPosition.Start;
     }
     let normalized = value.toLowerCase();
-    if (normalized === 'end' || normalized === 'bottom' || normalized === 'right') {
+    if (normalized === 'end') {
       return BarPosition.End;
     }
     return BarPosition.Start;
@@ -810,22 +991,6 @@ export struct ExtendedTabs {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
   }
 
-  private buildResolveContext(): A2UIResolveContext | undefined {
-    if (this.attribute === undefined) {
-      return undefined;
-    }
-    let surfaceId: string = this.attribute.surfaceId ?? '';
-    let componentId: string = this.attribute.id ?? '';
-    let renderId: number = this.attribute.renderId ?? -1;
-    return {
-      renderId: renderId,
-      surfaceId: surfaceId,
-      componentId: componentId,
-      dataModel: this.attribute.dataModel,
-      invokeFunction: (functionCall: A2UIFunctionCall): A2UIValueType =>
-        FunctionBridge.invoke(functionCall, surfaceId, componentId, renderId)
-    } as A2UIResolveContext;
-  }
 }
 
 @Builder

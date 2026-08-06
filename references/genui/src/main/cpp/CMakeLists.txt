@@ -42,6 +42,7 @@ add_library(a2ui_native SHARED
     adapter/SharedLibrarySymbolLoader.cpp
     adapter/A2UIArkUITypeConverter.cpp
     adapter/ArkUIOHApiAdapter.cpp
+    adapter/ArkUIConstraintSizeAdapter.cpp
     adapter/ArkUINodeApiAdapter.cpp
     adapter/ArkUINativeProvider.cpp
     adapter/NapiProvider.cpp
@@ -59,6 +60,7 @@ add_library(a2ui_native SHARED
     theme/ThemeManager.cpp
     theme/ThemeFactory.cpp
     components/extended/ExtendedCommonTheme.cpp
+    utils/LocalVariableNameUtils.cpp
     composition/ChildListParser.cpp
     composition/TemplateInstantiator.cpp
     composition/EagerChildrenStrategy.cpp
@@ -74,19 +76,19 @@ add_library(a2ui_native SHARED
     functions/FunctionResult.cpp
     functions/NativeFunctionBase.cpp
     functions/NativeFunctionRegistry.cpp
-    functions/NativeRequiredFunction.cpp
-    functions/NativeRegexFunction.cpp
-    functions/NativeLengthFunction.cpp
-    functions/NativeNumericFunction.cpp
-    functions/NativeEmailFunction.cpp
-    functions/NativeFormatStringFunction.cpp
-    functions/NativeFormatNumberFunction.cpp
-    functions/NativeFormatCurrencyFunction.cpp
-    functions/NativeFormatDateFunction.cpp
-    functions/NativePluralizeFunction.cpp
-    functions/NativeAndFunction.cpp
-    functions/NativeOrFunction.cpp
-    functions/NativeNotFunction.cpp
+    functions/impl/NativeRequiredFunction.cpp
+    functions/impl/NativeRegexFunction.cpp
+    functions/impl/NativeLengthFunction.cpp
+    functions/impl/NativeNumericFunction.cpp
+    functions/impl/NativeEmailFunction.cpp
+    functions/impl/NativeFormatStringFunction.cpp
+    functions/impl/NativeFormatNumberFunction.cpp
+    functions/impl/NativeFormatCurrencyFunction.cpp
+    functions/impl/NativeFormatDateFunction.cpp
+    functions/impl/NativePluralizeFunction.cpp
+    functions/impl/NativeAndFunction.cpp
+    functions/impl/NativeOrFunction.cpp
+    functions/impl/NativeNotFunction.cpp
     functions/NativeGetToggleValueFunction.cpp
     functions/NativeGetRadioValueFunction.cpp
     functions/NativeGetCheckboxGroupValuesFunction.cpp
@@ -103,6 +105,7 @@ add_library(a2ui_native SHARED
     utils/NapiUtils.cpp
     utils/ThemeColorUtils.cpp
     utils/DisplayDensityUtils.cpp
+    utils/SystemProperties.cpp
     utils/RequiredStringPropertyUtils.cpp
     components/ChildListSchemaValidationUtils.cpp
     components/Component.cpp
@@ -131,8 +134,12 @@ add_library(a2ui_native SHARED
     components/A2UI/slider/SliderComponent.cpp
     components/A2UI/slider/SliderTheme.cpp
     components/custom/CustomComponent.cpp
+    components/custom/CustomComponentAttributeValue.cpp
     components/custom/CustomComponentBindingLifecycle.cpp
+    components/custom/CustomComponentCommonStyleValidation.cpp
     components/custom/CustomComponentExpressionBinding.cpp
+    components/custom/CustomComponentPropsBuilder.cpp
+    components/custom/CustomComponentRuntimeProperties.cpp
     components/custom/CustomComponentTabsValidation.cpp
     components/custom/CustomComponentTabContentValidation.cpp
     components/NativeComponentFactory.cpp
@@ -221,6 +228,7 @@ find_library(
 target_include_directories(a2ui_native PRIVATE
     ${NATIVERENDER_ROOT_PATH}
     ${NATIVERENDER_ROOT_PATH}/adapter
+    ${NATIVERENDER_ROOT_PATH}/functions
     ${NATIVERENDER_ROOT_PATH}/include
     ${cjson_SOURCE_DIR}
 )

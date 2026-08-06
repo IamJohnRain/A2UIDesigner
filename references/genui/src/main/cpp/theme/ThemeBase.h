@@ -41,6 +41,23 @@ enum class Breakpoint {
     XL, // [1440, +inf) vp
 };
 
+constexpr Breakpoint ResolveBreakpointFromWidth(float width)
+{
+    if (width < 320.0F) {
+        return Breakpoint::XS;
+    }
+    if (width < 600.0F) {
+        return Breakpoint::SM;
+    }
+    if (width < 840.0F) {
+        return Breakpoint::MD;
+    }
+    if (width < 1440.0F) {
+        return Breakpoint::LG;
+    }
+    return Breakpoint::XL;
+}
+
 /**
  * @brief Theme context containing all factors affecting theme values
  *

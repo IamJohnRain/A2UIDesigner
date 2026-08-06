@@ -31,6 +31,8 @@
 #include "theme/ThemeManager.h"
 #include "utils/LogA2UI.h"
 
+#include "ArkUIConstraintSizeAdapter.h"
+
 #ifdef ENABLE_EXPRESSION_ENGINE
 #include "expression/DependencyCollector.h"
 #include "expression/EvaluationContext.h"
@@ -195,6 +197,21 @@ void SetupExpressionEvaluationContext(
     }
 }
 
+void ApplyExpressionLocalVariables(
+    EvaluationContext& evalContext, const std::map<std::string, JsonValue>& localVariables)
+{
+    if (localVariables.empty()) {
+        return;
+    }
+
+    evalContext.PushScope();
+    for (const auto& [name, value] : localVariables) {
+        if (!name.empty() && value.IsValid()) {
+            evalContext.SetLocalVariable(name, EvalResult::FromJson(value));
+        }
+    }
+}
+
 bool HasExpressionContextError(const EvaluationContext& evalContext)
 {
     return evalContext.lastError != ExpressionError::NONE && !evalContext.errorMessage.empty();
@@ -211,59 +228,51 @@ bool IsSoftExpressionContextError(ExpressionError error)
            error == ExpressionError::EVAL_UNDEFINED_VARIABLE || IsIllegalExpressionContextError(error);
 }
 
-int32_t ResolveExpressionRuntimeErrorCode(ExpressionError error)
-{
-    if (error == ExpressionError::EVAL_NO_GLOBAL_VARIABLE) {
-        return SURFACE_ERROR_GLOBAL_VARIABLE_NOT_FOUND;
-    }
-    if (IsIllegalExpressionContextError(error)) {
-        return SURFACE_ERROR_ILLEGAL_EXPRESSION;
-    }
-    return SURFACE_ERROR_DYNAMIC_VALUE_RESOLVE_FAILED;
-}
-
-std::string ResolveExpressionRuntimeErrorMessage(const EvaluationContext& evalContext)
-{
-    if (IsIllegalExpressionContextError(evalContext.lastError) &&
-        evalContext.errorMessage.rfind("illegal expression", 0) != 0) {
-        return "illegal expression: " + evalContext.errorMessage;
-    }
-    return evalContext.errorMessage;
-}
-
 void DispatchExpressionRuntimeError(int32_t renderId, const std::string& surfaceId, const std::string& componentId,
-    const EvaluationContext& evalContext)
+    const EvaluationContext& evalContext, MissingPathPolicy missingPathPolicy = MissingPathPolicy::REPORT_ALWAYS)
 {
     if (renderId < 0 || !HasExpressionContextError(evalContext)) {
         return;
     }
-    RuntimeErrorDispatchBridge::GetInstance().Dispatch(renderId, surfaceId, componentId,
-        ResolveExpressionRuntimeErrorCode(evalContext.lastError), ResolveExpressionRuntimeErrorMessage(evalContext),
-        "Component");
+    if (evalContext.lastError == ExpressionError::EVAL_PATH_NOT_FOUND &&
+        missingPathPolicy == MissingPathPolicy::DEFER_UNTIL_DATA_UPDATE) {
+        SurfaceSlot* surface = RenderManager::GetInstance().FindSurface(renderId, surfaceId);
+        if (surface == nullptr || !surface->HasReceivedDataModelUpdate()) {
+            return;
+        }
+    }
+    std::string errorMessage = evalContext.errorMessage;
+    if (IsIllegalExpressionContextError(evalContext.lastError) && errorMessage.rfind("illegal expression", 0) != 0 &&
+        errorMessage.rfind("Built-in function", 0) != 0) {
+        errorMessage = "illegal expression: " + errorMessage;
+    }
+    RuntimeErrorDispatchBridge::GetInstance().Dispatch(
+        renderId, surfaceId, componentId, SURFACE_ERROR_ILLEGAL_EXPRESSION, errorMessage, "Component");
 }
 
 JsonValue EvaluateExpressionBindingValue(const std::string& expression, int32_t renderId, const std::string& surfaceId,
-    const std::string& componentId, const std::map<std::string, JsonValue>& localVariables)
+    const std::string& componentId, const std::map<std::string, JsonValue>& localVariables,
+    bool* missingDataPath = nullptr)
 {
+    if (missingDataPath != nullptr) {
+        *missingDataPath = false;
+    }
     if (expression.empty()) {
         return JsonValue();
     }
 
     EvaluationContext evalContext;
     SetupExpressionEvaluationContext(evalContext, renderId, surfaceId, componentId);
-    if (!localVariables.empty()) {
-        evalContext.PushScope();
-        for (const auto& [name, value] : localVariables) {
-            if (!name.empty() && value.IsValid()) {
-                evalContext.SetLocalVariable(name, EvalResult::FromJson(value));
-            }
-        }
-    }
+    ApplyExpressionLocalVariables(evalContext, localVariables);
     JsonValue resolvedValue =
         ExpressionEngine::GetInstance().EvaluateAsJsonValue("{{ " + expression + " }}", evalContext);
+    if (missingDataPath != nullptr) {
+        *missingDataPath = evalContext.lastError == ExpressionError::EVAL_PATH_NOT_FOUND;
+    }
     if (HasExpressionContextError(evalContext) &&
         (IsSoftExpressionContextError(evalContext.lastError) || !resolvedValue.IsValid())) {
-        DispatchExpressionRuntimeError(renderId, surfaceId, componentId, evalContext);
+        DispatchExpressionRuntimeError(
+            renderId, surfaceId, componentId, evalContext, MissingPathPolicy::DEFER_UNTIL_DATA_UPDATE);
     }
     return resolvedValue;
 }
@@ -295,101 +304,132 @@ void AppendUniqueString(std::vector<std::string>& values, const std::string& val
 }
 #endif
 
+bool NormalizeEnumStringValue(const PropertyDeclaration& declaration, const JsonValue& input,
+    JsonValue& normalizedValue, NormalizationIssue* issue)
+{
+    std::string fallback = declaration.enumFallback.empty() ? declaration.fallbackString : declaration.enumFallback;
+    if (input.IsString()) {
+        std::string candidate = input.GetStringValue(fallback);
+        if (IsEnumValueAllowed(candidate, declaration.enumAllowed)) {
+            normalizedValue = input;
+            return true;
+        }
+        if (issue != nullptr) {
+            issue->hasWarning = true;
+            issue->code = SCHEMA_ERROR_CODE_INVALID_VALUE;
+            issue->message = "Property " + declaration.name + " got invalid enum value '" + candidate +
+                             "', fallback to '" + fallback + "'";
+        }
+        LOG_A2UI(LOG_WARN, "ApplyRuntimeProperty: enum property got invalid value '%{public}s', fallback '%{public}s'",
+            candidate.c_str(), fallback.c_str());
+    } else if (input.IsValid()) {
+        std::string actualType = input.GetTypeName();
+        if (issue != nullptr) {
+            issue->hasWarning = true;
+            issue->code = SCHEMA_ERROR_CODE_TYPE_MISMATCH;
+            issue->message = "Property " + declaration.name + " expects string enum value, got type '" + actualType +
+                             "', fallback to '" + fallback + "'";
+        }
+        LOG_A2UI(LOG_WARN,
+            "ApplyRuntimeProperty: enum property expects string value, got type '%{public}s', fallback "
+            "'%{public}s'",
+            actualType.c_str(), fallback.c_str());
+    }
+    std::string candidate = input.ToString(fallback);
+    if (!IsEnumValueAllowed(candidate, declaration.enumAllowed)) {
+        candidate = fallback;
+    }
+    normalizedValue = BuildStringValue(candidate);
+    return normalizedValue.IsValid();
+}
+
+void ResetNormalizationIssue(NormalizationIssue* issue)
+{
+    if (issue == nullptr) {
+        return;
+    }
+    issue->hasWarning = false;
+    issue->code.clear();
+    issue->message.clear();
+}
+
+void SetNormalizationTypeMismatchIssue(const PropertyDeclaration& declaration, const JsonValue& input,
+    const std::string& expectedType, const std::string& suffix, NormalizationIssue* issue)
+{
+    if (!input.IsValid() || issue == nullptr) {
+        return;
+    }
+    issue->hasWarning = true;
+    issue->code = SCHEMA_ERROR_CODE_TYPE_MISMATCH;
+    issue->message = "Property " + declaration.name + " expects " + expectedType + " value, got type '" +
+                     input.GetTypeName() + "', " + suffix;
+}
+
+bool NormalizeStringPropertyValue(const PropertyDeclaration& declaration, const JsonValue& input,
+    JsonValue& normalizedValue, NormalizationIssue* issue)
+{
+    if (input.IsString() || (declaration.acceptNumberForString && input.IsNumber())) {
+        normalizedValue = input;
+        return true;
+    }
+    SetNormalizationTypeMismatchIssue(declaration, input, "string", "value has been coerced to string", issue);
+    if (input.IsNull()) {
+        normalizedValue = BuildStringValue(declaration.fallbackString);
+        return normalizedValue.IsValid();
+    }
+    normalizedValue = BuildStringValue(input.ToString(declaration.fallbackString));
+    return normalizedValue.IsValid();
+}
+
+bool NormalizeNumberPropertyValue(const PropertyDeclaration& declaration, const JsonValue& input,
+    JsonValue& normalizedValue, NormalizationIssue* issue)
+{
+    if (input.IsNumber()) {
+        normalizedValue = input;
+        return true;
+    }
+    SetNormalizationTypeMismatchIssue(
+        declaration, input, "number", "compatibility normalization has been applied", issue);
+    normalizedValue = BuildNumberValue(input.ToNumber(declaration.fallbackNumber));
+    return normalizedValue.IsValid();
+}
+
+bool NormalizeBooleanPropertyValue(const PropertyDeclaration& declaration, const JsonValue& input,
+    JsonValue& normalizedValue, NormalizationIssue* issue)
+{
+    if (input.IsBool()) {
+        normalizedValue = input;
+        return true;
+    }
+    SetNormalizationTypeMismatchIssue(
+        declaration, input, "boolean", "compatibility normalization has been applied", issue);
+    normalizedValue = BuildBoolValue(input.ToBool(declaration.fallbackBool));
+    return normalizedValue.IsValid();
+}
+
+bool NormalizeObjectPropertyValue(const JsonValue& input, JsonValue& normalizedValue)
+{
+    if (!input.IsObject()) {
+        return false;
+    }
+    return CloneJsonValue(input, normalizedValue);
+}
+
 bool NormalizePropertyValue(const PropertyDeclaration& declaration, const JsonValue& input, JsonValue& normalizedValue,
     NormalizationIssue* issue = nullptr)
 {
-    if (issue != nullptr) {
-        issue->hasWarning = false;
-        issue->code.clear();
-        issue->message.clear();
-    }
+    ResetNormalizationIssue(issue);
     switch (declaration.type) {
         case PropertyValueType::STRING:
-            if (input.IsString()) {
-                normalizedValue = input;
-                return true;
-            }
-            if (declaration.acceptNumberForString && input.IsNumber()) {
-                normalizedValue = input;
-                return true;
-            }
-            if (input.IsValid() && issue != nullptr) {
-                issue->hasWarning = true;
-                issue->code = SCHEMA_ERROR_CODE_TYPE_MISMATCH;
-                issue->message = "Property " + declaration.name + " expects string value, got type '" +
-                                 input.GetTypeName() + "', value has been coerced to string";
-            }
-            normalizedValue = BuildStringValue(input.ToString(declaration.fallbackString));
-            return normalizedValue.IsValid();
+            return NormalizeStringPropertyValue(declaration, input, normalizedValue, issue);
         case PropertyValueType::NUMBER:
-            if (input.IsNumber()) {
-                normalizedValue = input;
-                return true;
-            }
-            if (input.IsValid() && issue != nullptr) {
-                issue->hasWarning = true;
-                issue->code = SCHEMA_ERROR_CODE_TYPE_MISMATCH;
-                issue->message = "Property " + declaration.name + " expects number value, got type '" +
-                                 input.GetTypeName() + "', compatibility normalization has been applied";
-            }
-            normalizedValue = BuildNumberValue(input.ToNumber(declaration.fallbackNumber));
-            return normalizedValue.IsValid();
+            return NormalizeNumberPropertyValue(declaration, input, normalizedValue, issue);
         case PropertyValueType::BOOLEAN:
-            if (input.IsBool()) {
-                normalizedValue = input;
-                return true;
-            }
-            if (input.IsValid() && issue != nullptr) {
-                issue->hasWarning = true;
-                issue->code = SCHEMA_ERROR_CODE_TYPE_MISMATCH;
-                issue->message = "Property " + declaration.name + " expects boolean value, got type '" +
-                                 input.GetTypeName() + "', compatibility normalization has been applied";
-            }
-            normalizedValue = BuildBoolValue(input.ToBool(declaration.fallbackBool));
-            return normalizedValue.IsValid();
-        case PropertyValueType::ENUM_STRING: {
-            std::string fallback =
-                declaration.enumFallback.empty() ? declaration.fallbackString : declaration.enumFallback;
-            if (input.IsString()) {
-                std::string candidate = input.GetStringValue(fallback);
-                if (IsEnumValueAllowed(candidate, declaration.enumAllowed)) {
-                    normalizedValue = input;
-                    return true;
-                }
-                if (issue != nullptr) {
-                    issue->hasWarning = true;
-                    issue->code = SCHEMA_ERROR_CODE_INVALID_VALUE;
-                    issue->message = "Property " + declaration.name + " got invalid enum value '" + candidate +
-                                     "', fallback to '" + fallback + "'";
-                }
-                LOG_A2UI(LOG_WARN,
-                    "ApplyRuntimeProperty: enum property got invalid value '%{public}s', fallback '%{public}s'",
-                    candidate.c_str(), fallback.c_str());
-            } else if (input.IsValid()) {
-                std::string actualType = input.GetTypeName();
-                if (issue != nullptr) {
-                    issue->hasWarning = true;
-                    issue->code = SCHEMA_ERROR_CODE_TYPE_MISMATCH;
-                    issue->message = "Property " + declaration.name + " expects string enum value, got type '" +
-                                     actualType + "', fallback to '" + fallback + "'";
-                }
-                LOG_A2UI(LOG_WARN,
-                    "ApplyRuntimeProperty: enum property expects string value, got type '%{public}s', fallback "
-                    "'%{public}s'",
-                    actualType.c_str(), fallback.c_str());
-            }
-            std::string candidate = input.ToString(fallback);
-            if (!IsEnumValueAllowed(candidate, declaration.enumAllowed)) {
-                candidate = fallback;
-            }
-            normalizedValue = BuildStringValue(candidate);
-            return normalizedValue.IsValid();
-        }
+            return NormalizeBooleanPropertyValue(declaration, input, normalizedValue, issue);
+        case PropertyValueType::ENUM_STRING:
+            return NormalizeEnumStringValue(declaration, input, normalizedValue, issue);
         case PropertyValueType::OBJECT:
-            if (!input.IsObject()) {
-                return false;
-            }
-            return CloneJsonValue(input, normalizedValue);
+            return NormalizeObjectPropertyValue(input, normalizedValue);
         default:
             return CloneJsonValue(input, normalizedValue);
     }
@@ -408,6 +448,7 @@ Component::Component(ArkUI_NodeHandle nativeView, bool ownsNativeView, bool isCo
 Component::~Component()
 {
     ClearChildren();
+    ArkUIConstraintSizeAdapter::Dispose(nativeView_);
     if (ownsNativeView_ && nativeView_ != nullptr) {
         ArkUINodeApiAdapter::DisposeNode(nativeView_);
         nativeView_ = nullptr;
@@ -422,6 +463,54 @@ bool Component::HasChild(const std::shared_ptr<Component>& child) const
         }
     }
     return false;
+}
+
+size_t Component::CountNativeDescendantViews(const std::shared_ptr<Component>& node)
+{
+    if (node == nullptr) {
+        return 0;
+    }
+    if (node->GetNativeView() != nullptr) {
+        return 1;
+    }
+
+    size_t count = 0;
+    for (const auto& child : node->GetChildren()) {
+        count += CountNativeDescendantViews(child);
+    }
+    return count;
+}
+
+void Component::CollectNativeDescendantViews(
+    const std::shared_ptr<Component>& node, std::vector<ArkUI_NodeHandle>& nativeViews)
+{
+    if (node == nullptr) {
+        return;
+    }
+    if (node->GetNativeView() != nullptr) {
+        nativeViews.push_back(node->GetNativeView());
+        return;
+    }
+
+    for (const auto& child : node->GetChildren()) {
+        CollectNativeDescendantViews(child, nativeViews);
+    }
+}
+
+size_t Component::ResolveNativeChildIndex(const Component* target, size_t fallback) const
+{
+    if (target == nullptr) {
+        return fallback;
+    }
+
+    size_t nativeIndex = 0;
+    for (const auto& child : children_) {
+        if (child.get() == target) {
+            return nativeIndex;
+        }
+        nativeIndex += CountNativeDescendantViews(child);
+    }
+    return fallback;
 }
 
 void Component::AddChild(const std::shared_ptr<Component>& child)
@@ -637,7 +726,7 @@ void Component::ClearPendingLocalVariablesForComponents(const std::map<std::stri
 
 ArkUI_NodeHandle Component::GetNativeView() const
 {
-    return nativeView_;
+    return ArkUIConstraintSizeAdapter::GetMountNode(nativeView_);
 }
 
 ArkUI_NodeHandle Component::GetHandle() const
@@ -739,23 +828,77 @@ bool Component::AcceptsChild(const std::shared_ptr<Component>& child) const
     return child != nullptr;
 }
 
+bool Component::BuildEagerTemplateChild(const TemplateChildBuildContext& context, int32_t itemIndex)
+{
+    std::map<std::string, JsonValue> generatedDescriptors;
+    std::string templateComponentId = context.childList.templateComponentId;
+    TemplateAdapterNode::TemplateInstanceBuildContext buildContext = {
+        .templateComponentId = context.childList.templateComponentId,
+        .arrayPath = context.childList.templatePath,
+        .itemIndex = itemIndex,
+        .allDescriptors = &context.descriptorStore,
+        .generatedDescriptors = &generatedDescriptors,
+    };
+    std::string generatedInstanceId =
+        TemplateAdapterNode::BuildTemplateInstanceTreeDescriptors(templateComponentId, buildContext);
+    if (generatedInstanceId.empty()) {
+        LOG_A2UI(LOG_WARN,
+            "ExpandTemplateChildrenEager: failed to build template instance descriptor, parentId=%{public}s, "
+            "templateId=%{public}s, itemIndex=%{public}d",
+            componentId_.c_str(), context.childList.templateComponentId.c_str(), itemIndex);
+        return false;
+    }
+
+    bool hasProcessedNode = false;
+    bool sawRootDescriptor = false;
+    std::map<std::string, JsonValue> currentLocalVariables =
+        BuildTemplateLocalVariables(context.childList, context.arrayValue.GetArrayItem(itemIndex), itemIndex);
+    std::map<std::string, JsonValue> localVariables = MergeLocalVariables(localVariables_, currentLocalVariables);
+    Component::RegisterPendingLocalVariablesForComponents(generatedDescriptors, localVariables);
+    auto node = context.surfaceSlot.BuildRootFromComponents(
+        generatedInstanceId, generatedDescriptors, hasProcessedNode, sawRootDescriptor, false);
+    Component::ClearPendingLocalVariablesForComponents(generatedDescriptors);
+    if (node == nullptr) {
+        return false;
+    }
+    context.childIds.push_back(generatedInstanceId);
+    return true;
+}
+
 bool Component::ExpandTemplateChildrenEager(
     const ChildListDescriptor& childList, SurfaceSlot& surfaceSlot, std::list<std::string>& childIds)
 {
     childIds.clear();
-    const std::map<std::string, JsonValue>& descriptorStore = surfaceSlot.GetAllComponentDescriptorStore();
-    std::map<std::string, std::shared_ptr<Component>>& allComponents = surfaceSlot.GetAllComponents();
-    std::map<std::string, JsonValue> generatedDescriptors;
-    auto templateComponentId = childList.templateComponentId;
-
-    auto templateIt = descriptorStore.find(templateComponentId);
-    if (templateIt == descriptorStore.end()) {
-        LOG_A2UI(LOG_WARN,
-            "ExpandTemplateChildrenEager: template descriptor not found, parentId=%{public}s, templateId=%{public}s",
-            componentId_.c_str(), templateComponentId.c_str());
+    JsonValue arrayValue;
+    if (!ResolveEagerTemplateArray(childList, surfaceSlot, arrayValue)) {
         return false;
     }
 
+    const std::map<std::string, JsonValue>& descriptorStore = surfaceSlot.GetAllComponentDescriptorStore();
+    int itemCount = arrayValue.GetArraySize();
+    TemplateChildBuildContext context = {
+        .childList = childList,
+        .surfaceSlot = surfaceSlot,
+        .arrayValue = arrayValue,
+        .descriptorStore = descriptorStore,
+        .childIds = childIds,
+    };
+    for (int itemIndex = 0; itemIndex < itemCount; ++itemIndex) {
+        BuildEagerTemplateChild(context, itemIndex);
+    }
+    return true;
+}
+
+bool Component::ResolveEagerTemplateArray(
+    const ChildListDescriptor& childList, SurfaceSlot& surfaceSlot, JsonValue& arrayValue)
+{
+    const std::map<std::string, JsonValue>& descriptorStore = surfaceSlot.GetAllComponentDescriptorStore();
+    if (descriptorStore.find(childList.templateComponentId) == descriptorStore.end()) {
+        LOG_A2UI(LOG_WARN,
+            "ExpandTemplateChildrenEager: template descriptor not found, parentId=%{public}s, templateId=%{public}s",
+            componentId_.c_str(), childList.templateComponentId.c_str());
+        return false;
+    }
     std::shared_ptr<DataModel> dataModel = surfaceSlot.GetOrCreateDataModel();
     if (dataModel == nullptr) {
         LOG_A2UI(
@@ -764,52 +907,26 @@ bool Component::ExpandTemplateChildrenEager(
     }
     std::optional<JsonValue> arrayValueOpt = dataModel->GetNode(childList.templatePath);
     if (!arrayValueOpt.has_value()) {
+        DynamicResolveContext context = { .renderId = surfaceSlot.GetRenderId(),
+            .surfaceId = surfaceSlot.GetSurfaceId(),
+            .componentId = componentId_,
+            .missingPathPolicy = MissingPathPolicy::DEFER_UNTIL_DATA_UPDATE };
+        DynamicValueResolver::ReportMissingPath(context, childList.templatePath);
         LOG_A2UI(LOG_WARN,
             "ExpandTemplateChildrenEager: template path is not array, parentId=%{public}s, path=%{public}s",
             componentId_.c_str(), childList.templatePath.c_str());
         return false;
     }
-
-    JsonValue arrayValue = arrayValueOpt.value();
-    if (!arrayValue.IsArray()) {
-        LOG_A2UI(LOG_WARN,
-            "ExpandTemplateChildrenEager: template path is not array, parentId=%{public}s, path=%{public}s",
-            componentId_.c_str(), childList.templatePath.c_str());
-        ReportSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
-            "Property children.path expects array data source, got type '" + std::string(arrayValue.GetTypeName()) +
-                "'",
-            "children.path");
-        return false;
+    arrayValue = arrayValueOpt.value();
+    if (arrayValue.IsArray()) {
+        return true;
     }
-
-    int itemCount = arrayValue.GetArraySize();
-    for (int itemIndex = 0; itemIndex < itemCount; ++itemIndex) {
-        generatedDescriptors.clear();
-        std::string generatedInstanceId = TemplateAdapterNode::BuildTemplateInstanceTreeDescriptors(templateComponentId,
-            templateComponentId, childList.templatePath, itemIndex, &descriptorStore, &generatedDescriptors);
-        if (generatedInstanceId.empty()) {
-            LOG_A2UI(LOG_WARN,
-                "ExpandTemplateChildrenEager: failed to build template instance descriptor, parentId=%{public}s, "
-                "templateId=%{public}s, itemIndex=%{public}d",
-                componentId_.c_str(), templateComponentId.c_str(), itemIndex);
-            continue;
-        }
-
-        bool hasProcessedNode = false;
-        bool sawRootDescriptor = false;
-        std::map<std::string, JsonValue> currentLocalVariables =
-            BuildTemplateLocalVariables(childList, arrayValue.GetArrayItem(itemIndex), itemIndex);
-        std::map<std::string, JsonValue> localVariables = MergeLocalVariables(localVariables_, currentLocalVariables);
-        Component::RegisterPendingLocalVariablesForComponents(generatedDescriptors, localVariables);
-        auto node = surfaceSlot.BuildRootFromComponents(
-            generatedInstanceId, generatedDescriptors, hasProcessedNode, sawRootDescriptor, false);
-        Component::ClearPendingLocalVariablesForComponents(generatedDescriptors);
-        if (node == nullptr) {
-            continue;
-        }
-        childIds.push_back(generatedInstanceId);
-    }
-    return true;
+    LOG_A2UI(LOG_WARN, "ExpandTemplateChildrenEager: template path is not array, parentId=%{public}s, path=%{public}s",
+        componentId_.c_str(), childList.templatePath.c_str());
+    ReportSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
+        "Property children.path expects array data source, got type '" + std::string(arrayValue.GetTypeName()) + "'",
+        "children.path");
+    return false;
 }
 
 void Component::DetachCurrentChildren()
@@ -976,12 +1093,25 @@ bool Component::ConsumeDescriptorDynamicBindingsResolved()
 void Component::OnDataUpdate(const std::string& property, const JsonValue& value)
 {
     for (const auto& binding : dataBindings_) {
+        if (binding.propertyName_ == property && binding.type_ == BindingType::PATH && !value.IsValid()) {
+            DynamicResolveContext context = { .renderId = renderId_,
+                .surfaceId = surfaceId_,
+                .componentId = componentId_,
+                .dataModel = GetDynamicResolveDataModel(),
+                .missingPathPolicy = MissingPathPolicy::DEFER_UNTIL_DATA_UPDATE };
+            DynamicValueResolver::ReportMissingPath(context, binding.dataPath_);
+            ApplyRuntimeProperty(property, value, true);
+            return;
+        }
         if (binding.propertyName_ == property && binding.type_ == BindingType::EXPRESSION) {
 #ifdef ENABLE_EXPRESSION_ENGINE
+            bool missingDataPath = false;
             JsonValue resolvedValue = EvaluateExpressionBindingValue(
-                binding.expression_, renderId_, surfaceId_, componentId_, localVariables_);
+                binding.expression_, renderId_, surfaceId_, componentId_, localVariables_, &missingDataPath);
             if (resolvedValue.IsValid()) {
                 ApplyRuntimeProperty(property, resolvedValue, true);
+            } else if (missingDataPath) {
+                ApplyRuntimeProperty(property, JsonValue(), true);
             }
 #endif
             return;
@@ -992,10 +1122,13 @@ void Component::OnDataUpdate(const std::string& property, const JsonValue& value
                 .componentId = componentId_,
                 .dataModel = GetDynamicResolveDataModel(),
                 .allowExpression = true,
+                .missingPathPolicy = MissingPathPolicy::DEFER_UNTIL_DATA_UPDATE,
                 .localVariables = localVariables_ };
             ResolvedValue resolved = DynamicValueResolver::Resolve(binding.functionCallDescriptor_, context);
             if (resolved.success && resolved.value.IsValid()) {
                 ApplyRuntimeProperty(property, resolved.value, true);
+            } else if (!value.IsValid()) {
+                ApplyRuntimeProperty(property, JsonValue(), true);
             }
             return;
         }
@@ -1008,6 +1141,16 @@ void Component::ApplyRuntimeProperty(const std::string& property, const JsonValu
     PropertyDeclaration declaration;
     if (TryGetPropertyDeclaration(property, declaration)) {
         if (fromDynamicUpdate && !declaration.allowDynamic) {
+            return;
+        }
+
+        if (declaration.resetOnTypeMismatch && declaration.type == PropertyValueType::STRING && value.IsValid() &&
+            !value.IsString()) {
+            ReportSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
+                "Property " + declaration.name + " expects string value, got type '" + value.GetTypeName() +
+                    "', value has been coerced to string",
+                property);
+            RemoveProperty(property);
             return;
         }
 
@@ -1051,6 +1194,7 @@ PropertyDeclaration Component::GetCommonPropertyDeclaration(const std::string& p
                 return PropertyDeclaration { .name = ACCESSIBILITY_LABEL_PROPERTY,
                     .type = PropertyValueType::STRING,
                     .allowDynamic = true,
+                    .resetOnTypeMismatch = true,
                     .fallbackString = "",
                     .applyValue = [&component](const JsonValue& value) {
                         component.SetAccessibilityLabel(value.GetStringValue(""));
@@ -1061,6 +1205,7 @@ PropertyDeclaration Component::GetCommonPropertyDeclaration(const std::string& p
                 return PropertyDeclaration { .name = ACCESSIBILITY_DESCRIPTION_PROPERTY,
                     .type = PropertyValueType::STRING,
                     .allowDynamic = true,
+                    .resetOnTypeMismatch = true,
                     .fallbackString = "",
                     .applyValue = [&component](const JsonValue& value) {
                         component.SetAccessibilityDescription(value.GetStringValue(""));
@@ -1522,6 +1667,51 @@ void Component::ValidateChecksSpecialProperty(const JsonValue& value)
     }
 }
 
+void Component::ValidateActionEventProperty(const JsonValue& value)
+{
+    JsonValue eventValue = value.GetItem("event");
+    if (!eventValue.IsObject()) {
+        std::string actualType = eventValue.GetTypeName();
+        ReportSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
+            "Property event expects object value, got type '" + actualType + "', field has been ignored",
+            "action.event");
+        return;
+    }
+    if (!eventValue.Has("name")) {
+        ReportSchemaWarning(
+            SCHEMA_ERROR_CODE_REQUIRED_MISS, "Property name is required, field has been ignored", "action.event.name");
+        return;
+    }
+
+    JsonValue nameValue = eventValue.GetItem("name");
+    if (!nameValue.IsString()) {
+        std::string actualType = nameValue.GetTypeName();
+        ReportSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
+            "Property name expects string value, got type '" + actualType + "', field has been ignored",
+            "action.event.name");
+    }
+    if (eventValue.Has("context")) {
+        JsonValue contextValue = eventValue.GetItem("context");
+        if (!contextValue.IsObject()) {
+            std::string actualType = contextValue.GetTypeName();
+            ReportSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
+                "Property context expects object value, got type '" + actualType + "', fallback to empty object",
+                "action.event.context");
+        }
+    }
+}
+
+void Component::ValidateActionFunctionCallProperty(const JsonValue& value)
+{
+    JsonValue functionCallValue = value.GetItem("functionCall");
+    if (!functionCallValue.IsObject()) {
+        std::string actualType = functionCallValue.GetTypeName();
+        ReportSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
+            "Property functionCall expects object value, got type '" + actualType + "', field has been ignored",
+            "action.functionCall");
+    }
+}
+
 void Component::ValidateActionSpecialProperty(const JsonValue& value)
 {
     if (!value.IsObject()) {
@@ -1545,46 +1735,10 @@ void Component::ValidateActionSpecialProperty(const JsonValue& value)
     }
 
     if (hasEvent) {
-        JsonValue eventValue = value.GetItem("event");
-        if (!eventValue.IsObject()) {
-            std::string actualType = eventValue.GetTypeName();
-            ReportSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
-                "Property event expects object value, got type '" + actualType + "', field has been ignored",
-                "action.event");
-            return;
-        }
-        if (!eventValue.Has("name")) {
-            ReportSchemaWarning(SCHEMA_ERROR_CODE_REQUIRED_MISS, "Property name is required, field has been ignored",
-                "action.event.name");
-            return;
-        }
-
-        JsonValue nameValue = eventValue.GetItem("name");
-        if (!nameValue.IsString()) {
-            std::string actualType = nameValue.GetTypeName();
-            ReportSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
-                "Property name expects string value, got type '" + actualType + "', field has been ignored",
-                "action.event.name");
-        }
-        if (eventValue.Has("context")) {
-            JsonValue contextValue = eventValue.GetItem("context");
-            if (!contextValue.IsObject()) {
-                std::string actualType = contextValue.GetTypeName();
-                ReportSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
-                    "Property context expects object value, got type '" + actualType + "', fallback to empty object",
-                    "action.event.context");
-            }
-        }
+        ValidateActionEventProperty(value);
         return;
     }
-
-    JsonValue functionCallValue = value.GetItem("functionCall");
-    if (!functionCallValue.IsObject()) {
-        std::string actualType = functionCallValue.GetTypeName();
-        ReportSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
-            "Property functionCall expects object value, got type '" + actualType + "', field has been ignored",
-            "action.functionCall");
-    }
+    ValidateActionFunctionCallProperty(value);
 }
 
 void Component::SetVisibility(A2UIVisibility visibility)
@@ -1635,43 +1789,197 @@ void Component::ApplySchemaProperty(const std::string& propertyKey, const JsonVa
     ApplyRuntimeProperty(propertyKey, JsonValue(), false);
 }
 
+bool Component::HandleUnsupportedExpression(const PropertyBindingState& state, const JsonValue& valueJson)
+{
+    if (!IsExpressionCandidate(valueJson) || state.allowExpression) {
+        return false;
+    }
+    ReportSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
+        "Property " + state.resolvedBindingKey + " does not support expression values, field has been ignored",
+        state.resolvedBindingKey);
+    LOG_A2UI(LOG_WARN, "SetPropertyFromDescriptor: property '%{public}s' does not support expression values",
+        state.declarationKey.c_str());
+    ApplyResolvedPropertyValue(state.declarationKey, state.resolvedBindingKey, JsonValue());
+    return true;
+}
+
+bool Component::HandleObjectLiteral(const PropertyBindingState& state, const JsonValue& valueJson)
+{
+    if (!valueJson.IsObject() || valueJson.Has("path") || valueJson.Has("call")) {
+        return false;
+    }
+    if (state.hasDeclaration && state.declaration.type == PropertyValueType::OBJECT) {
+        ApplyResolvedPropertyValue(state.declarationKey, state.resolvedBindingKey, valueJson);
+        return true;
+    }
+    ReportSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
+        "Property " + state.resolvedBindingKey +
+            " expects direct value or dynamic descriptor, object literal has been dropped",
+        state.resolvedBindingKey);
+    if (state.shouldFallbackOnNullOrEmptyObject) {
+        ApplyResolvedPropertyValue(state.declarationKey, state.resolvedBindingKey, JsonValue());
+        return true;
+    }
+    LOG_A2UI(LOG_WARN,
+        "SetPropertyFromDescriptor: unsupported object descriptor for property '%{public}s', field dropped",
+        state.descriptorKey.c_str());
+    RemoveProperty(state.resolvedBindingKey);
+    return true;
+}
+
+void Component::SyncExpressionBindings(const std::string& bindingKey, const JsonValue& valueJson)
+{
+    RemoveBindingsForProperty(bindingKey);
+#ifdef ENABLE_EXPRESSION_ENGINE
+    std::string expression =
+        valueJson.IsString() ? ExpressionEngine::ExtractExpression(valueJson.GetStringValue("")) : "";
+    std::vector<Dependency> dependencies = CollectExpressionDependencies(expression);
+    std::vector<std::string> dependencyNames;
+    std::vector<std::string> dataModelPaths;
+    for (const auto& dependency : dependencies) {
+        AppendUniqueString(dependencyNames, dependency.variableName);
+        if (dependency.variableName == "__dataModel") {
+            AppendUniqueString(dataModelPaths, dependency.path);
+        }
+    }
+    if (expression.empty() || dependencyNames.empty()) {
+        return;
+    }
+    if (dataModelPaths.empty()) {
+        dataBindings_.emplace_back(bindingKey, expression, dependencyNames);
+        return;
+    }
+    for (const auto& dataPath : dataModelPaths) {
+        DataBinding expressionBinding(bindingKey, expression, dependencyNames);
+        expressionBinding.dataPath_ = dataPath;
+        dataBindings_.push_back(std::move(expressionBinding));
+    }
+#endif
+}
+
+void Component::HandleResolvedPathBinding(const PropertyBindingState& state, const ResolvedValue& resolved)
+{
+    if (state.hasDeclaration && !state.declaration.allowDynamic) {
+        RemoveBindingsForProperty(state.resolvedBindingKey);
+        ReportSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
+            "Property " + state.declarationKey + " does not support dynamic binding, path '" + resolved.path +
+                "' has been ignored",
+            state.resolvedBindingKey);
+        LOG_A2UI(LOG_WARN,
+            "SetPropertyFromDescriptor: property '%{public}s' does not support dynamic binding, ignore path "
+            "'%{public}s'",
+            state.declarationKey.c_str(), resolved.path.c_str());
+        return;
+    }
+    SyncPathBinding(state.resolvedBindingKey, resolved.path);
+    ApplyResolvedPathValue(state.declarationKey, state.resolvedBindingKey, resolved, state.declaration,
+        state.shouldFallbackOnNullOrEmptyObject);
+    if (!resolved.success) {
+        LOG_A2UI(LOG_WARN, "SetPropertyFromDescriptor: path not found for property '%{public}s', path='%{public}s'",
+            state.resolvedBindingKey.c_str(), resolved.path.c_str());
+    }
+}
+
+void Component::ApplyFunctionCallMissingPathFallback(const PropertyBindingState& state, const JsonValue& valueJson)
+{
+    std::shared_ptr<DataModel> dataModel = GetDynamicResolveDataModel();
+    if (dataModel == nullptr) {
+        return;
+    }
+    for (const auto& path : DynamicValueResolver::ExtractDataPaths(valueJson)) {
+        if (!dataModel->GetNode(path).has_value()) {
+            ApplyResolvedPropertyValue(state.declarationKey, state.resolvedBindingKey, JsonValue());
+            return;
+        }
+    }
+}
+
+void Component::HandleResolvedFunctionCall(
+    const PropertyBindingState& state, const JsonValue& valueJson, const ResolvedValue& resolved)
+{
+    if (state.hasDeclaration && !state.declaration.allowDynamic) {
+        RemoveBindingsForProperty(state.resolvedBindingKey);
+        ReportSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
+            "Property " + state.declarationKey + " does not support dynamic functionCall binding",
+            state.resolvedBindingKey);
+        return;
+    }
+    if (resolved.success) {
+        ApplyResolvedFunctionCallValue(state.declarationKey, state.resolvedBindingKey, resolved);
+    } else {
+        ApplyFunctionCallMissingPathFallback(state, valueJson);
+    }
+    SyncFunctionCallBindings(state.resolvedBindingKey, valueJson);
+}
+
+void Component::HandleInvalidPathBinding(const PropertyBindingState& state)
+{
+    ReportSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
+        "Property " + state.resolvedBindingKey + " contains invalid path binding and has been dropped",
+        state.resolvedBindingKey);
+    LOG_A2UI(LOG_WARN, "SetPropertyFromDescriptor: invalid path binding for property '%{public}s', field dropped",
+        state.resolvedBindingKey.c_str());
+    RemoveProperty(state.resolvedBindingKey);
+}
+
+void Component::HandleResolvedExpression(
+    const PropertyBindingState& state, const JsonValue& valueJson, const ResolvedValue& resolved)
+{
+    if (!resolved.success) {
+        LOG_A2UI(LOG_WARN,
+            "SetPropertyFromDescriptor: expression resolve failed for property '%{public}s', reason='%{public}s'",
+            state.resolvedBindingKey.c_str(), resolved.errorMessage.c_str());
+        ApplyResolvedPropertyValue(state.declarationKey, state.resolvedBindingKey, JsonValue());
+        SyncExpressionBindings(state.resolvedBindingKey, valueJson);
+        return;
+    }
+    JsonValue propValue = resolved.value;
+    if (!propValue.IsValid() || propValue.IsNull()) {
+        if (state.shouldFallbackOnNullOrEmptyObject && propValue.IsNull()) {
+            ApplyResolvedPropertyValue(state.declarationKey, state.resolvedBindingKey, JsonValue());
+            SyncExpressionBindings(state.resolvedBindingKey, valueJson);
+            return;
+        }
+        LOG_A2UI(LOG_INFO, "SetPropertyFromDescriptor: property '%{public}s' resolved to invalid/null, skipped",
+            state.resolvedBindingKey.c_str());
+        SyncExpressionBindings(state.resolvedBindingKey, valueJson);
+        return;
+    }
+    SyncExpressionBindings(state.resolvedBindingKey, valueJson);
+    ApplyRuntimeProperty(state.declarationKey, propValue, false);
+    if (state.resolvedBindingKey != state.declarationKey) {
+        OnPropertyApplied(state.resolvedBindingKey, propValue);
+    }
+}
+
+void Component::HandleDirectResolvedValue(
+    const PropertyBindingState& state, const JsonValue& valueJson, const ResolvedValue& resolved)
+{
+    JsonValue propValue = resolved.success ? resolved.value : valueJson;
+    if (!propValue.IsValid() || propValue.IsNull()) {
+        if (state.shouldFallbackOnNullOrEmptyObject && propValue.IsNull()) {
+            ApplyResolvedPropertyValue(state.declarationKey, state.resolvedBindingKey, propValue);
+            return;
+        }
+        LOG_A2UI(LOG_INFO, "SetPropertyFromDescriptor: property '%{public}s' resolved to invalid/null, skipped",
+            state.resolvedBindingKey.c_str());
+        return;
+    }
+    ApplyResolvedPropertyValue(state.declarationKey, state.resolvedBindingKey, propValue);
+}
+
 void Component::ResolveAndBindProperty(const std::string& descriptorKey, const std::string& declarationKey,
     const std::string& bindingKey, const JsonValue& valueJson)
 {
-    std::string resolvedBindingKey = bindingKey.empty() ? declarationKey : bindingKey;
-    PropertyDeclaration declaration;
-    bool hasDeclaration = TryGetPropertyDeclaration(declarationKey, declaration);
-    bool shouldFallbackOnNullOrEmptyObject = hasDeclaration && declaration.type != PropertyValueType::OBJECT;
-    bool allowExpression = hasDeclaration && declaration.allowExpression && IsExpressionSupported();
-
-    if (IsExpressionCandidate(valueJson) && !allowExpression) {
-        ReportSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
-            "Property " + resolvedBindingKey + " does not support expression values, field has been ignored",
-            resolvedBindingKey);
-        LOG_A2UI(LOG_WARN, "SetPropertyFromDescriptor: property '%{public}s' does not support expression values",
-            declarationKey.c_str());
-        ApplyResolvedPropertyValue(declarationKey, resolvedBindingKey, JsonValue());
-        return;
-    }
-
-    // other properties will reach here
-    if (valueJson.IsObject() && !valueJson.Has("path") && !valueJson.Has("call")) {
-        if (hasDeclaration && declaration.type == PropertyValueType::OBJECT) {
-            ApplyResolvedPropertyValue(declarationKey, resolvedBindingKey, valueJson);
-            return;
-        }
-        ReportSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
-            "Property " + resolvedBindingKey +
-                " expects direct value or dynamic descriptor, object literal has been dropped",
-            resolvedBindingKey);
-        if (shouldFallbackOnNullOrEmptyObject) {
-            ApplyResolvedPropertyValue(declarationKey, resolvedBindingKey, JsonValue());
-            return;
-        }
-        LOG_A2UI(LOG_WARN,
-            "SetPropertyFromDescriptor: unsupported object descriptor for property '%{public}s', field dropped",
-            descriptorKey.c_str());
-        RemoveProperty(resolvedBindingKey);
+    PropertyBindingState state;
+    state.descriptorKey = descriptorKey;
+    state.declarationKey = declarationKey;
+    state.resolvedBindingKey = bindingKey.empty() ? declarationKey : bindingKey;
+    state.hasDeclaration = TryGetPropertyDeclaration(declarationKey, state.declaration);
+    state.shouldFallbackOnNullOrEmptyObject =
+        state.hasDeclaration && state.declaration.type != PropertyValueType::OBJECT;
+    state.allowExpression = state.hasDeclaration && state.declaration.allowExpression && IsExpressionSupported();
+    if (HandleUnsupportedExpression(state, valueJson) || HandleObjectLiteral(state, valueJson)) {
         return;
     }
 
@@ -1679,153 +1987,86 @@ void Component::ResolveAndBindProperty(const std::string& descriptorKey, const s
         .surfaceId = surfaceId_,
         .componentId = componentId_,
         .dataModel = GetDynamicResolveDataModel(),
-        .allowExpression = allowExpression,
+        .allowExpression = state.allowExpression,
+        .missingPathPolicy = MissingPathPolicy::DEFER_UNTIL_DATA_UPDATE,
         .localVariables = localVariables_ };
     ResolvedValue resolved = DynamicValueResolver::Resolve(valueJson, context);
-
-    if (resolved.source == ResolveSource::PATH) {
-        if (hasDeclaration && !declaration.allowDynamic) {
-            RemoveBindingsForProperty(resolvedBindingKey);
-            ReportSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
-                "Property " + declarationKey + " does not support dynamic binding, path '" + resolved.path +
-                    "' has been ignored",
-                resolvedBindingKey);
-            LOG_A2UI(LOG_WARN,
-                "SetPropertyFromDescriptor: property '%{public}s' does not support dynamic binding, ignore path "
-                "'%{public}s'",
-                declarationKey.c_str(), resolved.path.c_str());
+    switch (resolved.source) {
+        case ResolveSource::PATH:
+            HandleResolvedPathBinding(state, resolved);
             return;
-        }
-
-        SyncPathBinding(resolvedBindingKey, resolved.path);
-        if (resolved.success && resolved.value.IsValid()) {
-            if (resolved.value.IsNull()) {
-                if (shouldFallbackOnNullOrEmptyObject) {
-                    JsonValue fallbackValue;
-                    if (NormalizePropertyValue(declaration, JsonValue(), fallbackValue) && fallbackValue.IsValid()) {
-                        ApplyRuntimeProperty(declarationKey, JsonValue(), false);
-                        if (resolvedBindingKey != declarationKey) {
-                            OnPropertyApplied(resolvedBindingKey, fallbackValue);
-                        }
-                    }
-                }
-            } else {
-                JsonValue initialValue;
-                if (CloneJsonValue(resolved.value, initialValue)) {
-                    ApplyRuntimeProperty(declarationKey, initialValue, true);
-                    MarkDescriptorDynamicBindingsResolved();
-                    if (resolvedBindingKey != declarationKey) {
-                        OnPropertyApplied(resolvedBindingKey, initialValue);
-                    }
-                }
-            }
-        }
-        if (!resolved.success) {
-            LOG_A2UI(LOG_WARN, "SetPropertyFromDescriptor: path not found for property '%{public}s', path='%{public}s'",
-                resolvedBindingKey.c_str(), resolved.path.c_str());
-        }
-        return;
-    }
-
-    if (resolved.source == ResolveSource::FUNCTION_CALL) {
-        if (hasDeclaration && !declaration.allowDynamic) {
-            RemoveBindingsForProperty(resolvedBindingKey);
-            ReportSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
-                "Property " + declarationKey + " does not support dynamic functionCall binding", resolvedBindingKey);
+        case ResolveSource::FUNCTION_CALL:
+            HandleResolvedFunctionCall(state, valueJson, resolved);
             return;
-        }
-        if (resolved.success && resolved.value.IsValid() && !resolved.value.IsNull()) {
-            JsonValue initialValue;
-            if (CloneJsonValue(resolved.value, initialValue)) {
-                ApplyRuntimeProperty(declarationKey, initialValue, true);
-                MarkDescriptorDynamicBindingsResolved();
-                if (resolvedBindingKey != declarationKey) {
-                    OnPropertyApplied(resolvedBindingKey, initialValue);
-                }
-            }
-        }
-        SyncFunctionCallBindings(resolvedBindingKey, valueJson);
-        return;
-    }
-
-    if (resolved.source == ResolveSource::INVALID && valueJson.IsObject() && valueJson.Has("path")) {
-        ReportSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
-            "Property " + resolvedBindingKey + " contains invalid path binding and has been dropped",
-            resolvedBindingKey);
-        LOG_A2UI(LOG_WARN, "SetPropertyFromDescriptor: invalid path binding for property '%{public}s', field dropped",
-            resolvedBindingKey.c_str());
-        RemoveProperty(resolvedBindingKey);
-        return;
-    }
-
-    if (resolved.source == ResolveSource::EXPRESSION && !resolved.success) {
-        ReportSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
-            "Property " + resolvedBindingKey + " expression evaluation failed, fallback has been applied",
-            resolvedBindingKey);
-        LOG_A2UI(LOG_WARN,
-            "SetPropertyFromDescriptor: expression resolve failed for property '%{public}s', reason='%{public}s'",
-            resolvedBindingKey.c_str(), resolved.errorMessage.c_str());
-        ApplyResolvedPropertyValue(declarationKey, resolvedBindingKey, JsonValue());
-        return;
-    }
-
-    if (resolved.source == ResolveSource::EXPRESSION) {
-        JsonValue propValue = resolved.value;
-        if (!propValue.IsValid() || propValue.IsNull()) {
-            if (shouldFallbackOnNullOrEmptyObject && propValue.IsNull()) {
-                ApplyResolvedPropertyValue(declarationKey, resolvedBindingKey, JsonValue());
+        case ResolveSource::EXPRESSION:
+            HandleResolvedExpression(state, valueJson, resolved);
+            return;
+        case ResolveSource::INVALID:
+            if (valueJson.IsObject() && valueJson.Has("path")) {
+                HandleInvalidPathBinding(state);
                 return;
             }
-            LOG_A2UI(LOG_INFO, "SetPropertyFromDescriptor: property '%{public}s' resolved to invalid/null, skipped",
-                resolvedBindingKey.c_str());
+            break;
+        default:
+            break;
+    }
+    HandleDirectResolvedValue(state, valueJson, resolved);
+}
+
+void Component::ApplyResolvedPathValue(const std::string& declarationKey, const std::string& resolvedBindingKey,
+    const ResolvedValue& resolved, const PropertyDeclaration& declaration, bool shouldFallbackOnNullOrEmptyObject)
+{
+    if (!resolved.success || !resolved.value.IsValid()) {
+        JsonValue fallbackValue;
+        if (NormalizePropertyValue(declaration, JsonValue(), fallbackValue) && fallbackValue.IsValid()) {
+            ApplyRuntimeProperty(declarationKey, JsonValue(), false);
+            if (resolvedBindingKey != declarationKey) {
+                OnPropertyApplied(resolvedBindingKey, fallbackValue);
+            }
+        }
+        return;
+    }
+    if (resolved.value.IsNull()) {
+        if (!shouldFallbackOnNullOrEmptyObject) {
             return;
         }
-
-        RemoveBindingsForProperty(resolvedBindingKey);
-#ifdef ENABLE_EXPRESSION_ENGINE
-        std::string expression =
-            valueJson.IsString() ? ExpressionEngine::ExtractExpression(valueJson.GetStringValue("")) : "";
-        std::vector<Dependency> dependencies = CollectExpressionDependencies(expression);
-        std::vector<std::string> dependencyNames;
-        std::vector<std::string> dataModelPaths;
-        for (const auto& dependency : dependencies) {
-            AppendUniqueString(dependencyNames, dependency.variableName);
-            if (dependency.variableName == "__dataModel") {
-                AppendUniqueString(dataModelPaths, dependency.path);
-            }
+        JsonValue fallbackValue;
+        if (!NormalizePropertyValue(declaration, JsonValue(), fallbackValue) || !fallbackValue.IsValid()) {
+            return;
         }
-
-        if (!expression.empty() && !dependencyNames.empty()) {
-            if (dataModelPaths.empty()) {
-                dataBindings_.emplace_back(resolvedBindingKey, expression, dependencyNames);
-            } else {
-                for (const auto& dataPath : dataModelPaths) {
-                    DataBinding expressionBinding(resolvedBindingKey, expression, dependencyNames);
-                    expressionBinding.dataPath_ = dataPath;
-                    dataBindings_.push_back(std::move(expressionBinding));
-                }
-            }
-        }
-#endif
-        ApplyRuntimeProperty(declarationKey, propValue, false);
+        ApplyRuntimeProperty(declarationKey, JsonValue(), false);
         if (resolvedBindingKey != declarationKey) {
-            OnPropertyApplied(resolvedBindingKey, propValue);
+            OnPropertyApplied(resolvedBindingKey, fallbackValue);
         }
         return;
     }
 
-    JsonValue propValue = resolved.success ? resolved.value : valueJson;
-    if (!propValue.IsValid() || propValue.IsNull()) {
-        if (shouldFallbackOnNullOrEmptyObject && propValue.IsNull()) {
-            ApplyResolvedPropertyValue(declarationKey, resolvedBindingKey, JsonValue());
-            return;
-        }
-        LOG_A2UI(LOG_INFO, "SetPropertyFromDescriptor: property '%{public}s' resolved to invalid/null, skipped",
-            resolvedBindingKey.c_str());
+    JsonValue initialValue;
+    if (!CloneJsonValue(resolved.value, initialValue)) {
         return;
     }
+    ApplyRuntimeProperty(declarationKey, initialValue, true);
+    MarkDescriptorDynamicBindingsResolved();
+    if (resolvedBindingKey != declarationKey) {
+        OnPropertyApplied(resolvedBindingKey, initialValue);
+    }
+}
 
-    ApplyResolvedPropertyValue(declarationKey, resolvedBindingKey, propValue);
+void Component::ApplyResolvedFunctionCallValue(
+    const std::string& declarationKey, const std::string& resolvedBindingKey, const ResolvedValue& resolved)
+{
+    if (!resolved.success || !resolved.value.IsValid() || resolved.value.IsNull()) {
+        return;
+    }
+    JsonValue initialValue;
+    if (!CloneJsonValue(resolved.value, initialValue)) {
+        return;
+    }
+    ApplyRuntimeProperty(declarationKey, initialValue, true);
+    MarkDescriptorDynamicBindingsResolved();
+    if (resolvedBindingKey != declarationKey) {
+        OnPropertyApplied(resolvedBindingKey, initialValue);
+    }
 }
 
 void Component::SyncPathBinding(const std::string& bindingKey, const std::string& path)
@@ -1894,6 +2135,7 @@ JsonValue Component::EvaluateCustomExpression(const std::string& rawExpr) const
     }
     EvaluationContext evalContext;
     SetupExpressionEvaluationContext(evalContext, renderId_, surfaceId_, componentId_);
+    ApplyExpressionLocalVariables(evalContext, localVariables_);
     JsonValue value = ExpressionEngine::GetInstance().EvaluateAsJsonValue(rawExpr, evalContext);
     if (HasExpressionContextError(evalContext) &&
         (IsSoftExpressionContextError(evalContext.lastError) || !value.IsValid())) {

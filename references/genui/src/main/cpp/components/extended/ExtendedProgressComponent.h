@@ -51,6 +51,16 @@ public:
     {
         return progressType_;
     }
+
+    float GetStrokeWidthForTest() const
+    {
+        return strokeWidth_;
+    }
+
+    void ApplyStrokeWidthValueForTest(const JsonValue& value)
+    {
+        ApplyStrokeWidthValue(value);
+    }
 #endif
 
 protected:
@@ -60,6 +70,7 @@ protected:
 
 private:
     void ReportStyleWarning(const std::string& code, const std::string& styleName, const std::string& message) const;
+    void ApplyTotalPrivateAttribute(const JsonValue& descriptor);
     void SetValue(float value);
     void SetTotal(float total);
     void SetColor(uint32_t color);
@@ -68,9 +79,12 @@ private:
     uint32_t ResolveLinearDefaultColor() const;
     void ApplyColorValue(const JsonValue& value);
     void ApplyProgressTypeValue(const JsonValue& value);
+    void ApplyStrokeWidthValue(const JsonValue& value);
+    void SetStrokeWidth(float strokeWidth);
 
     float value_ = 0.0F;
     float total_ = 100.0F;
+    float strokeWidth_ = 4.0F;
     uint32_t color_ = 0xFF0A59F7u;
     int32_t progressType_ = 0;
     bool useDefaultColor_ = true;

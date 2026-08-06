@@ -1,5 +1,18 @@
 {
   "type": "object",
+  "$defs": {
+    "NonNegativeIntegerValue": {
+      "oneOf": [
+        {
+          "type": "integer",
+          "minimum": 0
+        },
+        {
+          "$ref": "../common_types.json#/$defs/ExtendedDynamicValueRef"
+        }
+      ]
+    }
+  },
   "allOf": [
     {
       "$ref": "../common_types.json#/$defs/ComponentCommon"
@@ -21,8 +34,8 @@
           }
         },
         "currentIndex": {
-          "$ref": "../common_types.json#/$defs/DynamicNumber",
-          "description": "Index of the currently displayed page."
+          "$ref": "#/$defs/NonNegativeIntegerValue",
+          "description": "Index of the currently displayed page. Resolved values must be non-negative integers less than children.length."
         }
       },
       "required": [

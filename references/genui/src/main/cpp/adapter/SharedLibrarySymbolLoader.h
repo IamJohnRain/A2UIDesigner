@@ -68,7 +68,7 @@ private:
 
     static std::vector<SharedLibraryEntry> BuildLibraryEntries();
     SharedLibraryEntry* FindLibraryEntry(SharedLibraryId libraryId);
-    void* OpenLibrary(SharedLibraryEntry& libraryEntry);
+    void* OpenLibrary(SharedLibraryEntry& libraryEntry) const;
     bool IsSupported(int32_t minRomApiVersion) const;
 
     int32_t currentRomApiVersion_ = ROM_API_VERSION_UNKNOWN;

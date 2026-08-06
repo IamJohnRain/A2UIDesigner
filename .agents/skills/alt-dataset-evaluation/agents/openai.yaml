@@ -1,0 +1,4 @@
+interface:
+  display_name: "ALT Dataset Evaluation"
+  short_description: "Convert, generate, render, and audit 60 ALT layout cases"
+  default_prompt: "Run the 60-case TaskSpec to SVG, ALT/ASC, DSL, and PNG evaluation pipeline, then report layout and color issues."

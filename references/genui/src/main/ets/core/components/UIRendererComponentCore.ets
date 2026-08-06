@@ -29,9 +29,12 @@ import { common, EnvironmentCallback, Configuration, ConfigurationConstant } fro
 import { deviceInfo } from '@kit.BasicServicesKit';
 import { i18n } from '@kit.LocalizationKit';
 
-const BUILT_IN_CUSTOM_COMPONENT_DEFINITIONS: CustomComponentDefinition[] = [
-  createExtendedRowDefinition()
-];
+const BUILT_IN_CUSTOM_COMPONENT_DEFINITIONS: CustomComponentDefinition[] = [];
+// API < 23 时 Row 组件走 ExtendedRow ETS 兼容路径；
+// API >= 23 时原生 Row 由 C++ 侧 MATCH_PARENT 布局策略接管。
+if (deviceInfo.sdkApiVersion < 23) {
+  BUILT_IN_CUSTOM_COMPONENT_DEFINITIONS.push(createExtendedRowDefinition());
+}
 
 export function resolveAreaLengthVpForBreakpoint(value: Length | undefined): number | undefined {
   if (typeof value === 'number') {
@@ -348,6 +351,12 @@ export struct UIRendererComponentCore {
         ContentSlot(this.rootSlot)
       }
       .width('100%')
+      .pixelRound({
+        start: PixelRoundCalcPolicy.NO_FORCE_ROUND,
+        end: PixelRoundCalcPolicy.NO_FORCE_ROUND,
+        top: PixelRoundCalcPolicy.NO_FORCE_ROUND,
+        bottom: PixelRoundCalcPolicy.NO_FORCE_ROUND
+      })
       .onAppear(() => {
         if (!this.canUseNativeRenderer('onAppear')) {
           return;

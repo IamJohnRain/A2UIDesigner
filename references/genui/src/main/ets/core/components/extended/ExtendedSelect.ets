@@ -19,6 +19,7 @@ import { CustomComponentDefinition } from '../A2UI/CustomComponentFactory';
 import { getIconSystemSymbolNames, resolveIconSystemSymbolResourceName } from '../A2UI/CustomIcon';
 import {
   parseCustomProps,
+  resolveDynamicValueOptionValueWithNative,
   resolveDynamicStringOptionValue,
   parseJsonArrayOptionValue,
   resolveCustomComponentWarningPathPrefix,
@@ -31,7 +32,7 @@ import { SchemaErrorCode, SchemaErrorInfoManager } from '../../schema/SchemaErro
 import { SchemaResourceLoader } from '../../schema/SchemaResourceLoader';
 import { A2UIDynamicValue } from '../../types/DynamicValue';
 import { A2UIFunctionCall } from '../../types/FunctionCall';
-import { A2UIResolveContext, ResolveResult } from '../../types/runtime/ResolveContext';
+import { A2UIResolveContext, ResolveResult, ResolveSource } from '../../types/runtime/ResolveContext';
 import { DynamicValueResolver } from '../../types/runtime/DynamicValueResolver';
 import {
   A2UIValueType,
@@ -63,14 +64,16 @@ const SELECT_HEX_COLOR_PATTERN: RegExp = /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
 const SELECT_FONT_WEIGHT_ALLOWED: string[] = ['lighter', 'normal', 'regular', 'medium', 'bold', 'bolder'];
 const SELECT_FONT_STYLE_ALLOWED: string[] = ['normal', 'italic'];
 
-const SELECT_FONT_COLOR: Resource = $r('app.color.custom_select_font_color');
-const SELECT_FONT_COLOR_DARK: Resource = $r('app.color.custom_select_font_color_dark');
-const SELECT_SELECTED_OPTION_BG_COLOR: Resource = $r('app.color.custom_select_selected_option_bg_color');
-const SELECT_SELECTED_OPTION_BG_COLOR_DARK: Resource = $r('app.color.custom_select_selected_option_bg_color_dark');
-const SELECT_SELECTED_OPTION_FONT_COLOR: Resource = $r('app.color.custom_select_selected_option_font_color');
-const SELECT_SELECTED_OPTION_FONT_COLOR_DARK: Resource = $r('app.color.custom_select_selected_option_font_color_dark');
-const SELECT_OPTION_FONT_COLOR: Resource = $r('app.color.custom_select_option_font_color');
-const SELECT_OPTION_FONT_COLOR_DARK: Resource = $r('app.color.custom_select_option_font_color_dark');
+const SELECT_FONT_COLOR: string = '#E5000000';
+const SELECT_FONT_COLOR_DARK: string = '#E5FFFFFF';
+const SELECT_SELECTED_OPTION_BG_COLOR: string = '#33007DFF';
+const SELECT_SELECTED_OPTION_BG_COLOR_DARK: string = '#33317AF7';
+const SELECT_SELECTED_OPTION_FONT_COLOR: string = '#FF007DFF';
+const SELECT_SELECTED_OPTION_FONT_COLOR_DARK: string = '#FF3F97E9';
+const SELECT_OPTION_FONT_COLOR: string = '#FF182431';
+const SELECT_OPTION_FONT_COLOR_DARK: string = '#DBFFFFFF';
+const SELECT_BACKGROUND_COLOR: string = '#0C000000';
+const SELECT_BACKGROUND_COLOR_DARK: string = '#19FFFFFF';
 const DEFAULT_MENU_ALIGN: string = MENU_ALIGN_START;
 
 interface SelectOptionItem {
@@ -180,6 +183,18 @@ function isDynamicValueShape(value: Object | undefined): boolean {
   return record['path'] !== undefined || record['call'] !== undefined;
 }
 
+function isFullExpressionString(value: Object | undefined): boolean {
+  if (typeof value !== 'string') {
+    return false;
+  }
+  let trimmed: string = value.trim();
+  return trimmed.startsWith('{{') && trimmed.endsWith('}}');
+}
+
+function isDynamicObjectValueShape(value: Object | undefined): boolean {
+  return isDynamicValueShape(value) || isFullExpressionString(value);
+}
+
 function buildSelectWarningPath(attribute: CustomComponentAttribute | undefined, path: string): string {
   let prefix: string = resolveCustomComponentWarningPathPrefix(attribute);
   if (path.length === 0) {
@@ -217,6 +232,11 @@ function buildSelectResolveContext(attribute: CustomComponentAttribute | undefin
     dataModel: attribute.dataModel,
     invokeFunction: (functionCall: A2UIFunctionCall): A2UIValueType => {
       return FunctionBridge.invoke(functionCall, surfaceId, componentId, renderId);
+    },
+    reportError: (source: ResolveSource, errorMessage: string): void => {
+      if (source !== 'function') {
+        FunctionBridge.reportDynamicValueResolveError(surfaceId, componentId, renderId, errorMessage);
+      }
     }
   } as A2UIResolveContext;
 }
@@ -227,6 +247,11 @@ function resolveSelectDynamicValue(
 ): A2UIValueType | undefined {
   if (value === undefined) {
     return undefined;
+  }
+  let nativeResolved: A2UIValueType | undefined =
+    resolveDynamicValueOptionValueWithNative(value, attribute);
+  if (nativeResolved !== undefined) {
+    return nativeResolved;
   }
   let result: ResolveResult<A2UIValueType> =
     DynamicValueResolver.resolveValue(value as A2UIDynamicValue, buildSelectResolveContext(attribute));
@@ -698,7 +723,7 @@ function validateSelectSymbolIconSchema(
   if (value === undefined || value === null) {
     return;
   }
-  if (isDynamicValueShape(value)) {
+  if (isDynamicObjectValueShape(value)) {
     return;
   }
   if (!isRecordValue(value)) {
@@ -837,7 +862,7 @@ function validateSelectFontSchema(
   if (value === undefined || value === null) {
     return;
   }
-  if (isDynamicValueShape(value)) {
+  if (isDynamicObjectValueShape(value)) {
     return;
   }
   if (!isRecordValue(value)) {
@@ -903,7 +928,7 @@ function validateMenuAlignSchema(
   value: Object | undefined,
   path: string
 ): void {
-  if (value === undefined || value === null || isDynamicValueShape(value)) {
+  if (value === undefined || value === null || isDynamicObjectValueShape(value)) {
     return;
   }
   if (typeof value === 'string') {
@@ -928,7 +953,7 @@ function validateMenuAlignSchema(
   validateEnumStringValue(attribute, align['alignType'], `${path}.alignType`, MENU_ALIGN_ALLOWED);
   let offset: Object | undefined = align['offset'];
   if (offset !== undefined && offset !== null) {
-    if (isDynamicValueShape(offset)) {
+    if (isDynamicObjectValueShape(offset)) {
       return;
     }
     if (!isRecordValue(offset)) {
@@ -959,7 +984,7 @@ function validateDividerSchema(
   if (value === undefined || value === null) {
     return;
   }
-  if (isDynamicValueShape(value)) {
+  if (isDynamicObjectValueShape(value)) {
     return;
   }
   if (!isRecordValue(value)) {
@@ -1320,15 +1345,17 @@ export struct ExtendedSelect {
         .onClick((event: ClickEvent) => {
           this.dispatchSelectClick(event);
         })
-        .attributeModifier(buildExtendedCommonStyleModifier<SelectAttribute>(this.attribute))
+        .attributeModifier(buildExtendedCommonStyleModifier<SelectAttribute>(this.attribute, {
+          backgroundColor: this.resolveThemeColor(SELECT_BACKGROUND_COLOR, SELECT_BACKGROUND_COLOR_DARK)
+        }))
+        .id(this.resolveComponentId())
+        .layoutWeight(this.resolveWeight())
+        .onAppear(() => {
+          dispatchComponentEvent(this.attribute, 'onAppear');
+        })
+        .accessibilityText(this.resolveAccessibilityLabel())
+        .accessibilityDescription(this.resolveAccessibilityDescription())
     }
-    .id(this.resolveComponentId())
-    .layoutWeight(this.resolveWeight())
-    .onAppear(() => {
-      dispatchComponentEvent(this.attribute, 'onAppear');
-    })
-    .accessibilityText(this.resolveAccessibilityLabel())
-    .accessibilityDescription(this.resolveAccessibilityDescription())
   }
 
   private resolveDisplayValue(): string {
@@ -1453,7 +1480,7 @@ export struct ExtendedSelect {
     dispatchComponentEvent(this.attribute, 'onClick', payload);
   }
 
-  private resolveThemeColor(lightColor: Resource, darkColor: Resource): Resource {
+  private resolveThemeColor(lightColor: string, darkColor: string): string {
     return this.attribute?.componentTheme?.colorMode === ThemeMode.DARK ? darkColor : lightColor;
   }
 
@@ -1756,9 +1783,11 @@ export struct ExtendedSelect {
       return;
     }
     let colorStr: string | undefined = resolveDynamicStringOptionValue(value, this.attribute);
-    if (colorStr !== undefined) {
-      setter(colorStr);
+    if (colorStr === undefined || !isValidSelectColorString(colorStr)) {
+      setter('');
+      return;
     }
+    setter(colorStr);
   }
 
   private resolveFontOption(value: Object | undefined, target: SelectFont): void {
@@ -1810,8 +1839,7 @@ export struct ExtendedSelect {
         target.alignType = normalizedAlignStr;
       }
       let offsetValue: Object | undefined = map['offset'];
-      if (offsetValue !== undefined && offsetValue !== null && typeof offsetValue === 'object' &&
-        !Array.isArray(offsetValue)) {
+      if (offsetValue !== undefined && offsetValue !== null) {
         let offsetMap: Record<string, Object> | undefined = resolveSelectRecordValue(offsetValue, this.attribute);
         if (offsetMap === undefined) {
           return;

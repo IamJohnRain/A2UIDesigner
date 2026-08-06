@@ -19,6 +19,7 @@ import { CapabilitiesCore } from '../base/CapabilitiesCore';
 
 export class SchemaResourceLoader {
   private static hostContext: common.Context | undefined = undefined;
+  private static templateProvider: ((relativePath: string) => string | undefined) | undefined = undefined;
   private static templateCache: Map<string, string> = new Map();
   private static errorReporter: ((message: string) => void) | undefined = undefined;
 
@@ -27,6 +28,12 @@ export class SchemaResourceLoader {
 
   public static setHostContext(hostContext: common.Context | undefined): void {
     SchemaResourceLoader.hostContext = hostContext;
+  }
+
+  public static setTemplateProvider(
+    templateProvider: ((relativePath: string) => string | undefined) | undefined
+  ): void {
+    SchemaResourceLoader.templateProvider = templateProvider;
   }
 
   public static setErrorReporter(errorReporter: ((message: string) => void) | undefined): void {
@@ -63,6 +70,12 @@ export class SchemaResourceLoader {
   }
 
   private static loadTemplate(relativePath: string): string {
+    if (SchemaResourceLoader.templateProvider !== undefined) {
+      const template: string | undefined = SchemaResourceLoader.templateProvider(relativePath);
+      if (template !== undefined) {
+        return template.trim();
+      }
+    }
     if (SchemaResourceLoader.hostContext === undefined) {
       SchemaResourceLoader.reportError(`[SchemaResourceLoader] host context is not ready, path=${relativePath}`);
       return '';

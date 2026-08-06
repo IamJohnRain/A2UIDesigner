@@ -28,11 +28,7 @@ const std::unordered_map<std::string, StylePropertyName>& GetStylePropertyNameMa
     static const std::unordered_map<std::string, StylePropertyName> propertyNameMap = { { "width",
                                                                                             StylePropertyName::WIDTH },
         { "height", StylePropertyName::HEIGHT }, { "padding", StylePropertyName::PADDING },
-        { "paddingTop", StylePropertyName::PADDING }, { "paddingRight", StylePropertyName::PADDING },
-        { "paddingBottom", StylePropertyName::PADDING }, { "paddingLeft", StylePropertyName::PADDING },
-        { "margin", StylePropertyName::MARGIN }, { "marginTop", StylePropertyName::MARGIN },
-        { "marginRight", StylePropertyName::MARGIN }, { "marginBottom", StylePropertyName::MARGIN },
-        { "marginLeft", StylePropertyName::MARGIN }, { "backgroundColor", StylePropertyName::BACKGROUND_COLOR },
+        { "margin", StylePropertyName::MARGIN }, { "backgroundColor", StylePropertyName::BACKGROUND_COLOR },
         { "borderRadius", StylePropertyName::BORDER_RADIUS }, { "borderWidth", StylePropertyName::BORDER_WIDTH },
         { "borderColor", StylePropertyName::BORDER_COLOR }, { "fontColor", StylePropertyName::FONT_COLOR },
         { "fontSize", StylePropertyName::FONT_SIZE }, { "fontWeight", StylePropertyName::FONT_WEIGHT },
@@ -44,11 +40,9 @@ const std::unordered_map<std::string, StylePropertyName>& GetStylePropertyNameMa
         { "showUnderline", StylePropertyName::SHOW_UNDERLINE }, { "visibility", StylePropertyName::VISIBILITY },
         { "opacity", StylePropertyName::OPACITY }, { "shadow", StylePropertyName::SHADOW },
         { "flexShrink", StylePropertyName::FLEX_SHRINK }, { "backgroundImage", StylePropertyName::BACKGROUND_IMAGE },
-        { "backgroundimage", StylePropertyName::BACKGROUND_IMAGE },
         { "backgroundImageSizeWithStyle", StylePropertyName::BACKGROUND_IMAGE_SIZE },
-        { "backgroundimageSizeWithStyle", StylePropertyName::BACKGROUND_IMAGE_SIZE },
         { "clip", StylePropertyName::CLIP }, { "layoutWeight", StylePropertyName::LAYOUT_WEIGHT },
-        { "constraintSize", StylePropertyName::CONSTRAINT_SIZE } };
+        { "constraintSize", StylePropertyName::CONSTRAINT_SIZE }, { "aspectRatio", StylePropertyName::ASPECT_RATIO } };
     return propertyNameMap;
 }
 
@@ -93,10 +87,6 @@ StylePropertyName StyleParser::ToPropertyName(const std::string& rawName)
     auto iter = propertyNameMap.find(rawName);
     if (iter != propertyNameMap.end()) {
         return iter->second;
-    }
-    if (rawName == "backgroundImageSize" || rawName == "backgroundimageSize" ||
-        rawName == "backgroundImageSizeWithStyle" || rawName == "backgroundimageSizeWithStyle") {
-        return StylePropertyName::BACKGROUND_IMAGE_SIZE;
     }
     if (rawName == "linearGradient") {
         return StylePropertyName::LINEAR_GRADIENT;

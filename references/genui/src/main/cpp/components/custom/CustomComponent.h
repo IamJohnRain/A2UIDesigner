@@ -37,13 +37,16 @@
 
 namespace NativeModule {
 
+struct DynamicValueDependencies;
+struct ResolvedValue;
+
 std::unique_ptr<JsonAdapter> BuildComponentThemeJson(const ThemeContext& themeContext);
 void SetComponentThemeProperty(napi_env env, napi_value object, const ThemeContext& themeContext);
 std::string ResolveCustomPropertyWarningPath(const std::string& componentId, const std::string& propertyKey);
 
 class CustomComponent : public Component {
 public:
-    explicit CustomComponent(const std::string& componentType);
+    explicit CustomComponent(const std::string& componentType, bool preserveDynamicDescriptors = false);
     ~CustomComponent() override;
     static CustomComponent* FindByHandle(uintptr_t handle);
     bool ValidateChecks(const std::string& targetJsonLiteral, std::string* failedMessage) const;
@@ -56,6 +59,7 @@ public:
     bool SetRuntimeCustomProperty(const std::string& propertyName, const JsonValue& value);
     bool RegisterDynamicValueCallback(const std::string& propertyName, const JsonValue& descriptor, napi_env env,
         napi_value callback, std::string* errorMessage);
+    void ClearDynamicValueCallback(const std::string& propertyName);
     void SyncCheckedToBoundDataModel(const std::string& bindingPath, bool value);
     std::optional<JsonValue> GetProperty(const std::string& key) const;
 
@@ -64,6 +68,7 @@ protected:
     void OnAddChild(const std::shared_ptr<Component>& child, size_t index) override;
     void OnMoveChild(const std::shared_ptr<Component>& child, size_t currentIndex, size_t targetIndex) override;
     void OnRemoveChild(const std::shared_ptr<Component>& child) override;
+    void OnAttachToParent() override;
     void ApplyCommonAttributes(const JsonValue& descriptor) override;
     void ApplyPrivateAttributes(const JsonValue& descriptor) override;
     void OnDataUpdate(const std::string& property, const JsonValue& value) override;
@@ -77,10 +82,17 @@ protected:
         const ChildListDescriptor& childList, SurfaceSlot& surfaceSlot, std::list<std::string>& childIds) override;
 
 private:
+    enum class FlexShrinkStyleState { UNSPECIFIED, EXPLICIT_VALUE, DYNAMIC_VALUE, PARENT_DEFAULT };
+
+    void DetachChildFromSlots(const std::shared_ptr<Component>& child);
+    void CacheRawDynamicProperty(const std::string& key, const JsonValue& child);
     void ApplyCustomProperties(const JsonValue& descriptor);
     bool IsExtendedEtsExpressionScope() const;
     // Build a new customProps tree with every {{ }} leaf resolved (read-only).
     JsonValue ResolveExpressionsInValue(const JsonValue& node, const std::string& path) const;
+    JsonValue ResolveExpressionsInObject(const JsonValue& node, const std::string& path) const;
+    JsonValue ResolveExpressionsInArray(const JsonValue& node, const std::string& path) const;
+    JsonValue CloneExpressionValue(const JsonValue& node) const;
     void ParseChecks(const JsonValue& descriptor);
     void ParseExtendedTabsChildListDescriptor(const JsonValue& descriptor);
     void ParseTabsChildListDescriptor(const JsonValue& descriptor);
@@ -89,13 +101,30 @@ private:
     bool CreateCustomComponent();
     void UpdateCustomComponent();
     napi_value CreateAttributeValue() const;
+    void PopulateAttributeIdentity(napi_value attributeValue) const;
+    void PopulateAttributeThemeAndCustomProps(napi_value attributeValue) const;
+    void PopulateAttributeCommonProperties(napi_value attributeValue) const;
+    void PopulateAttributeDataModel(napi_value attributeValue) const;
+    JsonValue ParseCheckTargetValue(const std::string& targetJsonLiteral) const;
     JsonValue BuildCustomProps() const;
+    const std::map<std::string, JsonValue>& BuildEffectiveCustomProperties(
+        std::map<std::string, JsonValue>& effectiveProperties) const;
+    void PutTabsCustomProp(JsonValue& customProps, const std::map<std::string, JsonValue>& properties) const;
+    void PutChildrenCustomProp(JsonValue& customProps) const;
+    void PutNamedCustomProperties(JsonValue& customProps, const std::map<std::string, JsonValue>& properties) const;
     void DisposeComponentContent();
     void ResetReferences();
     void ParseTabsMapping(const JsonValue& descriptor);
     void RegisterDataBindings(const JsonValue& descriptor);
     void ParseListeners(const JsonValue& descriptor);
     void SyncChildSlots(napi_value childSlots);
+    void SyncChildSlotEntry(napi_value childSlots, napi_value key);
+    void SyncUpdatedChildSlots(napi_value result);
+    void ResolveChildSlotValues(napi_value& childSlot, napi_value& childSlots);
+    bool InvokeCreateFunction(napi_ref createCustomComponentRef, napi_value& result);
+    bool ExtractContentAndCreateRefs(
+        napi_value result, ArkUI_NodeHandle& handle, A2UINodeContentHandle& childSlotHandle);
+    bool ApplyDynamicCustomProperty(const std::string& key, const JsonValue& child, const JsonValue& descriptor);
     bool IsTabsType() const;
     bool IsExtendedTabsType() const;
     bool IsExtendedProtocolSurface() const;
@@ -108,7 +137,7 @@ private:
     void MergeTabsFromChildIds(JsonValue& tabsArray) const;
     void MergeRowChildren(JsonValue& childrenArray) const;
 
-    std::map<std::string, JsonValue> CollectTabsProperties() const;
+    std::map<std::string, JsonValue> CollectTabsProperties(const std::map<std::string, JsonValue>& properties) const;
     JsonValue GetOrCreateTabsArray(const std::map<std::string, JsonValue>& properties) const;
     void UpdateTabsWithProperties(JsonValue& tabsArray, const std::map<std::string, JsonValue>& tabsProperties) const;
     void ResolveFunctionCallsInTabsArray(JsonValue& tabsArray) const;
@@ -118,12 +147,16 @@ private:
     void MergeTabsChildren(JsonValue& childrenArray) const;
     void NormalizeCustomProperty(const std::string& propertyName, JsonValue& value);
     void NormalizeExtendedCommonStyles(JsonValue& value);
+    void UpdateFlexShrinkStyleState(const JsonValue& styles);
+    void SyncFlexShrinkParentDefaultProperties();
     void NormalizeExtendedTabsProperty(const std::string& propertyName, JsonValue& value);
     void NormalizeExtendedTabContentProperty(const std::string& propertyName, JsonValue& value);
     void NormalizeExtendedTabContentStyles(JsonValue& value);
+    void NormalizeExtendedTabContentNumberStyles(JsonValue& value);
+    void NormalizeExtendedTabContentStringStyles(JsonValue& value);
+    void NormalizeExtendedTabContentFontWeightStyle(JsonValue& value);
     void ReportCustomSchemaWarning(
         const std::string& code, const std::string& message, const std::string& propertyPath) const;
-    void ClearDynamicValueCallback(const std::string& propertyName);
     void ClearDynamicValueCallbacks();
     bool DispatchDynamicValueCallback(const std::string& propertyName, const JsonValue& value);
     void DispatchCurrentDynamicValue(const std::string& propertyName, const std::string& path);
@@ -135,9 +168,31 @@ private:
         std::string dataPath;
     };
 
+    struct PersistentDynamicValueRegistrationContext {
+        const std::string& propertyName;
+        const JsonValue& descriptor;
+        const ResolvedValue& resolved;
+        const DynamicValueDependencies& dependencies;
+        const DynamicValueCallbackInfo& callbackInfo;
+        std::string* errorMessage = nullptr;
+    };
+
+    bool RegisterPathDynamicValueCallback(const std::string& propertyName, const std::string& path,
+        const DynamicValueCallbackInfo& callbackInfo, std::string* errorMessage);
+    bool RegisterFunctionCallDynamicBindings(
+        const std::string& propertyName, const JsonValue& descriptor, const DynamicValueDependencies& dependencies);
+    bool RegisterExpressionDynamicBindings(
+        const std::string& propertyName, const JsonValue& descriptor, const DynamicValueDependencies& dependencies);
+    bool RegisterPersistentDynamicValueCallback(const PersistentDynamicValueRegistrationContext& registration);
+    bool DispatchOneShotDynamicValueCallback(const std::string& propertyName, const ResolvedValue& resolved,
+        const DynamicValueCallbackInfo& callbackInfo, std::string* errorMessage);
+    bool ResolveAndRegisterDynamicValueCallback(const std::string& propertyName, const JsonValue& descriptor,
+        const DynamicValueCallbackInfo& callbackInfo, std::string* errorMessage);
+
     CustomComponentDescriptor descriptor_;
     std::set<std::string> customPropertyNames_;
     std::map<std::string, JsonValue> properties_;
+    std::map<std::string, JsonValue> rawDynamicProperties_;
     std::map<std::string, DynamicValueCallbackInfo> dynamicValueCallbacks_;
     std::set<std::string> dynamicResolverBindingKeys_;
     std::unique_ptr<ChecksEngine> checksEngine_;
@@ -154,6 +209,8 @@ private:
     napi_ref componentContentRef_ = nullptr;
     napi_ref childSlotRef_ = nullptr;
     std::map<std::string, napi_ref> childSlotRefs_;
+    bool preserveDynamicDescriptors_ = false;
+    FlexShrinkStyleState flexShrinkStyleState_ = FlexShrinkStyleState::UNSPECIFIED;
 };
 
 } // namespace NativeModule

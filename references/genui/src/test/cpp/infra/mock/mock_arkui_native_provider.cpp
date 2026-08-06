@@ -28,21 +28,50 @@ MockArkUINativeProvider* GetActiveProvider()
     return MockArkUINativeProvider::GetActiveInstance();
 }
 
-ArkUI_NodeHandle MockCreateNode(ArkUI_NodeType)
+ArkUI_NodeHandle MockCreateNode(ArkUI_NodeType type)
 {
-    return reinterpret_cast<ArkUI_NodeHandle>(0x1);
+    MockArkUINativeProvider* provider = GetActiveProvider();
+    ArkUI_NodeHandle node = reinterpret_cast<ArkUI_NodeHandle>(0x1);
+    if (provider != nullptr) {
+        provider->createdNodes_.push_back({ node, type });
+    }
+    return node;
 }
-void MockDisposeNode(ArkUI_NodeHandle) {}
-int32_t MockAddChild(ArkUI_NodeHandle, ArkUI_NodeHandle)
+void MockDisposeNode(ArkUI_NodeHandle node)
 {
+    MockArkUINativeProvider* provider = GetActiveProvider();
+    if (provider != nullptr) {
+        provider->disposedNodes_.push_back(node);
+    }
+}
+int32_t MockAddChild(ArkUI_NodeHandle parent, ArkUI_NodeHandle child)
+{
+    MockArkUINativeProvider* provider = GetActiveProvider();
+    if (provider != nullptr) {
+        provider->nodeChildren_[parent].push_back(child);
+        provider->nodeParents_[child] = parent;
+    }
     return 0;
 }
-int32_t MockRemoveChild(ArkUI_NodeHandle, ArkUI_NodeHandle)
+int32_t MockRemoveChild(ArkUI_NodeHandle parent, ArkUI_NodeHandle child)
 {
+    MockArkUINativeProvider* provider = GetActiveProvider();
+    if (provider != nullptr) {
+        auto& children = provider->nodeChildren_[parent];
+        children.erase(std::remove(children.begin(), children.end(), child), children.end());
+        provider->nodeParents_.erase(child);
+    }
     return 0;
 }
-int32_t MockInsertChildAt(ArkUI_NodeHandle, ArkUI_NodeHandle, int32_t)
+int32_t MockInsertChildAt(ArkUI_NodeHandle parent, ArkUI_NodeHandle child, int32_t index)
 {
+    MockArkUINativeProvider* provider = GetActiveProvider();
+    if (provider != nullptr) {
+        auto& children = provider->nodeChildren_[parent];
+        size_t target = index < 0 ? children.size() : std::min(static_cast<size_t>(index), children.size());
+        children.insert(children.begin() + static_cast<std::ptrdiff_t>(target), child);
+        provider->nodeParents_[child] = parent;
+    }
     return 0;
 }
 int32_t MockSetAttribute(ArkUI_NodeHandle node, int32_t attribute, ArkUI_AttributeItem* item)
@@ -62,7 +91,25 @@ int32_t MockSetAttribute(ArkUI_NodeHandle node, int32_t attribute, ArkUI_Attribu
         }
     }
     g_activeMockArkUIProvider->setAttributeRecords_.push_back(record);
+    g_activeMockArkUIProvider->currentAttributes_[{ node, attribute }] = record;
     return 0;
+}
+const ArkUI_AttributeItem* MockGetAttribute(ArkUI_NodeHandle node, int32_t attribute)
+{
+    MockArkUINativeProvider* provider = GetActiveProvider();
+    if (provider == nullptr) {
+        return nullptr;
+    }
+    auto record = provider->currentAttributes_.find({ node, attribute });
+    if (record == provider->currentAttributes_.end()) {
+        return nullptr;
+    }
+    static ArkUI_AttributeItem item;
+    item.value = record->second.values.empty() ? nullptr : record->second.values.data();
+    item.size = static_cast<int32_t>(record->second.values.size());
+    item.string = record->second.stringValue.empty() ? nullptr : record->second.stringValue.c_str();
+    item.object = nullptr;
+    return &item;
 }
 int32_t MockResetAttribute(ArkUI_NodeHandle node, int32_t attribute)
 {
@@ -70,6 +117,7 @@ int32_t MockResetAttribute(ArkUI_NodeHandle node, int32_t attribute)
     if (provider != nullptr) {
         provider->resetAttributeTypes_.push_back(attribute);
         provider->resetAttributeRecords_.push_back({ node, attribute });
+        provider->currentAttributes_.erase({ node, attribute });
     }
     return 0;
 }
@@ -155,6 +203,134 @@ int32_t MockUnregisterNodeEvent(ArkUI_NodeHandle node, int32_t eventType)
     return 0;
 }
 
+void MockMarkDirty(ArkUI_NodeHandle node, ArkUI_NodeDirtyFlag dirtyFlag)
+{
+    MockArkUINativeProvider* provider = GetActiveProvider();
+    if (provider != nullptr) {
+        provider->dirtyNodes_.push_back({ node, dirtyFlag });
+    }
+}
+
+uint32_t MockGetTotalChildCount(ArkUI_NodeHandle node)
+{
+    MockArkUINativeProvider* provider = GetActiveProvider();
+    return provider == nullptr ? 0U : static_cast<uint32_t>(provider->nodeChildren_[node].size());
+}
+
+ArkUI_NodeHandle MockGetChildAt(ArkUI_NodeHandle node, int32_t position)
+{
+    MockArkUINativeProvider* provider = GetActiveProvider();
+    if (provider == nullptr || position < 0) {
+        return nullptr;
+    }
+    auto& children = provider->nodeChildren_[node];
+    return static_cast<size_t>(position) < children.size() ? children[static_cast<size_t>(position)] : nullptr;
+}
+
+int32_t MockSetMeasuredSize(ArkUI_NodeHandle node, int32_t width, int32_t height)
+{
+    MockArkUINativeProvider* provider = GetActiveProvider();
+    if (provider != nullptr) {
+        provider->measuredSizes_[node] = { width, height };
+    }
+    return 0;
+}
+
+int32_t MockSetLayoutPosition(ArkUI_NodeHandle node, int32_t x, int32_t y)
+{
+    MockArkUINativeProvider* provider = GetActiveProvider();
+    if (provider != nullptr) {
+        provider->layoutRecords_.push_back({ node, x, y });
+    }
+    return 0;
+}
+
+ArkUI_IntSize MockGetMeasuredSize(ArkUI_NodeHandle node)
+{
+    MockArkUINativeProvider* provider = GetActiveProvider();
+    if (provider == nullptr) {
+        return { 0, 0 };
+    }
+    auto size = provider->measuredSizes_.find(node);
+    return size == provider->measuredSizes_.end() ? ArkUI_IntSize { 0, 0 } : size->second;
+}
+
+int32_t MockMeasureNode(ArkUI_NodeHandle node, ArkUI_LayoutConstraint*)
+{
+    MockArkUINativeProvider* provider = GetActiveProvider();
+    if (provider != nullptr) {
+        provider->measuredNodes_.push_back(node);
+    }
+    return 0;
+}
+
+int32_t MockLayoutNode(ArkUI_NodeHandle node, int32_t x, int32_t y)
+{
+    MockArkUINativeProvider* provider = GetActiveProvider();
+    if (provider != nullptr) {
+        provider->layoutRecords_.push_back({ node, x, y });
+    }
+    return 0;
+}
+
+ArkUI_NodeHandle MockGetParent(ArkUI_NodeHandle node)
+{
+    MockArkUINativeProvider* provider = GetActiveProvider();
+    if (provider == nullptr) {
+        return nullptr;
+    }
+    auto parent = provider->nodeParents_.find(node);
+    return parent == provider->nodeParents_.end() ? nullptr : parent->second;
+}
+
+int32_t MockRegisterNodeCustomEvent(
+    ArkUI_NodeHandle node, ArkUI_NodeCustomEventType eventType, int32_t targetId, void* userData)
+{
+    static_cast<void>(targetId);
+    MockArkUINativeProvider* provider = GetActiveProvider();
+    if (provider == nullptr || node == nullptr) {
+        return -1;
+    }
+    return provider->RegisterCustomEvent(node, eventType, userData);
+}
+
+void MockUnregisterNodeCustomEvent(ArkUI_NodeHandle node, ArkUI_NodeCustomEventType eventType)
+{
+    MockArkUINativeProvider* provider = GetActiveProvider();
+    if (provider == nullptr) {
+        return;
+    }
+    provider->UnregisterCustomEvent(node, eventType);
+}
+
+int32_t MockAddNodeCustomEventReceiver(ArkUI_NodeHandle node, ArkUI_NodeCustomEventCallback callback)
+{
+    MockArkUINativeProvider* provider = GetActiveProvider();
+    if (provider == nullptr || node == nullptr || callback == nullptr) {
+        return -1;
+    }
+    provider->nodeCustomEventReceivers_[node].push_back(callback);
+    return 0;
+}
+
+int32_t MockRemoveNodeCustomEventReceiver(ArkUI_NodeHandle node, ArkUI_NodeCustomEventCallback callback)
+{
+    MockArkUINativeProvider* provider = GetActiveProvider();
+    if (provider == nullptr) {
+        return -1;
+    }
+    auto receivers = provider->nodeCustomEventReceivers_.find(node);
+    if (receivers == provider->nodeCustomEventReceivers_.end()) {
+        return 0;
+    }
+    auto& callbacks = receivers->second;
+    callbacks.erase(std::remove(callbacks.begin(), callbacks.end(), callback), callbacks.end());
+    if (callbacks.empty()) {
+        provider->nodeCustomEventReceivers_.erase(receivers);
+    }
+    return 0;
+}
+
 ArkUI_NativeDialogHandle MockCreateDialog()
 {
     MockArkUINativeProvider* provider = GetActiveProvider();
@@ -218,6 +394,7 @@ ArkUI_NativeNodeAPI_1 CreateSafeMockNodeAPI()
     api.removeChild = MockRemoveChild;
     api.insertChildAt = MockInsertChildAt;
     api.setAttribute = MockSetAttribute;
+    api.getAttribute = MockGetAttribute;
     api.resetAttribute = MockResetAttribute;
     api.setUserData = MockSetUserData;
     api.getUserData = MockGetUserData;
@@ -225,6 +402,19 @@ ArkUI_NativeNodeAPI_1 CreateSafeMockNodeAPI()
     api.removeNodeEventReceiver = MockRemoveNodeEventReceiver;
     api.registerNodeEvent = MockRegisterNodeEvent;
     api.unregisterNodeEvent = MockUnregisterNodeEvent;
+    api.registerNodeCustomEvent = MockRegisterNodeCustomEvent;
+    api.unregisterNodeCustomEvent = MockUnregisterNodeCustomEvent;
+    api.addNodeCustomEventReceiver = MockAddNodeCustomEventReceiver;
+    api.removeNodeCustomEventReceiver = MockRemoveNodeCustomEventReceiver;
+    api.markDirty = MockMarkDirty;
+    api.getTotalChildCount = MockGetTotalChildCount;
+    api.getChildAt = MockGetChildAt;
+    api.setMeasuredSize = MockSetMeasuredSize;
+    api.setLayoutPosition = MockSetLayoutPosition;
+    api.getMeasuredSize = MockGetMeasuredSize;
+    api.measureNode = MockMeasureNode;
+    api.layoutNode = MockLayoutNode;
+    api.getParent = MockGetParent;
     return api;
 }
 
@@ -542,6 +732,7 @@ void MockArkUINativeProvider::ResetAllMocks()
     nodeContentMapping_.clear();
     nodeUserData_.clear();
     nodeEventReceivers_.clear();
+    nodeCustomEventReceivers_.clear();
     registeredNodeEvents_.clear();
     createdAdapters_.clear();
     disposedAdapters_.clear();
@@ -555,6 +746,7 @@ void MockArkUINativeProvider::ResetAllMocks()
     nodeAdapterEventItems_.clear();
     dialogDismissShouldBlockDismiss_.clear();
     setAttributeRecords_.clear();
+    TddResetPixelRoundPolicy();
     getNodeContentFromNapiValueResult_ = 0;
     nodeContentHandleResult_ = reinterpret_cast<ArkUI_NodeContentHandle>(static_cast<intptr_t>(1));
     getNodeHandleFromNapiValueResult_ = 0;
@@ -575,6 +767,16 @@ void MockArkUINativeProvider::ResetAllMocks()
     nodeEventTypes_.clear();
     nodeEventComponentEvents_.clear();
     nodeEventStringAsyncEvents_.clear();
+    customEventRegistrations_.clear();
+    currentAttributes_.clear();
+    createdNodes_.clear();
+    disposedNodes_.clear();
+    nodeChildren_.clear();
+    nodeParents_.clear();
+    measuredSizes_.clear();
+    measuredNodes_.clear();
+    layoutRecords_.clear();
+    dirtyNodes_.clear();
     dialogDismissEventUserData_.clear();
     nodeUniqueIds_.clear();
     getNodeUniqueIdResult_ = 0;
@@ -800,6 +1002,75 @@ bool MockArkUINativeProvider::DispatchNodeEvent(ArkUI_NodeHandle nodeHandle, Ark
     for (ArkUI_NodeEventCallback callback : callbacks) {
         if (callback != nullptr) {
             callback(event);
+        }
+    }
+    return true;
+}
+
+int32_t MockArkUINativeProvider::RegisterCustomEvent(
+    ArkUI_NodeHandle node, ArkUI_NodeCustomEventType eventType, void* userData)
+{
+    if (node == nullptr) {
+        return -1;
+    }
+    customEventRegistrations_[node][eventType] = { .eventType = eventType, .userData = userData };
+    return 0;
+}
+
+void MockArkUINativeProvider::UnregisterCustomEvent(ArkUI_NodeHandle node, ArkUI_NodeCustomEventType eventType)
+{
+    auto registrations = customEventRegistrations_.find(node);
+    if (registrations == customEventRegistrations_.end()) {
+        return;
+    }
+    registrations->second.erase(eventType);
+    if (registrations->second.empty()) {
+        customEventRegistrations_.erase(registrations);
+    }
+}
+
+bool MockArkUINativeProvider::DispatchMeasureEvent(
+    ArkUI_NodeHandle node, int32_t percentReferenceWidth, int32_t percentReferenceHeight)
+{
+    auto registrations = customEventRegistrations_.find(node);
+    auto receivers = nodeCustomEventReceivers_.find(node);
+    if (registrations == customEventRegistrations_.end() || receivers == nodeCustomEventReceivers_.end()) {
+        return false;
+    }
+    auto registration = registrations->second.find(ARKUI_NODE_CUSTOM_EVENT_ON_MEASURE);
+    if (registration == registrations->second.end()) {
+        return false;
+    }
+    ArkUI_LayoutConstraint constraint { 0, percentReferenceWidth, 0, percentReferenceHeight, percentReferenceWidth,
+        percentReferenceHeight };
+    ArkUI_NodeCustomEvent event { node, ARKUI_NODE_CUSTOM_EVENT_ON_MEASURE, registration->second.userData, &constraint,
+        { 0, 0 } };
+    const auto callbacks = receivers->second;
+    for (ArkUI_NodeCustomEventCallback callback : callbacks) {
+        if (callback != nullptr) {
+            callback(&event);
+        }
+    }
+    return true;
+}
+
+bool MockArkUINativeProvider::DispatchLayoutEvent(ArkUI_NodeHandle node, int32_t x, int32_t y)
+{
+    auto registrations = customEventRegistrations_.find(node);
+    auto receivers = nodeCustomEventReceivers_.find(node);
+    if (registrations == customEventRegistrations_.end() || receivers == nodeCustomEventReceivers_.end()) {
+        return false;
+    }
+    auto registration = registrations->second.find(ARKUI_NODE_CUSTOM_EVENT_ON_LAYOUT);
+    if (registration == registrations->second.end()) {
+        return false;
+    }
+    ArkUI_NodeCustomEvent event { node, ARKUI_NODE_CUSTOM_EVENT_ON_LAYOUT, registration->second.userData, nullptr,
+        { x, y } };
+    const auto callbacks = receivers->second;
+    for (ArkUI_NodeCustomEventCallback callback : callbacks) {
+        if (callback != nullptr) {
+            callback(&event);
         }
     }
     return true;

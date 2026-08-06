@@ -21,12 +21,12 @@ export interface SurfaceResult {
   message?: string;
 }
 
-export type ExpressionResultType = 'string' | 'number' | 'boolean' | 'undefined';
+export type ExpressionResultType = 'string' | 'number' | 'boolean' | 'object' | 'array' | 'null' | 'undefined';
 
 export interface ExpressionEvaluateResult {
   success: boolean;
   type: ExpressionResultType;
-  value?: string | number | boolean;
+  value?: string | number | boolean | null | Object | Object[];
 }
 
 export type NativeValue =
@@ -236,6 +236,11 @@ export const resolveCustomComponentDynamicValue: (
   callback: (value: NativeValue) => void
 ) => ResolveCustomComponentDynamicValueResult;
 
+export const clearCustomComponentDynamicValue: (
+  customComponentHandle: number,
+  key: string
+) => ResolveCustomComponentDynamicValueResult;
+
 export const evaluateDynamicValue: (
   renderId: number,
   surfaceId: string,
@@ -287,6 +292,7 @@ export interface NativeEngineModule {
   validateCustomComponentChecks: typeof validateCustomComponentChecks;
   dispatchCustomComponentAction: typeof dispatchCustomComponentAction;
   resolveCustomComponentDynamicValue: typeof resolveCustomComponentDynamicValue;
+  clearCustomComponentDynamicValue: typeof clearCustomComponentDynamicValue;
   evaluateDynamicValue: typeof evaluateDynamicValue;
   setFontSizeScale: typeof setFontSizeScale;
   setApiVersion: typeof setApiVersion;

@@ -18,6 +18,7 @@
 
 #include <array>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -56,6 +57,7 @@ protected:
     void ValidateComponentSpecificDynamicStylesDfx(
         const JsonValue& styles, const std::set<std::string>& dynamicStyleKeys) override;
     void ApplyComponentSpecificStyles(const JsonValue& styles, ArkUINodeApiAdapter& applier) override;
+    void RegisterComponentSpecificListeners() override;
     void OnAddChild(const std::shared_ptr<Component>& child, size_t index) override;
     void OnMoveChild(const std::shared_ptr<Component>& child, size_t currentIndex, size_t targetIndex) override;
     void OnRemoveChild(const std::shared_ptr<Component>& child) override;
@@ -85,6 +87,8 @@ private:
 
     void ApplyColumnsTemplateForContext(const ThemeContext& context);
     void ApplyRowsTemplateForContext(const ThemeContext& context);
+    void ApplyColumnsTemplateStyle(const JsonValue& styles, bool isDeltaUpdate);
+    void HandleSizeChange(A2UINodeEvent* event, bool isAreaChange = false);
     ThemeContext ResolveThemeContext() const;
     static bool ParseTemplateConfig(const JsonValue& value, GridTemplateConfig& config);
     static std::string ResolveResponsiveTemplate(const GridTemplateConfig& config, const ThemeContext& context);
@@ -102,6 +106,7 @@ private:
     GridTemplateConfig columnsTemplateConfig_;
     GridTemplateConfig rowsTemplateConfig_;
     std::vector<GridItemSlot> gridItems_;
+    std::optional<Breakpoint> componentBreakpoint_;
 };
 
 } // namespace NativeModule

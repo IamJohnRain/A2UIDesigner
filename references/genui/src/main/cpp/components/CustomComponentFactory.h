@@ -25,7 +25,7 @@ namespace NativeModule {
 
 class CustomComponentFactory final {
 public:
-    static std::shared_ptr<Component> Create(const std::string& type);
+    static std::shared_ptr<Component> Create(const std::string& type, bool preserveDynamicDescriptors = false);
 
 private:
     CustomComponentFactory() = default;

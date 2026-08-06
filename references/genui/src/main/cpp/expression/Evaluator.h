@@ -35,12 +35,27 @@ private:
     EvalResult EvaluateStringLiteral(const StringLiteral& node);
     EvalResult EvaluateBooleanLiteral(const BooleanLiteral& node);
     EvalResult EvaluateBinary(const std::shared_ptr<BinaryExpression>& node, EvaluationContext& context);
+    EvalResult EvaluateLogicalBinary(const std::shared_ptr<BinaryExpression>& node, EvaluationContext& context);
+    EvalResult EvaluateResolvedBinary(
+        BinaryOp op, const EvalResult& left, const EvalResult& right, EvaluationContext& context);
     EvalResult EvaluateUnary(const std::shared_ptr<UnaryExpression>& node, EvaluationContext& context);
     EvalResult EvaluateConditional(const std::shared_ptr<ConditionalExpression>& node, EvaluationContext& context);
     EvalResult EvaluateGrouped(const std::shared_ptr<GroupedExpression>& node, EvaluationContext& context);
     EvalResult EvaluateFunctionCall(const std::shared_ptr<FunctionCall>& node, EvaluationContext& context);
+    EvalResult EvaluateJsonPointerIntrinsic(const std::shared_ptr<FunctionCall>& node, EvaluationContext& context);
+    EvalResult EvaluateFragmentIntrinsic(const std::shared_ptr<FunctionCall>& node, EvaluationContext& context);
+    EvalResult EvaluateSizeFragmentIntrinsic(const std::shared_ptr<FunctionCall>& node, EvaluationContext& context);
+    std::vector<EvalResult> EvaluateFunctionArguments(
+        const std::shared_ptr<FunctionCall>& node, EvaluationContext& context, bool& hasUndefinedArgument);
     EvalResult EvaluateVariableReference(const std::shared_ptr<VariableReference>& node, EvaluationContext& context);
     EvalResult EvaluateMemberAccess(const std::shared_ptr<MemberAccess>& node, EvaluationContext& context);
+    EvalResult TryEvaluateDataModelMemberAccess(
+        const std::shared_ptr<MemberAccess>& node, EvaluationContext& context, bool& handled);
+    EvalResult EvaluateMemberObject(const std::shared_ptr<MemberAccess>& node, EvaluationContext& context);
+    EvalResult EvaluateJsonMemberValue(const std::shared_ptr<MemberAccess>& node, const JsonValue& objectValue,
+        EvaluationContext& context, bool& handled);
+    EvalResult EvaluateUnsupportedMemberAccess(
+        const std::shared_ptr<MemberAccess>& node, EvaluationContext& context) const;
 
     ExpressionFunctions& functions_;
 };

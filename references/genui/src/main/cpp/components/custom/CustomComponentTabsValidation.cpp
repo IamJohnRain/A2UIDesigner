@@ -1,51 +1,41 @@
+/*
+ * Copyright (c) 2026 Huawei Device Co., Ltd.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 #include <cmath>
 
+#include "components/TypeValidation.h"
 #include "components/custom/CustomComponent.h"
-#include "components/custom/CustomComponentExpressionBinding.h"
-#include "styles/StyleApplyUtils.h"
-
-#include "SchemaErrorCodes.h"
 
 namespace NativeModule {
 
-namespace {
-
-bool IsDynamicDescriptorObject(const JsonValue& value)
-{
-    return value.IsObject() && (value.Has("path") || value.Has("call"));
-}
-
-bool ParseBooleanLikeValue(const JsonValue& value)
-{
-    if (value.IsBool()) {
-        return true;
-    }
-    if (!value.IsString()) {
-        return false;
-    }
-
-    std::string token = StyleApplyUtils::TrimToken(value.GetStringValue(""));
-    return token == "true" || token == "false";
-}
-
-} // namespace
-
 void CustomComponent::NormalizeExtendedTabsProperty(const std::string& propertyName, JsonValue& value)
 {
+    auto report = [this](const std::string& code, const std::string& message, const std::string& path) {
+        ReportCustomSchemaWarning(code, message, path);
+    };
+
     if (propertyName == "barPosition") {
-        if (IsDynamicDescriptorObject(value) || IsExpressionStringValue(value)) {
+        if (IsDynamicValue(value)) {
             return;
         }
         if (!value.IsString()) {
-            ReportCustomSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
-                "Property barPosition expects string value, got type '" + std::string(value.GetTypeName()) +
-                    "', fallback/reset has been applied",
-                "barPosition");
-            value = JsonValue();
+            ReportTypeMismatchAndReset(report, value, "string", "barPosition");
             return;
         }
         std::string token = StyleApplyUtils::TrimToken(value.GetStringValue(""));
-        if (token == "start" || token == "end" || token == "right" || token == "bottom") {
+        if (token == "start" || token == "end") {
             return;
         }
         ReportCustomSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
@@ -55,38 +45,31 @@ void CustomComponent::NormalizeExtendedTabsProperty(const std::string& propertyN
     }
 
     if (propertyName == "vertical" || propertyName == "scrollable") {
-        if (IsDynamicDescriptorObject(value) || IsExpressionStringValue(value)) {
+        if (IsDynamicValue(value)) {
             return;
         }
-        if (ParseBooleanLikeValue(value)) {
+        if (value.IsBool()) {
             return;
         }
-        if (value.IsString()) {
-            ReportCustomSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
-                "Property " + propertyName + " has invalid value and has been reset to default", propertyName);
-        } else {
-            ReportCustomSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
-                "Property " + propertyName + " expects boolean value, got type '" + std::string(value.GetTypeName()) +
-                    "', fallback/reset has been applied",
-                propertyName);
-        }
-        value = JsonValue();
+        ReportTypeMismatchAndReset(report, value, "boolean", propertyName);
         return;
     }
 
     if (propertyName == "tabIndex") {
-        if (IsDynamicDescriptorObject(value) || IsExpressionStringValue(value)) {
+        if (IsDynamicValue(value)) {
             return;
         }
-        float parsedNumber = 0.0F;
-        if (StyleApplyUtils::ParseNumber(value, parsedNumber) && std::isfinite(parsedNumber)) {
+        if (IsLiteralNumber(value)) {
+            double tabIndex = value.GetNumberValue(-1.0);
+            if (tabIndex >= 0.0 && std::floor(tabIndex) == tabIndex) {
+                return;
+            }
+            ReportCustomSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
+                "Property tabIndex must be a non-negative integer and has been reset to default", "tabIndex");
+            value = JsonValue();
             return;
         }
-        ReportCustomSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
-            "Property tabIndex expects number value, got type '" + std::string(value.GetTypeName()) +
-                "', fallback/reset has been applied",
-            "tabIndex");
-        value = JsonValue();
+        ReportTypeMismatchAndReset(report, value, "number", "tabIndex");
     }
 }
 

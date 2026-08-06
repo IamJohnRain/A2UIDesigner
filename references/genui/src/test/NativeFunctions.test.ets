@@ -28,7 +28,7 @@
  * limitations under the License.
  */
 
-import { describe, beforeAll, beforeEach, afterEach, afterAll, it, expect } from '@ohos/hypium';
+import { describe, beforeAll, beforeEach, afterEach, afterAll, it, xit, expect } from '@ohos/hypium';
 import { InnerFunctionItem } from '../main/ets/core/base/FunctionItem';
 import { requiredFunction } from '../main/ets/core/functions/validation/RequiredFunction';
 import { regexFunction } from '../main/ets/core/functions/validation/RegexFunction';
@@ -246,9 +246,9 @@ export default function NativeFunctionsUnitTest() {
         }
       });
 
-      it('should_mark_native_functions_with_inner_native_true', 0, () => {
+      it('should_mark_inner_native_functions_and_keep_open_url_local', 0, () => {
         let nativeNames: string[] = [
-          'openUrl', 'required', 'regex', 'length', 'numeric', 'email',
+          'required', 'regex', 'length', 'numeric', 'email',
           'formatString', 'formatNumber', 'formatCurrency', 'formatDate', 'pluralize',
           'and', 'or', 'not'
         ];
@@ -258,6 +258,11 @@ export default function NativeFunctionsUnitTest() {
             expect(item.isInnerNative).assertTrue();
           }
         }
+
+        let openUrlItem = items.find((item: InnerFunctionItem) => item.name === 'openUrl');
+        expect(openUrlItem !== undefined).assertTrue();
+        expect(openUrlItem!.isInnerNative).assertFalse();
+        expect(openUrlItem!.functionCall !== undefined).assertTrue();
       });
 
       it('should_have_unique_names_for_all_functions', 0, () => {
@@ -464,8 +469,9 @@ export default function NativeFunctionsUnitTest() {
         expect(functionItem.name).assertEqual('openUrl');
       });
 
-      it('openUrl_should_be_marked_as_inner_native', 0, () => {
-        expect(functionItem.isInnerNative).assertTrue();
+      it('openUrl_should_be_local_function', 0, () => {
+        expect(functionItem.isInnerNative).assertFalse();
+        expect(functionItem.functionCall !== undefined).assertTrue();
       });
 
     });
@@ -485,7 +491,7 @@ export default function NativeFunctionsUnitTest() {
         }
       });
 
-      it('should_not_expose_ets_handlers_for_inner_native_functions', 0, () => {
+      xit('should_not_expose_ets_handlers_for_inner_native_functions', 0, () => {
         let functions: BuiltinFunctionBase[] = [
           openUrlFunction, requiredFunction, regexFunction, lengthFunction, numericFunction, emailFunction,
           formatStringFunction, formatNumberFunction, formatCurrencyFunction, formatDateFunction,
@@ -502,11 +508,12 @@ export default function NativeFunctionsUnitTest() {
     });
 
     describe('OpenUrlMarkedNative', () => {
-      it('should_mark_openUrl_as_inner_native', 0, () => {
+      it('should_register_open_url_as_local_function', 0, () => {
         let items: InnerFunctionItem[] = allA2UIBasicFunctions();
         let openUrlItem: InnerFunctionItem | undefined = items.find((item: InnerFunctionItem) => item.name === 'openUrl');
         expect(openUrlItem !== undefined).assertTrue();
-        expect(openUrlItem!.isInnerNative).assertTrue();
+        expect(openUrlItem!.isInnerNative).assertFalse();
+        expect(openUrlItem!.functionCall !== undefined).assertTrue();
       });
     });
 

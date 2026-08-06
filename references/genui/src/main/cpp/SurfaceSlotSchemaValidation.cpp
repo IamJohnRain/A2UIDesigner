@@ -19,6 +19,7 @@
 
 #include "components/ChildListSchemaValidationUtils.h"
 #include "functions/WarningDispatchBridge.h"
+#include "utils/LocalVariableNameUtils.h"
 #include "utils/RequiredStringPropertyUtils.h"
 
 #include "SchemaErrorCodes.h"
@@ -190,6 +191,52 @@ void ValidateStructuralFieldShapes(
     }
 }
 
+namespace {
+
+struct ComponentSchemaWarningContext {
+    int32_t renderId;
+    const std::string& surfaceId;
+    const std::string& nodeId;
+    const std::string& componentType;
+};
+
+void BuildInvalidCallValueIssue(
+    const JsonValue& handler, const std::string& handlerPath, std::string& code, std::string& message)
+{
+    if (handler.Has("condition")) {
+        code = SCHEMA_ERROR_CODE_REQUIRED_MISS;
+        message = "Property " + handlerPath + " has 'condition' but missing valid 'call'";
+    } else if (handler.Has("call")) {
+        code = SCHEMA_ERROR_CODE_TYPE_MISMATCH;
+        message = "Property " + handlerPath + ".call expects string value";
+    } else {
+        code = SCHEMA_ERROR_CODE_REQUIRED_MISS;
+        message = "Property " + handlerPath + ".call is required";
+    }
+}
+
+void ValidateEventHandlerLocalVariable(
+    const JsonValue& handler, const std::string& handlerPath, const ComponentSchemaWarningContext& context)
+{
+    if (!handler.Has("as")) {
+        return;
+    }
+
+    JsonValue asValue = handler.GetItem("as");
+    const std::string asPath = handlerPath + ".as";
+    if (!asValue.IsString()) {
+        DispatchComponentSchemaWarning(context.renderId, context.surfaceId, context.nodeId, context.componentType,
+            SCHEMA_ERROR_CODE_TYPE_MISMATCH,
+            "Property " + asPath + " expects string local variable name, handler has been dropped", asPath);
+    } else if (!IsValidLocalVariableName(asValue.GetStringValue(""))) {
+        DispatchComponentSchemaWarning(context.renderId, context.surfaceId, context.nodeId, context.componentType,
+            SCHEMA_ERROR_CODE_INVALID_VALUE,
+            "Property " + asPath + " has invalid local variable name, binding has been dropped", asPath);
+    }
+}
+
+} // namespace
+
 void ValidateEventHandlerFields(const JsonValue& nodeValue, int32_t renderId, const std::string& surfaceId)
 {
     if (!nodeValue.IsObject()) {
@@ -198,6 +245,7 @@ void ValidateEventHandlerFields(const JsonValue& nodeValue, int32_t renderId, co
 
     const std::string nodeId = nodeValue.GetString("id", "");
     const std::string componentType = nodeValue.GetString("component", "");
+    const ComponentSchemaWarningContext context { renderId, surfaceId, nodeId, componentType };
 
     for (const auto& eventName : EVENT_HANDLER_PROPERTY_NAMES) {
         if (!nodeValue.Has(eventName.c_str())) {
@@ -226,21 +274,15 @@ void ValidateEventHandlerFields(const JsonValue& nodeValue, int32_t renderId, co
                 continue;
             }
 
+            ValidateEventHandlerLocalVariable(handler, handlerPath, context);
+
             JsonValue callValue = handler.GetItem("call");
             if (!callValue.IsString()) {
-                if (handler.Has("condition")) {
-                    DispatchComponentSchemaWarning(renderId, surfaceId, nodeId, componentType,
-                        SCHEMA_ERROR_CODE_REQUIRED_MISS,
-                        "Property " + handlerPath + " has 'condition' but missing valid 'call'", handlerPath + ".call");
-                } else if (handler.Has("call")) {
-                    DispatchComponentSchemaWarning(renderId, surfaceId, nodeId, componentType,
-                        SCHEMA_ERROR_CODE_TYPE_MISMATCH, "Property " + handlerPath + ".call expects string value",
-                        handlerPath + ".call");
-                } else {
-                    DispatchComponentSchemaWarning(renderId, surfaceId, nodeId, componentType,
-                        SCHEMA_ERROR_CODE_REQUIRED_MISS, "Property " + handlerPath + ".call is required",
-                        handlerPath + ".call");
-                }
+                std::string code;
+                std::string message;
+                BuildInvalidCallValueIssue(handler, handlerPath, code, message);
+                DispatchComponentSchemaWarning(
+                    renderId, surfaceId, nodeId, componentType, code, message, handlerPath + ".call");
                 continue;
             }
 

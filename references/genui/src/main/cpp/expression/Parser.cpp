@@ -82,6 +82,36 @@ private:
         errorColumn_ = Current().column;
     }
 
+    bool IsDataModelMemberChain(const std::shared_ptr<AstNode>& node) const
+    {
+        std::shared_ptr<AstNode> current = node;
+        while (current != nullptr && current->type == AstNodeType::MEMBER_ACCESS) {
+            current = std::static_pointer_cast<MemberAccess>(current)->object;
+        }
+        if (current == nullptr || current->type != AstNodeType::VARIABLE_REFERENCE) {
+            return false;
+        }
+        auto variableReference = std::static_pointer_cast<VariableReference>(current);
+        return variableReference->isAbsolute && variableReference->name == "__dataModel";
+    }
+
+    std::shared_ptr<AstNode> ParseInvalidDataModelJsonPointerKey()
+    {
+        const Token firstSlash = Current();
+        std::string path;
+        while (!Match(TokenType::RBRACKET) && !Match(TokenType::EOF_TOKEN)) {
+            path += Advance().value;
+        }
+        if (path.empty() || !Match(TokenType::RBRACKET)) {
+            SetError("unexpected token");
+            return nullptr;
+        }
+        auto key = std::make_shared<StringLiteral>(std::move(path));
+        key->line = firstSlash.line;
+        key->column = firstSlash.column;
+        return key;
+    }
+
     std::shared_ptr<AstNode> ParseExpression()
     {
         return ParseTernary();
@@ -312,7 +342,12 @@ private:
             }
             if (Match(TokenType::LBRACKET)) {
                 Advance();
-                auto key = ParseExpression();
+                std::shared_ptr<AstNode> key;
+                if (IsDataModelMemberChain(node) && Match(TokenType::SLASH)) {
+                    key = ParseInvalidDataModelJsonPointerKey();
+                } else {
+                    key = ParseExpression();
+                }
                 if (key == nullptr) {
                     return nullptr;
                 }
@@ -333,7 +368,26 @@ private:
         return node;
     }
 
-    std::shared_ptr<AstNode> ParsePrimary()
+    bool ParseCallArguments(FunctionCall& call)
+    {
+        if (Match(TokenType::RPAREN)) {
+            return true;
+        }
+        while (true) {
+            auto arg = ParseExpression();
+            if (arg == nullptr) {
+                return false;
+            }
+            call.arguments.push_back(std::move(arg));
+            if (!Match(TokenType::COMMA)) {
+                break;
+            }
+            Advance();
+        }
+        return true;
+    }
+
+    std::shared_ptr<AstNode> ParseLiteralPrimary()
     {
         if (Match(TokenType::NUMBER_LITERAL)) {
             auto token = Advance();
@@ -365,6 +419,11 @@ private:
             node->column = token.column;
             return node;
         }
+        return nullptr;
+    }
+
+    std::shared_ptr<AstNode> ParseGroupedPrimary()
+    {
         if (Match(TokenType::LPAREN)) {
             auto parenToken = Advance();
             auto inner = ParseExpression();
@@ -382,6 +441,11 @@ private:
             grouped->column = parenToken.column;
             return grouped;
         }
+        return nullptr;
+    }
+
+    std::shared_ptr<AstNode> ParseIdentifierPrimary()
+    {
         if (Match(TokenType::IDENTIFIER)) {
             auto identToken = Advance();
             if (Match(TokenType::LPAREN)) {
@@ -389,20 +453,8 @@ private:
                 auto call = std::make_shared<FunctionCall>(identToken.value);
                 call->line = identToken.line;
                 call->column = identToken.column;
-                if (!Match(TokenType::RPAREN)) {
-                    auto arg = ParseExpression();
-                    if (arg == nullptr) {
-                        return nullptr;
-                    }
-                    call->arguments.push_back(std::move(arg));
-                    while (Match(TokenType::COMMA)) {
-                        Advance();
-                        arg = ParseExpression();
-                        if (arg == nullptr) {
-                            return nullptr;
-                        }
-                        call->arguments.push_back(std::move(arg));
-                    }
+                if (!ParseCallArguments(*call)) {
+                    return nullptr;
                 }
                 if (!Match(TokenType::RPAREN)) {
                     SetError("expected ')' after function arguments");
@@ -416,6 +468,11 @@ private:
             ref->column = identToken.column;
             return ref;
         }
+        return nullptr;
+    }
+
+    std::shared_ptr<AstNode> ParseDollarPrimary()
+    {
         if (Match(TokenType::DOLLAR)) {
             auto dollarToken = Advance();
             if (!Match(TokenType::IDENTIFIER)) {
@@ -428,7 +485,26 @@ private:
             ref->column = dollarToken.column;
             return ref;
         }
-        SetError("unexpected token");
+        return nullptr;
+    }
+
+    std::shared_ptr<AstNode> ParsePrimary()
+    {
+        if (auto literal = ParseLiteralPrimary()) {
+            return literal;
+        }
+        if (auto grouped = ParseGroupedPrimary()) {
+            return grouped;
+        }
+        if (auto identifier = ParseIdentifierPrimary()) {
+            return identifier;
+        }
+        if (auto dollar = ParseDollarPrimary()) {
+            return dollar;
+        }
+        if (errorMessage_.empty()) {
+            SetError("unexpected token");
+        }
         return nullptr;
     }
 };

@@ -157,14 +157,8 @@ bool ParseShadowFromStringValue(const JsonValue& value, StyleShadow& shadow)
     return ApplyShadowStyleValue(shadowStyle, shadow);
 }
 
-bool ParseShadowFromObjectValue(const JsonValue& value, StyleShadow& shadow)
+bool ParseShadowNumericFields(const JsonValue& value, StyleShadow& shadow, bool& hasSupportedField)
 {
-    if (value.Has("path") || value.Has("call")) {
-        return false;
-    }
-
-    bool hasSupportedField = false;
-
     float parsedNumber = 0.0F;
     if (value.Has("radius")) {
         if (!StyleApplyUtils::ParseNumber(value.GetItem("radius"), parsedNumber)) {
@@ -185,6 +179,11 @@ bool ParseShadowFromObjectValue(const JsonValue& value, StyleShadow& shadow)
         }
         hasSupportedField = true;
     }
+    return true;
+}
+
+bool ParseShadowMetaFields(const JsonValue& value, StyleShadow& shadow, bool& hasSupportedField)
+{
     if (value.Has("type")) {
         if (!ParseShadowTypeValue(value.GetItem("type"), shadow.type)) {
             return false;
@@ -204,6 +203,20 @@ bool ParseShadowFromObjectValue(const JsonValue& value, StyleShadow& shadow)
         }
         shadow.hasColor = true;
         hasSupportedField = true;
+    }
+    return true;
+}
+
+bool ParseShadowFromObjectValue(const JsonValue& value, StyleShadow& shadow)
+{
+    if (value.Has("path") || value.Has("call")) {
+        return false;
+    }
+
+    bool hasSupportedField = false;
+    if (!ParseShadowNumericFields(value, shadow, hasSupportedField) ||
+        !ParseShadowMetaFields(value, shadow, hasSupportedField)) {
+        return false;
     }
 
     if (!hasSupportedField) {
@@ -352,6 +365,87 @@ bool TryParseImageSizeDimension(const JsonValue& value, float& parsedValue)
     }
 }
 
+bool ParseLinearGradientShape(const JsonValue& value, StyleLinearGradient& gradient)
+{
+    bool hasAngle = false;
+    float parsedAngle = 180.0F;
+    if (ParseAngleToken(value.GetItem("angle"), parsedAngle)) {
+        gradient.angle = parsedAngle;
+        gradient.direction = A2UI_LINEAR_GRADIENT_DIRECTION_CUSTOM_VALUE;
+        hasAngle = true;
+    }
+
+    if (!hasAngle && value.Has("direction")) {
+        int32_t parsedDirection = A2UI_LINEAR_GRADIENT_DIRECTION_BOTTOM_VALUE;
+        if (!value.GetItem("direction").IsString() ||
+            !ParseLinearGradientDirectionToken(value.GetString("direction", ""), parsedDirection)) {
+            return false;
+        }
+        gradient.direction = parsedDirection;
+    }
+    return true;
+}
+
+bool ParseLinearGradientRepeating(const JsonValue& value, StyleLinearGradient& gradient)
+{
+    if (!value.Has("repeating")) {
+        return true;
+    }
+    if (!value.GetItem("repeating").IsBool()) {
+        return false;
+    }
+    gradient.repeating = value.GetBool("repeating", false);
+    return true;
+}
+
+void ParseGradientStopOverrides(
+    const JsonValue& colors, const JsonValue& stops, std::vector<float>& stopOverrides, std::vector<bool>& hasOverrides)
+{
+    if (!stops.IsArray()) {
+        return;
+    }
+
+    int stopCount = std::min(colors.GetArraySize(), stops.GetArraySize());
+    for (int index = 0; index < stopCount; ++index) {
+        float parsedStop = 0.0F;
+        if (ParseGradientStopOverride(stops.GetArrayItem(index), parsedStop)) {
+            stopOverrides[static_cast<size_t>(index)] = parsedStop;
+            hasOverrides[static_cast<size_t>(index)] = true;
+        }
+    }
+}
+
+float ResolveDefaultGradientStop(int index, int totalColors)
+{
+    return totalColors <= 1 ? 0.0F : static_cast<float>(index) / static_cast<float>(totalColors - 1);
+}
+
+void AppendLinearGradientColorStops(const JsonValue& colors, const std::vector<float>& stopOverrides,
+    const std::vector<bool>& hasStopOverrides, StyleLinearGradient& gradient)
+{
+    float previousStop = 0.0F;
+    int totalColors = colors.GetArraySize();
+    for (int index = 0; index < totalColors; ++index) {
+        uint32_t color = 0;
+        float stop = 0.0F;
+        JsonValue colorValue = colors.GetArrayItem(index);
+        if (!ParseColorStop(colorValue, color, stop)) {
+            if (!ParseGradientColorValue(colorValue, color)) {
+                continue;
+            }
+            stop = hasStopOverrides[static_cast<size_t>(index)] ? stopOverrides[static_cast<size_t>(index)]
+                                                                : ResolveDefaultGradientStop(index, totalColors);
+        }
+        stop = ClampStop(stop);
+        if (!gradient.stops.empty() && stop < previousStop) {
+            stop = previousStop;
+        }
+        gradient.colors.push_back(color);
+        gradient.stops.push_back(stop);
+        previousStop = stop;
+    }
+}
+
 } // namespace
 
 bool StyleApplyUtils::ParseShadow(const JsonValue& value, StyleShadow& shadow)
@@ -417,28 +511,8 @@ bool StyleApplyUtils::ParseLinearGradient(const JsonValue& value, StyleLinearGra
         return false;
     }
 
-    bool hasAngle = false;
-    float parsedAngle = 180.0F;
-    if (ParseAngleToken(value.GetItem("angle"), parsedAngle)) {
-        gradient.angle = parsedAngle;
-        gradient.direction = A2UI_LINEAR_GRADIENT_DIRECTION_CUSTOM_VALUE;
-        hasAngle = true;
-    }
-
-    if (!hasAngle && value.Has("direction")) {
-        int32_t parsedDirection = A2UI_LINEAR_GRADIENT_DIRECTION_BOTTOM_VALUE;
-        if (!value.GetItem("direction").IsString() ||
-            !ParseLinearGradientDirectionToken(value.GetString("direction", ""), parsedDirection)) {
-            return false;
-        }
-        gradient.direction = parsedDirection;
-    }
-
-    if (value.Has("repeating")) {
-        if (!value.GetItem("repeating").IsBool()) {
-            return false;
-        }
-        gradient.repeating = value.GetBool("repeating", false);
+    if (!ParseLinearGradientShape(value, gradient) || !ParseLinearGradientRepeating(value, gradient)) {
+        return false;
     }
 
     JsonValue colors = value.GetItem("colors");
@@ -448,42 +522,8 @@ bool StyleApplyUtils::ParseLinearGradient(const JsonValue& value, StyleLinearGra
 
     std::vector<float> stopOverrides(static_cast<size_t>(colors.GetArraySize()), 0.0F);
     std::vector<bool> hasStopOverrides(static_cast<size_t>(colors.GetArraySize()), false);
-    JsonValue stops = value.GetItem("stops");
-    if (stops.IsArray()) {
-        int stopCount = std::min(colors.GetArraySize(), stops.GetArraySize());
-        for (int index = 0; index < stopCount; ++index) {
-            float parsedStop = 0.0F;
-            if (ParseGradientStopOverride(stops.GetArrayItem(index), parsedStop)) {
-                stopOverrides[static_cast<size_t>(index)] = parsedStop;
-                hasStopOverrides[static_cast<size_t>(index)] = true;
-            }
-        }
-    }
-
-    float previousStop = 0.0F;
-    int totalColors = colors.GetArraySize();
-    for (int index = 0; index < colors.GetArraySize(); ++index) {
-        uint32_t color = 0;
-        float stop = 0.0F;
-        JsonValue colorValue = colors.GetArrayItem(index);
-        if (!ParseColorStop(colorValue, color, stop)) {
-            if (!ParseGradientColorValue(colorValue, color)) {
-                continue;
-            }
-            if (hasStopOverrides[static_cast<size_t>(index)]) {
-                stop = stopOverrides[static_cast<size_t>(index)];
-            } else {
-                stop = totalColors <= 1 ? 0.0F : static_cast<float>(index) / static_cast<float>(totalColors - 1);
-            }
-        }
-        stop = ClampStop(stop);
-        if (!gradient.stops.empty() && stop < previousStop) {
-            stop = previousStop;
-        }
-        gradient.colors.push_back(color);
-        gradient.stops.push_back(stop);
-        previousStop = stop;
-    }
+    ParseGradientStopOverrides(colors, value.GetItem("stops"), stopOverrides, hasStopOverrides);
+    AppendLinearGradientColorStops(colors, stopOverrides, hasStopOverrides, gradient);
 
     return !gradient.colors.empty() && gradient.colors.size() == gradient.stops.size();
 }
@@ -491,7 +531,7 @@ bool StyleApplyUtils::ParseLinearGradient(const JsonValue& value, StyleLinearGra
 bool StyleApplyUtils::ParseFlexShrink(const JsonValue& value, float& flexShrink)
 {
     float parsed = 0.0F;
-    if (!ParseNumber(value, parsed) || !std::isfinite(parsed) || parsed < 0.0F || parsed > 1.0F) {
+    if (!ParseNumber(value, parsed) || !std::isfinite(parsed) || parsed < 0.0F) {
         return false;
     }
     flexShrink = parsed;

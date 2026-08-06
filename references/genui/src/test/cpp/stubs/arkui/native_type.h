@@ -30,6 +30,25 @@ struct ArkUI_NodeContent {
 };
 typedef struct ArkUI_NodeContent* ArkUI_NodeContentHandle;
 
+struct ArkUI_LayoutConstraint {
+    int32_t minWidth;
+    int32_t maxWidth;
+    int32_t minHeight;
+    int32_t maxHeight;
+    int32_t percentReferenceWidth;
+    int32_t percentReferenceHeight;
+};
+
+typedef struct {
+    int32_t width;
+    int32_t height;
+} ArkUI_IntSize;
+
+typedef struct {
+    int32_t x;
+    int32_t y;
+} ArkUI_IntOffset;
+
 typedef struct {
     const uint32_t* colors;
     float* stops;
@@ -104,5 +123,83 @@ typedef enum {
     ARKUI_LAYOUTPOLICY_WRAPCONTENT,
     ARKUI_LAYOUTPOLICY_FIXATIDEALSIZE,
 } ArkUI_LayoutPolicy;
+
+typedef enum {
+    ARKUI_PIXELROUNDCALCPOLICY_NOFORCEROUND = 0,
+    ARKUI_PIXELROUNDCALCPOLICY_FORCECEIL,
+    ARKUI_PIXELROUNDCALCPOLICY_FORCEFLOOR,
+} ArkUI_PixelRoundCalcPolicy;
+
+typedef struct ArkUI_PixelRoundPolicy {
+    int32_t start = ARKUI_PIXELROUNDCALCPOLICY_FORCECEIL;
+    int32_t top = ARKUI_PIXELROUNDCALCPOLICY_FORCECEIL;
+    int32_t end = ARKUI_PIXELROUNDCALCPOLICY_FORCECEIL;
+    int32_t bottom = ARKUI_PIXELROUNDCALCPOLICY_FORCECEIL;
+} ArkUI_PixelRoundPolicy;
+
+// TDD inspection hooks: allow tests to inspect the last-created policy and
+// simulate Create() failure. Dispose is a no-op so tests can read field
+// values after the function under test returns.
+inline ArkUI_PixelRoundPolicy*& TddLastPixelRoundPolicy()
+{
+    static ArkUI_PixelRoundPolicy* ptr = nullptr;
+    return ptr;
+}
+
+inline bool& TddPixelRoundCreateShouldFail()
+{
+    static bool flag = false;
+    return flag;
+}
+
+inline void TddResetPixelRoundPolicy()
+{
+    delete TddLastPixelRoundPolicy();
+    TddLastPixelRoundPolicy() = nullptr;
+    TddPixelRoundCreateShouldFail() = false;
+}
+
+inline ArkUI_PixelRoundPolicy* OH_ArkUI_PixelRoundPolicy_Create()
+{
+    if (TddPixelRoundCreateShouldFail()) {
+        return nullptr;
+    }
+    delete TddLastPixelRoundPolicy();
+    TddLastPixelRoundPolicy() = new ArkUI_PixelRoundPolicy();
+    return TddLastPixelRoundPolicy();
+}
+
+inline void OH_ArkUI_PixelRoundPolicy_Dispose(ArkUI_PixelRoundPolicy* policy)
+{
+    // No-op: retain policy for post-call test inspection. TddResetPixelRoundPolicy cleans up.
+}
+
+inline void OH_ArkUI_PixelRoundPolicy_SetStart(ArkUI_PixelRoundPolicy* policy, ArkUI_PixelRoundCalcPolicy value)
+{
+    if (policy != nullptr) {
+        policy->start = static_cast<int32_t>(value);
+    }
+}
+
+inline void OH_ArkUI_PixelRoundPolicy_SetTop(ArkUI_PixelRoundPolicy* policy, ArkUI_PixelRoundCalcPolicy value)
+{
+    if (policy != nullptr) {
+        policy->top = static_cast<int32_t>(value);
+    }
+}
+
+inline void OH_ArkUI_PixelRoundPolicy_SetEnd(ArkUI_PixelRoundPolicy* policy, ArkUI_PixelRoundCalcPolicy value)
+{
+    if (policy != nullptr) {
+        policy->end = static_cast<int32_t>(value);
+    }
+}
+
+inline void OH_ArkUI_PixelRoundPolicy_SetBottom(ArkUI_PixelRoundPolicy* policy, ArkUI_PixelRoundCalcPolicy value)
+{
+    if (policy != nullptr) {
+        policy->bottom = static_cast<int32_t>(value);
+    }
+}
 
 #endif

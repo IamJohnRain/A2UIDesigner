@@ -173,6 +173,41 @@ int32_t ArkUIOHApiAdapter::GetNodeUniqueId(ArkUI_NodeHandle node, int32_t* uniqu
     return GetMockProvider().GetNodeUniqueId(node, uniqueId);
 }
 
+ArkUI_LayoutConstraint* ArkUIOHApiAdapter::NodeCustomEventGetLayoutConstraintInMeasure(ArkUI_NodeCustomEvent* event)
+{
+    return OH_ArkUI_NodeCustomEvent_GetLayoutConstraintInMeasure(event);
+}
+
+ArkUI_NodeHandle ArkUIOHApiAdapter::NodeCustomEventGetNodeHandle(ArkUI_NodeCustomEvent* event)
+{
+    return OH_ArkUI_NodeCustomEvent_GetNodeHandle(event);
+}
+
+int32_t ArkUIOHApiAdapter::NodeCustomEventGetEventType(ArkUI_NodeCustomEvent* event)
+{
+    return static_cast<int32_t>(OH_ArkUI_NodeCustomEvent_GetEventType(event));
+}
+
+void* ArkUIOHApiAdapter::NodeCustomEventGetUserData(ArkUI_NodeCustomEvent* event)
+{
+    return OH_ArkUI_NodeCustomEvent_GetUserData(event);
+}
+
+ArkUI_IntOffset ArkUIOHApiAdapter::NodeCustomEventGetPositionInLayout(ArkUI_NodeCustomEvent* event)
+{
+    return OH_ArkUI_NodeCustomEvent_GetPositionInLayout(event);
+}
+
+int32_t ArkUIOHApiAdapter::LayoutConstraintGetPercentReferenceWidth(const ArkUI_LayoutConstraint* constraint)
+{
+    return OH_ArkUI_LayoutConstraint_GetPercentReferenceWidth(constraint);
+}
+
+int32_t ArkUIOHApiAdapter::LayoutConstraintGetPercentReferenceHeight(const ArkUI_LayoutConstraint* constraint)
+{
+    return OH_ArkUI_LayoutConstraint_GetPercentReferenceHeight(constraint);
+}
+
 NativeDisplayManager_ErrorCode ArkUIOHApiAdapter::GetDefaultDisplayDensityPixels(float* densityPixels)
 {
     return OH_NativeDisplayManager_GetDefaultDisplayDensityPixels(densityPixels);
@@ -181,6 +216,26 @@ NativeDisplayManager_ErrorCode ArkUIOHApiAdapter::GetDefaultDisplayDensityPixels
 NativeDisplayManager_ErrorCode ArkUIOHApiAdapter::GetDefaultDisplayScaledDensity(float* scaledDensity)
 {
     return OH_NativeDisplayManager_GetDefaultDisplayScaledDensity(scaledDensity);
+}
+
+ArkUI_PixelRoundPolicy* ArkUIOHApiAdapter::CreatePixelRoundPolicyNoForceRound()
+{
+    ArkUI_PixelRoundPolicy* policy = OH_ArkUI_PixelRoundPolicy_Create();
+    if (policy == nullptr) {
+        return nullptr;
+    }
+    OH_ArkUI_PixelRoundPolicy_SetStart(policy, ARKUI_PIXELROUNDCALCPOLICY_NOFORCEROUND);
+    OH_ArkUI_PixelRoundPolicy_SetEnd(policy, ARKUI_PIXELROUNDCALCPOLICY_NOFORCEROUND);
+    OH_ArkUI_PixelRoundPolicy_SetTop(policy, ARKUI_PIXELROUNDCALCPOLICY_NOFORCEROUND);
+    OH_ArkUI_PixelRoundPolicy_SetBottom(policy, ARKUI_PIXELROUNDCALCPOLICY_NOFORCEROUND);
+    return policy;
+}
+
+void ArkUIOHApiAdapter::DisposePixelRoundPolicy(ArkUI_PixelRoundPolicy* policy)
+{
+    if (policy != nullptr) {
+        OH_ArkUI_PixelRoundPolicy_Dispose(policy);
+    }
 }
 
 } // namespace NativeModule

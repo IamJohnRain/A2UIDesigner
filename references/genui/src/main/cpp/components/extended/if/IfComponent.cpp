@@ -174,6 +174,21 @@ bool ShouldReportInvalidFalsyConditionResult(const EvalResult& result)
     return result.IsNull();
 }
 
+bool IsDeferredConditionEvaluation(const EvalResult& result, const EvaluationContext& context,
+    const std::string& expression, bool isInitialEvaluation, const SurfaceSlot* surfaceSlot)
+{
+    if (!result.hasEvaluationError || !isInitialEvaluation || expression.find("$__dataModel") == std::string::npos) {
+        return false;
+    }
+
+    if (surfaceSlot != nullptr && surfaceSlot->HasReceivedDataModelUpdate()) {
+        return false;
+    }
+
+    return context.lastError == ExpressionError::EVAL_PATH_NOT_FOUND ||
+           (context.lastError == ExpressionError::NONE && context.GetDataModel() == nullptr);
+}
+
 std::string NumberToConditionExpression(double value)
 {
     if (std::isnan(value)) {
@@ -447,6 +462,55 @@ std::list<std::string> IfComponent::ParseStringArray(const JsonValue& value, con
     return result;
 }
 
+#ifdef ENABLE_EXPRESSION_ENGINE
+void IfComponent::SetupConditionEvaluationContext(EvaluationContext& context)
+{
+    InjectGlobalVariables(context);
+    auto surfaceSlot = GetRuntimeSurfaceSlot();
+    if (surfaceSlot != nullptr) {
+        auto dataModel = surfaceSlot->GetOrCreateDataModel();
+        if (dataModel != nullptr) {
+            context.SetDataModel(dataModel.get());
+        }
+        return;
+    }
+    if (GetRenderContext().dataModel != nullptr) {
+        context.SetDataModel(GetRenderContext().dataModel.get());
+    }
+}
+
+bool IfComponent::EvaluateConditionWithExpressionEngine(
+    const std::string& expression, bool& evalSucceeded, bool isInitialEvaluation)
+{
+    EvaluationContext context;
+    SetupConditionEvaluationContext(context);
+    auto& engine = ExpressionEngine::GetInstance();
+    std::string evalExpr = engine.IsExpression(expression) ? expression : "{{ " + expression + " }}";
+    EvalResult result = engine.Evaluate(evalExpr, context);
+    dependencies_ = CollectConditionDependencies(engine, expression);
+    if (result.IsUndefined()) {
+        LOG_A2UI(LOG_DEBUG,
+            "IfComponent::EvaluateCondition - expression evaluation returned undefined, phase=%{public}s, "
+            "componentId=%{public}s",
+            isInitialEvaluation ? "initial" : "update", GetComponentId().c_str());
+        return false;
+    }
+    if (IsDeferredConditionEvaluation(result, context, expression, isInitialEvaluation, GetRuntimeSurfaceSlot())) {
+        LOG_A2UI(LOG_DEBUG,
+            "IfComponent::EvaluateCondition - expression evaluation deferred until data is available, "
+            "componentId=%{public}s",
+            GetComponentId().c_str());
+        return false;
+    }
+    if (ShouldReportInvalidFalsyConditionResult(result)) {
+        ReportIfSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
+            "Property condition evaluates to invalid falsy non-boolean value, fallback to childrenElse", "condition");
+    }
+    evalSucceeded = true;
+    return result.AsBool();
+}
+#endif
+
 bool IfComponent::EvaluateCondition(const std::string& expression, bool& evalSucceeded, bool isInitialEvaluation)
 {
     evalSucceeded = false;
@@ -456,46 +520,7 @@ bool IfComponent::EvaluateCondition(const std::string& expression, bool& evalSuc
     }
 
 #ifdef ENABLE_EXPRESSION_ENGINE
-    EvaluationContext context;
-    InjectGlobalVariables(context);
-
-    auto surfaceSlot = GetRuntimeSurfaceSlot();
-    if (surfaceSlot != nullptr) {
-        auto dataModel = surfaceSlot->GetOrCreateDataModel();
-        if (dataModel != nullptr) {
-            context.SetDataModel(dataModel.get());
-        }
-    } else if (GetRenderContext().dataModel != nullptr) {
-        context.SetDataModel(GetRenderContext().dataModel.get());
-    }
-
-    auto& engine = ExpressionEngine::GetInstance();
-
-    std::string evalExpr;
-    if (engine.IsExpression(expression)) {
-        evalExpr = expression;
-    } else {
-        evalExpr = "{{ " + expression + " }}";
-    }
-    EvalResult result = engine.Evaluate(evalExpr, context);
-    dependencies_ = CollectConditionDependencies(engine, expression);
-
-    if (result.IsUndefined()) {
-        LOG_A2UI(LOG_WARN,
-            "IfComponent::EvaluateCondition - expression evaluation returned undefined, componentId=%{public}s",
-            GetComponentId().c_str());
-        ReportIfSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
-            isInitialEvaluation ? "Property condition initial evaluation failed, fallback to childrenElse"
-                                : "Property condition re-evaluation failed, keep current branch",
-            "condition");
-        return false;
-    }
-    if (ShouldReportInvalidFalsyConditionResult(result)) {
-        ReportIfSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
-            "Property condition evaluates to invalid falsy non-boolean value, fallback to childrenElse", "condition");
-    }
-    evalSucceeded = true;
-    return result.AsBool();
+    return EvaluateConditionWithExpressionEngine(expression, evalSucceeded, isInitialEvaluation);
 #else
     LOG_A2UI(LOG_WARN, "IfComponent::EvaluateCondition - expression engine not enabled, componentId=%{public}s",
         GetComponentId().c_str());

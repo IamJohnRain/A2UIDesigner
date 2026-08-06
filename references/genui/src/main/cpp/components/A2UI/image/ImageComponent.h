@@ -43,6 +43,10 @@ protected:
     std::vector<std::string> GetComponentDirectRequiredPropertyKeys() const override;
 
 private:
+    PropertyDeclaration CreateUrlPropertyDeclaration();
+    PropertyDeclaration CreateDescriptionPropertyDeclaration();
+    PropertyDeclaration CreateFitPropertyDeclaration();
+    PropertyDeclaration CreateVariantPropertyDeclaration();
     A2UIObjectFit ParseObjectFit(const std::string& fit) const;
     void ApplyVariantPreset(const std::string& variant);
 

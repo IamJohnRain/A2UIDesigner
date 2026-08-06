@@ -156,6 +156,7 @@ StyleResolveResult StyleResolver::Resolve(const StyleParseResult& parseResult, c
         .componentId = componentId,
         .dataModel = renderContext.dataModel,
         .allowExpression = true,
+        .missingPathPolicy = MissingPathPolicy::DEFER_UNTIL_DATA_UPDATE,
         .localVariables = localVariables };
 
     for (const auto& property : parseResult.properties) {
@@ -243,6 +244,9 @@ bool StyleResolver::ResolveProperty(
     }
 
     if (property.kind == StyleValueKind::EXPRESSION) {
+#ifdef ENABLE_EXPRESSION_ENGINE
+        CollectExpressionBindingPlans(property, result);
+#endif
         ResolvedValue resolved = DynamicValueResolver::Resolve(property.rawValue, dynamicContext);
         if (!resolved.success || !resolved.value.IsValid()) {
             AppendError(result, StyleErrorCode::RESOLVE_FAILED, property.rawName,
@@ -255,9 +259,6 @@ bool StyleResolver::ResolveProperty(
         bool putResult = PutResolvedValue(result, property, resolved.value);
         if (putResult) {
             result.dynamicallyResolvedStyleKeys.insert(property.rawName);
-#ifdef ENABLE_EXPRESSION_ENGINE
-            CollectExpressionBindingPlans(property, result);
-#endif
         }
         return putResult;
     }
@@ -315,7 +316,10 @@ bool StyleResolver::ResolveDynamicProperty(
         LOG_A2UI(LOG_WARN,
             "StyleResolver::ResolveDynamicProperty: dynamic style resolve failed, "
             "style=%{public}s, reason=%{public}s",
-            property.rawName.c_str(), resolved.errorMessage.c_str());
+            dynamicContext.componentId.c_str(), property.rawName.c_str());
+        if (property.kind == StyleValueKind::FUNCTION_CALL && property.name != StylePropertyName::UNKNOWN) {
+            result.resetProperties.push_back({ property.rawName, property.name });
+        }
         return false;
     }
 
@@ -357,6 +361,9 @@ bool StyleResolver::ResolveDynamicDescriptorProperty(
             "StyleResolver::ResolveDynamicDescriptorProperty - resolve failed, componentId=%{public}s, "
             "style=%{public}s, reason=%{public}s",
             dynamicContext.componentId.c_str(), property.rawName.c_str(), resolved.errorMessage.c_str());
+        if (property.name != StylePropertyName::UNKNOWN) {
+            result.resetProperties.push_back({ property.rawName, property.name });
+        }
         return false;
     }
 
@@ -379,7 +386,7 @@ void StyleResolver::RegisterDescriptorBindings(
         return;
     }
 
-    auto appendBinding = [&](const std::string& dataPath) {
+    auto appendBinding = [&property, &dependencies, &result](const std::string& dataPath) {
         StyleBindingPlan bindingPlan;
         bindingPlan.bindingProperty = BuildStyleBindingProperty(property.rawName);
         bindingPlan.dataPath = dataPath;

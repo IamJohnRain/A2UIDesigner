@@ -38,6 +38,15 @@ void LogExpressionWarn(const char* stage, const EvaluationContext& context)
         context.GetComponentId().c_str());
 }
 
+const VariableReference* AsTopLevelRelativeVariableReference(const std::shared_ptr<AstNode>& ast)
+{
+    if (ast == nullptr || ast->type != AstNodeType::VARIABLE_REFERENCE) {
+        return nullptr;
+    }
+    const auto* variableReference = static_cast<const VariableReference*>(ast.get());
+    return variableReference->isAbsolute ? nullptr : variableReference;
+}
+
 bool IsIdentifierStart(char ch)
 {
     return std::isalpha(static_cast<unsigned char>(ch)) != 0 || ch == '_';
@@ -393,6 +402,8 @@ ExpressionEngine::ExpressionEngine()
             if (args[0].IsArray()) {
                 return EvalResult::FromNumber(static_cast<double>(args[0].AsJson().GetArraySize()));
             }
+            context.SetError(
+                ExpressionError::PARSE_UNEXPECTED_TOKEN, "Built-in function size() expects an array argument");
             return EvalResult::FromNumber(0.0);
         });
 }
@@ -459,74 +470,106 @@ EvalResult ExpressionEngine::EvaluateInternal(
     const std::string& exprStr, EvaluationContext& context, bool stringifyJsonResult)
 {
     context.ClearError();
+    std::string innerExpr;
+    if (!PrepareExpression(exprStr, context, innerExpr)) {
+        return EvalResult::Undefined();
+    }
 
-    // Extract inner expression from {{ ... }} wrapper
-    std::string innerExpr = ExtractExpression(exprStr);
+    std::vector<Token> tokens = lexer_.Tokenize(innerExpr);
+    if (!ValidatePreparedTokens(innerExpr, tokens, context)) {
+        return EvalResult::Undefined();
+    }
+
+    std::shared_ptr<AstNode> ast = GetOrParseAst(innerExpr, tokens, context);
+    if (ast == nullptr) {
+        return EvalResult::Undefined();
+    }
+
+    EvalResult result = evaluator_->Evaluate(ast, context);
+    return FinalizeEvaluationResult(ast, std::move(result), context, stringifyJsonResult);
+}
+
+bool ExpressionEngine::PrepareExpression(const std::string& exprStr, EvaluationContext& context, std::string& innerExpr)
+{
+    innerExpr = ExtractExpression(exprStr);
     if (innerExpr.empty() && !exprStr.empty()) {
         context.SetError(ExpressionError::PARSE_UNEXPECTED_TOKEN, "invalid expression format");
         LogExpressionWarn("extract", context);
-        return EvalResult::Undefined();
+        return false;
     }
 
     innerExpr = RewriteExpressionPlaceholders(innerExpr);
-
-    // Phase 1: input precheck
     if (innerExpr.size() > context.maxExprLength) {
         context.SetError(ExpressionError::SANDBOX_LENGTH_EXCEEDED, "expression too long");
         LogExpressionWarn("length", context);
-        return EvalResult::Undefined();
+        return false;
     }
+    return true;
+}
 
-    // Tokenize
-    std::vector<Token> tokens = lexer_.Tokenize(innerExpr);
-
-    // Phase 2: token-level validation
+bool ExpressionEngine::ValidatePreparedTokens(
+    const std::string& innerExpr, const std::vector<Token>& tokens, EvaluationContext& context)
+{
+    (void)innerExpr;
     if (!sandbox_.ValidateTokens(tokens, context)) {
         LogExpressionWarn("tokens", context);
-        return EvalResult::Undefined();
+        return false;
     }
     if (tokens.size() > context.maxTokenCount + 1) { // +1 for EOF
         context.SetError(ExpressionError::SANDBOX_TOKEN_COUNT_EXCEEDED, "too many tokens");
         LogExpressionWarn("token-count", context);
-        return EvalResult::Undefined();
+        return false;
     }
     if (!sandbox_.CheckNestingDepth(tokens, context)) {
         LogExpressionWarn("nesting", context);
-        return EvalResult::Undefined();
+        return false;
     }
     if (!sandbox_.CheckBracketBalance(tokens, context)) {
         LogExpressionWarn("brackets", context);
-        return EvalResult::Undefined();
+        return false;
     }
+    return true;
+}
 
-    // Cache lookup
-    std::string cacheKey = innerExpr;
+std::shared_ptr<AstNode> ExpressionEngine::GetOrParseAst(
+    const std::string& cacheKey, const std::vector<Token>& tokens, EvaluationContext& context)
+{
     std::shared_ptr<AstNode> ast = GetCachedAst(cacheKey);
-
-    if (ast == nullptr) {
-        // Parse
-        ParseResult parseResult = parser_.Parse(tokens);
-        if (!parseResult.success || parseResult.ast == nullptr) {
-            context.SetError(ExpressionError::PARSE_UNEXPECTED_TOKEN, parseResult.errorMessage);
-            LogExpressionWarn("parser", context);
-            return EvalResult::Undefined();
-        }
-
-        // Phase 3: AST-level validation
-        auto astResult = sandbox_.ValidateAst(parseResult.ast, context);
-        if (!astResult.valid) {
-            context.SetError(ExpressionError::SANDBOX_AST_TOO_LARGE, astResult.reason);
-            LogExpressionWarn("ast", context);
-            return EvalResult::Undefined();
-        }
-
-        ast = std::move(parseResult.ast);
-        PutCachedAst(cacheKey, ast);
+    if (ast != nullptr) {
+        return ast;
     }
 
-    // Evaluate
-    EvalResult result = evaluator_->Evaluate(ast, context);
+    ParseResult parseResult = parser_.Parse(tokens);
+    if (!parseResult.success || parseResult.ast == nullptr) {
+        context.SetError(ExpressionError::PARSE_UNEXPECTED_TOKEN, parseResult.errorMessage);
+        LogExpressionWarn("parser", context);
+        return nullptr;
+    }
+
+    auto astResult = sandbox_.ValidateAst(parseResult.ast, context);
+    if (!astResult.valid) {
+        context.SetError(ExpressionError::SANDBOX_AST_TOO_LARGE, astResult.reason);
+        LogExpressionWarn("ast", context);
+        return nullptr;
+    }
+
+    ast = std::move(parseResult.ast);
+    PutCachedAst(cacheKey, ast);
+    return ast;
+}
+
+EvalResult ExpressionEngine::FinalizeEvaluationResult(
+    const std::shared_ptr<AstNode>& ast, EvalResult result, EvaluationContext& context, bool stringifyJsonResult)
+{
     if (result.IsUndefined()) {
+        const VariableReference* variableReference = AsTopLevelRelativeVariableReference(ast);
+        if (variableReference != nullptr && context.lastError == ExpressionError::EVAL_UNDEFINED_VARIABLE) {
+            context.SetError(ExpressionError::PARSE_UNEXPECTED_TOKEN,
+                "illegal expression: unquoted string: " + variableReference->name);
+            EvalResult fallback = EvalResult::FromString("");
+            fallback.hasEvaluationError = true;
+            return fallback;
+        }
         LogExpressionWarn("evaluator", context);
         return result;
     }
@@ -541,7 +584,8 @@ EvalResult ExpressionEngine::Evaluate(const std::string& exprStr, EvaluationCont
     return EvaluateInternal(exprStr, context, true);
 }
 
-JsonValue ExpressionEngine::EvaluateAsJsonValue(const std::string& exprStr, EvaluationContext& context)
+JsonValue ExpressionEngine::EvaluateAsJsonValue(
+    const std::string& exprStr, EvaluationContext& context, bool preserveNullResult)
 {
     EvaluationContext jsonContext = context;
     jsonContext.allowContainerResults = true;
@@ -566,6 +610,13 @@ JsonValue ExpressionEngine::EvaluateAsJsonValue(const std::string& exprStr, Eval
         }
         case EvalValueType::BOOLEAN: {
             auto adapter = JsonAdapter::CreateBool(result.boolValue);
+            return adapter != nullptr ? adapter->GetRoot() : JsonValue();
+        }
+        case EvalValueType::NULL_VALUE: {
+            if (!preserveNullResult) {
+                return JsonValue();
+            }
+            auto adapter = JsonAdapter::CreateNull();
             return adapter != nullptr ? adapter->GetRoot() : JsonValue();
         }
         case EvalValueType::JSON_VALUE: {

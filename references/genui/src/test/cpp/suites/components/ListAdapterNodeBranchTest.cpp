@@ -161,7 +161,7 @@ TEST_F(ListAdapterNodeBranchTest, should_skip_update_when_node_is_missing_or_not
     nestedListMissing->SetAdapterNode(nestedAdapterMissing);
 
     parentAdapter.OnNestedAdapterUpdate(nestedListMissing, "/users/0");
-    EXPECT_EQ(mockArkUIPtr_->totalNodeCounts_[nestedAdapterMissing->GetHandle()], 1U);
+    EXPECT_EQ(mockArkUIPtr_->totalNodeCounts_[nestedAdapterMissing->GetHandle()], 0U);
 
     auto nestedListNonArray = std::make_shared<ListComponent>();
     auto nestedAdapterNonArray = std::make_shared<ListAdapterNode>();
@@ -243,7 +243,7 @@ TEST_F(ListAdapterNodeBranchTest, should_skip_update_when_data_path_not_found_bu
     root->AddChild(validPathList);
 
     parentAdapter.OnNestedAdapterUpdate(root, "/users/0");
-    EXPECT_EQ(mockArkUIPtr_->totalNodeCounts_[missingPathAdapter->GetHandle()], 1U);
+    EXPECT_EQ(mockArkUIPtr_->totalNodeCounts_[missingPathAdapter->GetHandle()], 0U);
     EXPECT_EQ(mockArkUIPtr_->totalNodeCounts_[validPathAdapter->GetHandle()], 3U);
 }
 

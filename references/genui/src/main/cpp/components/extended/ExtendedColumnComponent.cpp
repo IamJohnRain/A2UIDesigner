@@ -106,14 +106,6 @@ void ExtendedColumnComponent::ApplyPrivateAttributes(const JsonValue& descriptor
 {
     SetAlignItems(A2UIHorizontalAlignment::START);
     SetJustifyContent(A2UIFlexAlignment::START);
-    if (descriptor.IsObject() && descriptor.Has("itemMargin")) {
-        JsonValue itemMarginValue = descriptor.GetItem("itemMargin");
-        if (!IsDynamicValueDescriptor(itemMarginValue) && itemMarginValue.IsNumber() &&
-            itemMarginValue.GetNumberValue(DEFAULT_ITEM_MARGIN) < 0.0) {
-            ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
-                "Property itemMargin has invalid value and has been reset to default", "itemMargin");
-        }
-    }
     ApplyDeclaredPropertyOrFallback(descriptor, "itemMargin");
 }
 
@@ -133,7 +125,7 @@ PropertyDeclaration ExtendedColumnComponent::GetPrivatePropertyDeclaration(const
             [](ExtendedColumnComponent& component) {
                 return PropertyDeclaration { .name = "itemMargin",
                     .type = PropertyValueType::NUMBER,
-                    .allowDynamic = false,
+                    .allowDynamic = true,
                     .allowExpression = true,
                     .fallbackNumber = DEFAULT_ITEM_MARGIN,
                     .applyValue = [&component](const JsonValue& value) {
@@ -230,6 +222,10 @@ void ExtendedColumnComponent::SetJustifyContent(A2UIFlexAlignment alignment)
 
 void ExtendedColumnComponent::SetItemMargin(float itemMargin)
 {
+    if (!std::isfinite(itemMargin) || itemMargin < 0.0F) {
+        ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
+            "Property itemMargin must be greater than or equal to 0 and has been reset to default", "itemMargin");
+    }
     itemMargin_ = NormalizeItemMargin(itemMargin, DEFAULT_ITEM_MARGIN);
     ApplyItemMarginToChildren();
 }

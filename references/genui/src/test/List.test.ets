@@ -23,6 +23,7 @@ import SurfaceControllerSchemaErrorBridgeUnitTest from './SurfaceControllerSchem
 import SchemaWarningComponentValidationUnitTest from './SchemaWarningComponentValidation.test';
 import ExpressionEngineUnitTest from './ExpressionEngine.test';
 import ExpressionEngineWithContextUnitTest from './ExpressionEngineWithContext.test';
+import CustomComponentDynamicValueResolverUnitTest from './CustomComponentDynamicValueResolver.test';
 
 export default function testsuite() {
   NativeFunctionsUnitTest();
@@ -35,4 +36,5 @@ export default function testsuite() {
   SchemaWarningComponentValidationUnitTest();
   ExpressionEngineUnitTest();
   ExpressionEngineWithContextUnitTest();
+  CustomComponentDynamicValueResolverUnitTest();
 }

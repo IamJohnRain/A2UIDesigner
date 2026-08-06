@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import copy
 import json
 import logging
@@ -24,6 +25,7 @@ GENUI_PROFILE = "genui@0.7.0-alpha.7"
 CONFIG_DIR = Path(__file__).resolve().parent / "config"
 THEMES_PATH = CONFIG_DIR / "alt-themes.json"
 LAYOUT_PROFILE_PATH = CONFIG_DIR / "alt-layout-profile.json"
+TUNING_PATH = CONFIG_DIR / "alt-tuning.json"
 DEFAULT_DSL_NAME = "card.dsl.jsonl"
 DEFAULT_ALT_NAME = "card.alt.txt"
 DEFAULT_ASC_NAME = "card.asc.txt"
@@ -38,7 +40,7 @@ AUTO_ASC_FIELDS = {
     "Text": {"text", "bind", "expr"},
     "Image": {"asset"},
     "Progress": {"value", "total"},
-    "Button": {"label", "event"},
+    "Button": {"label", "bind", "event"},
     "Checkbox": {"label", "value", "group", "bind", "select", "event"},
 }
 SIMPLE_BINDING_PATTERN = re.compile(r"^\{\{\s*\$\{([^}]+)\}\s*\}\}$")
@@ -207,6 +209,50 @@ def load_json_config(path: Path) -> dict[str, Any]:
 
 THEME_CONFIG = load_json_config(THEMES_PATH)
 LAYOUT_PROFILE = load_json_config(LAYOUT_PROFILE_PATH)
+TUNING = load_json_config(TUNING_PATH)
+
+
+def tuning_value(path: str, default: Any) -> Any:
+    """Read a dotted path from the tuning configuration with a fallback."""
+    node: Any = TUNING
+    for part in path.split("."):
+        if not isinstance(node, dict) or part not in node:
+            return default
+        node = node[part]
+    return node
+
+
+# Derived tuning constants. Defaults mirror the values previously hard-coded
+# in this module so a missing key cannot silently change behavior.
+EPSILON = float(tuning_value("tolerance.comparisonEpsilon", 0.01))
+TEXT_WIDTH_SAFETY = float(tuning_value("text.widthSafety", 1.10))
+BUTTON_WIDTH_SAFETY = float(tuning_value("text.buttonWidthSafety", 1.08))
+LINE_HEIGHT_PADDING = float(tuning_value("text.lineHeightPadding", 4.0))
+TEXT_MINIMUM_WIDTH_CHARS = float(tuning_value("text.minimumWidthChars", 2.0))
+LONG_TEXT_UNITS_THRESHOLD = float(tuning_value("text.longTextUnitsThreshold", 6.0))
+TEXT_UNIT_WEIGHTS = tuning_value("text.unitWeights", {}) or {}
+BUTTON_CHARS_RESERVE = float(tuning_value("button.charsHorizontalReserve", 24.0))
+BUTTON_LABEL_FONT_FALLBACK = float(tuning_value("button.labelFontFallback", 16.0))
+COLUMN_CENTER_MAIN_RATIO = float(tuning_value("column.centerMainRatio", 0.7))
+COLUMN_BOTTOM_ACTION_ANCHOR_GAP = float(tuning_value("column.bottomActionAnchorGap", 18.0))
+COLUMN_COMPACT_GAP_MINIMUM = float(tuning_value("column.compactGapMinimum", 2.0))
+PRIMARY_FONT_BANDS = tuning_value(
+    "typography.primaryFontBands",
+    [
+        {"aboveUnits": 12, "fontSize": 16},
+        {"aboveUnits": 8, "fontSize": 18},
+        {"aboveUnits": 3, "fontSize": 20},
+    ],
+)
+FONT_ADAPTATION_DEFAULT_MIN_SIZE = int(tuning_value("fontAdaptation.defaultMinSize", 10))
+FONT_ADAPTATION_DEFAULT_STEP = int(tuning_value("fontAdaptation.defaultStep", 2))
+FONT_ADAPTATION_ABSOLUTE_MIN_SIZE = float(tuning_value("fontAdaptation.absoluteMinimumSize", 8))
+THEME_LUMINANCE_WEIGHTS = tuning_value(
+    "themeInference.luminanceWeights", [0.2126, 0.7152, 0.0722]
+)
+THEME_DARK_LUMINANCE_THRESHOLD = float(tuning_value("themeInference.darkLuminanceThreshold", 0.42))
+THEME_AMBIENT_CHANNEL_SPREAD = float(tuning_value("themeInference.ambientChannelSpread", 12.0))
+THEME_AMBIENT_MIN_CHANNEL = float(tuning_value("themeInference.ambientMinChannel", 238.0))
 AUTO_THEMES = set(THEME_CONFIG.get("themes", {}))
 GRADIENT_DIRECTIONS = {
     "RightBottom",
@@ -645,10 +691,13 @@ def extract_alt_attrs(component: dict[str, Any], diagnostics: list[str]) -> dict
 
         if component_type == "Button":
             capacity_font = numeric_dimension(font_size) if not is_dynamic(font_size) else None
-            capacity_font = capacity_font or 16.0
+            capacity_font = capacity_font or BUTTON_LABEL_FONT_FALLBACK
             capacity_width = numeric_dimension(width)
             if capacity_width is not None:
-                attrs["chars"] = max(0, int(math.floor((capacity_width - 24.0) / capacity_font)))
+                attrs["chars"] = max(
+                    0,
+                    int(math.floor((capacity_width - BUTTON_CHARS_RESERVE) / capacity_font)),
+                )
 
     if component_type == "Text":
         add_static_attr(attrs, "lines", styles.get("maxLines"), diagnostics, "styles.maxLines")
@@ -772,8 +821,11 @@ def validate_restored_content(document: AltDocument, dsl_text: str) -> None:
                 f"but ALT chars={chars!r}"
             )
         width, _ = node_box(node, intrinsic=False)
-        required_width = estimated_text_width(label, node_font_size(node, 16.0)) + 24.0
-        if width is None or width + 0.01 < required_width:
+        required_width = (
+            estimated_text_width(label, node_font_size(node, BUTTON_LABEL_FONT_FALLBACK))
+            + BUTTON_CHARS_RESERVE
+        )
+        if width is None or width + EPSILON < required_width:
             raise ConversionError(
                 f"{node.node_id}: Button width cannot contain label {label!r}; "
                 f"requires at least {required_width:g}vp"
@@ -917,6 +969,100 @@ def binding_path(value: Any) -> str | None:
         return None
     match = SIMPLE_BINDING_PATTERN.fullmatch(value.strip())
     return match.group(1) if match else None
+
+
+def split_text_expression_terms(body: str) -> list[str] | None:
+    """Split a text expression on top-level + operators.
+
+    Automatic ALT expressions intentionally support a small, deterministic
+    subset: scalar JSON-pointer references, quoted string literals, and
+    concatenation.  Keeping the parser here explicit avoids evaluating
+    arbitrary code while still allowing composite runtime facts such as a
+    start/end time range.
+    """
+    terms: list[str] = []
+    current: list[str] = []
+    quote: str | None = None
+    escaped = False
+    for character in body:
+        if quote is not None:
+            current.append(character)
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == quote:
+                quote = None
+            continue
+        if character in {"'", '"'}:
+            quote = character
+            current.append(character)
+        elif character == "+":
+            term = "".join(current).strip()
+            if not term:
+                return None
+            terms.append(term)
+            current.clear()
+        else:
+            current.append(character)
+    if quote is not None:
+        return None
+    term = "".join(current).strip()
+    if not term:
+        return None
+    terms.append(term)
+    return terms
+
+
+def resolve_text_expression(
+    expression: str,
+    data_model: Any,
+) -> tuple[str | None, list[str], str | None]:
+    """Resolve the safe automatic Text expression subset against sample data.
+
+    The returned text is only a layout sample.  The original expression is
+    retained in the generated DSL so runtime updates remain data-driven.
+    """
+    if not is_dynamic(expression):
+        return None, [], "expression must be wrapped in {{ ... }}"
+    stripped = expression.strip()
+    if not (stripped.startswith("{{") and stripped.endswith("}}")):
+        return None, [], "expression must be wrapped in {{ ... }}"
+    body = stripped[2:-2].strip()
+    terms = split_text_expression_terms(body)
+    if not terms:
+        return None, [], "expression must contain at least one term"
+
+    parts: list[str] = []
+    references: list[str] = []
+    for term in terms:
+        pointer_match = re.fullmatch(r"\$\{([^{}]+)\}", term)
+        if pointer_match:
+            pointer = pointer_match.group(1).strip()
+            if not pointer.startswith("/"):
+                return None, references, f"expression reference {pointer!r} is not a JSON Pointer"
+            value = pointer_get(data_model, pointer)
+            if value is None or isinstance(value, (dict, list)):
+                return None, references, f"expression reference {pointer!r} has no scalar sampleValue"
+            if isinstance(value, bool):
+                parts.append("true" if value else "false")
+            elif isinstance(value, (int, float)) and not isinstance(value, bool):
+                parts.append(format_number(value))
+            else:
+                parts.append(str(value))
+            references.append(pointer)
+            continue
+        if len(term) >= 2 and term[0] == term[-1] and term[0] in {"'", '"'}:
+            try:
+                value = ast.literal_eval(term)
+            except (SyntaxError, ValueError) as exc:
+                return None, references, f"invalid string literal {term!r}: {exc}"
+            if not isinstance(value, str):
+                return None, references, f"expression literal {term!r} must be a string"
+            parts.append(value)
+            continue
+        return None, references, f"unsupported Text expression term {term!r}"
+    return "".join(parts), references, None
 
 
 def semantic_attrs(
@@ -1089,11 +1235,15 @@ def validate_auto_asc(
             raise ConversionError(f"{node.node_id}: auto ASC Image requires asset=N")
         if node.component == "Progress" and not all(key in attrs for key in ("value", "total")):
             raise ConversionError(f"{node.node_id}: auto ASC Progress requires value and total")
-        if node.component == "Button" and not all(key in attrs for key in ("label", "event")):
-            raise ConversionError(f"{node.node_id}: auto ASC Button requires label and event=N")
+        if node.component == "Button" and not all(key in attrs for key in ("event",)):
+            raise ConversionError(f"{node.node_id}: auto ASC Button requires event=N")
+        if node.component == "Button" and not any(key in attrs for key in ("label", "bind")):
+            raise ConversionError(f"{node.node_id}: auto ASC Button requires label or bind and event=N")
+        if node.component == "Button" and "label" in attrs and "bind" in attrs:
+            raise ConversionError(f"{node.node_id}: auto ASC Button cannot contain both label and bind")
         if node.component == "Button":
             label = attrs.get("label")
-            if not isinstance(label, str) or label.startswith("/") or is_dynamic(label):
+            if label is not None and (not isinstance(label, str) or label.startswith("/") or is_dynamic(label)):
                 raise ConversionError(
                     f"{node.node_id}: auto ASC Button label must be a short static string, not a binding"
                 )
@@ -1106,15 +1256,51 @@ def validate_auto_asc(
                 raise ConversionError(f"{node.node_id}: auto ASC {key} must be a JSON Pointer")
         if node.component == "Text" and "bind" in attrs:
             require_scalar_pointer(node.node_id, "bind", attrs["bind"])
+        if node.component == "Button" and "bind" in attrs:
+            require_scalar_pointer(node.node_id, "bind", attrs["bind"])
         if node.component == "Checkbox" and "bind" in attrs:
             require_scalar_pointer(node.node_id, "bind", attrs["bind"])
+            try:
+                selected_sample = pointer_get(data_model, attrs["bind"])
+            except ConversionError:
+                selected_sample = None
+            if not isinstance(selected_sample, bool):
+                raise ConversionError(
+                    f"{node.node_id}: auto ASC Checkbox bind must reference a boolean selected field"
+                )
+        if node.component == "Checkbox":
+            if "bind" not in attrs or "label" not in attrs:
+                raise ConversionError(
+                    f"{node.node_id}: auto ASC Checkbox requires label and bind=/booleanPath"
+                )
+            label = attrs["label"]
+            if not isinstance(label, str):
+                raise ConversionError(f"{node.node_id}: auto ASC Checkbox label must be a string")
+            if is_dynamic(label):
+                _, label_refs, label_error = resolve_text_expression(label, data_model)
+                if label_error:
+                    raise ConversionError(
+                        f"{node.node_id}: auto ASC Checkbox label cannot be measured safely: {label_error}"
+                    )
+                for pointer in label_refs:
+                    require_scalar_pointer(node.node_id, "label", pointer)
         if node.component == "Progress":
             for key in ("value", "total"):
                 if not isinstance(attrs[key], str) or not attrs[key].startswith("/"):
                     raise ConversionError(f"{node.node_id}: auto ASC {key} must be a JSON Pointer")
                 require_scalar_pointer(node.node_id, key, attrs[key])
-        if "expr" in attrs and not is_dynamic(attrs["expr"]):
-            raise ConversionError(f"{node.node_id}: auto ASC expr must be a complete {{ ... }} expression")
+        if "expr" in attrs:
+            if not is_dynamic(attrs["expr"]):
+                raise ConversionError(f"{node.node_id}: auto ASC expr must be a complete {{ ... }} expression")
+            _, expression_refs, expression_error = resolve_text_expression(
+                attrs["expr"], data_model
+            )
+            if expression_error:
+                raise ConversionError(
+                    f"{node.node_id}: auto ASC expr cannot be measured safely: {expression_error}"
+                )
+            for pointer in expression_refs:
+                require_scalar_pointer(node.node_id, "expr", pointer)
         if "asset" in attrs:
             index = attrs["asset"]
             if not isinstance(index, int) or index < 0 or index >= len(assets):
@@ -1148,7 +1334,15 @@ def apply_asc_to_dsl(
             if key == "text":
                 component["content"] = value
             elif key == "bind":
-                target = "select" if component_type == "Checkbox" else "src" if component_type == "Image" else "content"
+                target = (
+                    "select"
+                    if component_type == "Checkbox"
+                    else "src"
+                    if component_type == "Image"
+                    else "label"
+                    if component_type == "Button"
+                    else "content"
+                )
                 component[target] = f"{{{{ ${{{value}}} }}}}"
             elif key == "expr":
                 target = "src" if component_type == "Image" else "content"
@@ -1290,6 +1484,14 @@ def theme_values(theme_name: str) -> dict[str, Any]:
     return theme
 
 
+def checkbox_layout_profile(*, automatic: bool) -> dict[str, Any]:
+    """Return the explicit Checkbox profile for legacy or automatic output."""
+    components = TUNING.get("components", {})
+    key = "autoCheckbox" if automatic else "checkbox"
+    value = components.get(key, {}) if isinstance(components, dict) else {}
+    return value if isinstance(value, dict) else {}
+
+
 def infer_theme_name(document: AltDocument) -> str:
     attrs = document.root.attrs
     background = attrs.get("bg")
@@ -1304,11 +1506,18 @@ def infer_theme_name(document: AltDocument) -> str:
         red, green, blue = int(raw[2:4], 16), int(raw[4:6], 16), int(raw[6:8], 16)
     else:
         red, green, blue = int(raw[0:2], 16), int(raw[2:4], 16), int(raw[4:6], 16)
-    luminance = (0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255.0
-    if luminance < 0.42:
+    luminance = (
+        float(THEME_LUMINANCE_WEIGHTS[0]) * red
+        + float(THEME_LUMINANCE_WEIGHTS[1]) * green
+        + float(THEME_LUMINANCE_WEIGHTS[2]) * blue
+    ) / 255.0
+    if luminance < THEME_DARK_LUMINANCE_THRESHOLD:
         return "focus-dark"
     channel_spread = max(red, green, blue) - min(red, green, blue)
-    if channel_spread >= 12 or min(red, green, blue) < 238:
+    if (
+        channel_spread >= THEME_AMBIENT_CHANNEL_SPREAD
+        or min(red, green, blue) < THEME_AMBIENT_MIN_CHANNEL
+    ):
         return "ambient-light"
     return "neutral-light"
 
@@ -1429,7 +1638,12 @@ def validate_auto_protocol(document: AltDocument, task_size: str | None = None) 
     return issues
 
 
-def node_box(node: AltNode, intrinsic: bool = True) -> tuple[float | None, float | None]:
+def node_box(
+    node: AltNode,
+    intrinsic: bool = True,
+    checkbox_min_height: float = 48.0,
+    checkbox_min_width: float = 36.0,
+) -> tuple[float | None, float | None]:
     if "size" in node.attrs:
         size = numeric_dimension(node.attrs["size"])
         return size, size
@@ -1440,13 +1654,26 @@ def node_box(node: AltNode, intrinsic: bool = True) -> tuple[float | None, float
     else:
         width = height = None
     if intrinsic and node.component == "Checkbox":
-        height = max(height or 0.0, 48.0)
-        width = max(width or 0.0, 36.0)
+        height = max(height or 0.0, checkbox_min_height)
+        width = max(width or 0.0, checkbox_min_width)
     return width, height
 
 
 def validate_layout(document: AltDocument, size: str) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
+    automatic = is_auto_layout(document)
+    checkbox_profile = checkbox_layout_profile(automatic=automatic)
+    checkbox_min_height = float(
+        checkbox_profile.get("outerHeight", 48 if not automatic else 22)
+    )
+    checkbox_min_width = float(
+        checkbox_profile.get(
+            "minimumWidth",
+            float(checkbox_profile.get("controlSize", 20))
+            + float(checkbox_profile.get("controlMargin", 2)) * 2
+            + float(checkbox_profile.get("labelGap", 12)),
+        )
+    )
     expected = (140.0, 140.0) if size == "2x2" else (300.0, 140.0)
     root_width, root_height = node_box(document.root, intrinsic=False)
     if document.root.component not in {"Row", "Column", "Stack"}:
@@ -1479,20 +1706,20 @@ def validate_layout(document: AltDocument, size: str) -> list[ValidationIssue]:
                 ValidationIssue("error", node.node_id, f"{node.component} cannot contain ALT child nodes")
             )
         if node.component == "Checkbox":
-            if height is not None and height < 48:
+            if height is not None and height < checkbox_min_height:
                 issues.append(
                     ValidationIssue(
                         "error",
                         node.node_id,
-                        f"Checkbox outer height {height:g} is smaller than intrinsic 48vp",
+                        f"Checkbox outer height {height:g} is smaller than intrinsic {checkbox_min_height:g}vp",
                     )
                 )
-            if width is not None and width < 36:
+            if width is not None and width < checkbox_min_width:
                 issues.append(
                     ValidationIssue(
                         "error",
                         node.node_id,
-                        f"Checkbox width {width:g} cannot contain the fixed 20vp control and 16vp margins/gap",
+                        f"Checkbox width {width:g} cannot contain the fixed control and label gap minimum {checkbox_min_width:g}vp",
                     )
                 )
             if any(key in node.attrs for key in ("font", "lines", "overflow")):
@@ -1524,7 +1751,7 @@ def validate_layout(document: AltDocument, size: str) -> list[ValidationIssue]:
                 )
 
         if node.component == "Button":
-            font_size = 16.0
+            font_size = BUTTON_LABEL_FONT_FALLBACK
             if "font" in node.attrs:
                 font_size = numeric_dimension(str(node.attrs["font"]).split("/", 1)[0]) or font_size
             else:
@@ -1533,7 +1760,7 @@ def validate_layout(document: AltDocument, size: str) -> list[ValidationIssue]:
             if not isinstance(chars, int) or isinstance(chars, bool) or chars < 1:
                 issues.append(ValidationIssue("error", node.node_id, "Button chars must be an integer of at least 1"))
             if width is not None and isinstance(chars, int):
-                capacity = max(0, int(math.floor((width - 24.0) / font_size)))
+                capacity = max(0, int(math.floor((width - BUTTON_CHARS_RESERVE) / font_size)))
                 if chars > capacity:
                     issues.append(
                         ValidationIssue(
@@ -1563,11 +1790,22 @@ def validate_layout(document: AltDocument, size: str) -> list[ValidationIssue]:
             )
 
         if node.component in {"Row", "Column", "Stack"} and node.children:
-            parent_width, parent_height = node_box(node)
+            parent_width, parent_height = node_box(
+                node,
+                checkbox_min_height=checkbox_min_height,
+                checkbox_min_width=checkbox_min_width,
+            )
             top, right, bottom, left = edge_numbers(node.attrs.get("pad"))
             inner_width = None if parent_width is None else max(0.0, parent_width - left - right)
             inner_height = None if parent_height is None else max(0.0, parent_height - top - bottom)
-            child_boxes = [node_box(child) for child in node.children]
+            child_boxes = [
+                node_box(
+                    child,
+                    checkbox_min_height=checkbox_min_height,
+                    checkbox_min_width=checkbox_min_width,
+                )
+                for child in node.children
+            ]
             child_margins = [edge_numbers(child.attrs.get("margin")) for child in node.children]
             gap = numeric_dimension(node.attrs.get("gap", 0)) or 0.0
             if node.component == "Row" and inner_width is not None and all(box[0] is not None for box in child_boxes):
@@ -1575,7 +1813,7 @@ def validate_layout(document: AltDocument, size: str) -> list[ValidationIssue]:
                     (box[0] or 0.0) + margin[1] + margin[3]
                     for box, margin in zip(child_boxes, child_margins)
                 ) + gap * max(0, len(child_boxes) - 1)
-                if required > inner_width + 0.01:
+                if required > inner_width + EPSILON:
                     issues.append(
                         ValidationIssue(
                             "error",
@@ -1588,7 +1826,7 @@ def validate_layout(document: AltDocument, size: str) -> list[ValidationIssue]:
                     (box[1] or 0.0) + margin[0] + margin[2]
                     for box, margin in zip(child_boxes, child_margins)
                 )
-                if required > inner_height + 0.01:
+                if required > inner_height + EPSILON:
                     issues.append(
                         ValidationIssue(
                             "error",
@@ -1601,7 +1839,7 @@ def validate_layout(document: AltDocument, size: str) -> list[ValidationIssue]:
                     (box[1] or 0.0) + margin[0] + margin[2]
                     for box, margin in zip(child_boxes, child_margins)
                 ) + gap * max(0, len(child_boxes) - 1)
-                if required > inner_height + 0.01:
+                if required > inner_height + EPSILON:
                     issues.append(
                         ValidationIssue(
                             "error",
@@ -1614,7 +1852,7 @@ def validate_layout(document: AltDocument, size: str) -> list[ValidationIssue]:
                     (box[0] or 0.0) + margin[1] + margin[3]
                     for box, margin in zip(child_boxes, child_margins)
                 )
-                if required > inner_width + 0.01:
+                if required > inner_width + EPSILON:
                     issues.append(
                         ValidationIssue(
                             "error",
@@ -1626,7 +1864,7 @@ def validate_layout(document: AltDocument, size: str) -> list[ValidationIssue]:
                 for child, box, margin in zip(node.children, child_boxes, child_margins):
                     child_width = None if box[0] is None else box[0] + margin[1] + margin[3]
                     child_height = None if box[1] is None else box[1] + margin[0] + margin[2]
-                    if inner_width is not None and child_width is not None and child_width > inner_width + 0.01:
+                    if inner_width is not None and child_width is not None and child_width > inner_width + EPSILON:
                         issues.append(
                             ValidationIssue(
                                 "error",
@@ -1634,7 +1872,7 @@ def validate_layout(document: AltDocument, size: str) -> list[ValidationIssue]:
                                 f"Stack child width {child_width:g} exceeds {node.node_id} inner width {inner_width:g}",
                             )
                         )
-                    if inner_height is not None and child_height is not None and child_height > inner_height + 0.01:
+                    if inner_height is not None and child_height is not None and child_height > inner_height + EPSILON:
                         issues.append(
                             ValidationIssue(
                                 "error",
@@ -1836,6 +2074,451 @@ def find_best_value(
     return best[1]
 
 
+ROLE_BINDING_TOKENS = {
+    "title": {"title", "name", "heading", "subject"},
+    "primary": {
+        "primary",
+        "value",
+        "level",
+        "score",
+        "count",
+        "total",
+        "amount",
+        "number",
+        "metric",
+        "load",
+        "temperature",
+        "duration",
+        "time",
+        "reminder",
+    },
+    "status": {
+        "status",
+        "state",
+        "condition",
+        "mode",
+        "current",
+        "connected",
+        "loading",
+        "risk",
+        "alert",
+    },
+    "warning": {"warning", "risk", "alert", "danger", "notice", "level"},
+    "error": {"error", "failure", "exception", "invalid"},
+    "metric": {
+        "metric",
+        "value",
+        "count",
+        "total",
+        "score",
+        "progress",
+        "level",
+        "temperature",
+        "duration",
+        "time",
+    },
+    "support": {
+        "support",
+        "caption",
+        "subtitle",
+        "summary",
+        "description",
+        "detail",
+        "meta",
+        "location",
+        "time",
+        "date",
+        "reminder",
+    },
+    "meta": {"meta", "description", "detail", "time", "date", "location"},
+    "action": {"action", "label", "button", "command", "entry"},
+    "item": {"item", "label", "option", "selection"},
+    "selection": {"item", "label", "option", "selected", "selection"},
+}
+
+
+def binding_tokens(value: str) -> set[str]:
+    """Tokenize field paths and also retain the alphabetic stem of item1-like names."""
+    tokens = identifier_tokens(value)
+    tokens.update(re.sub(r"\d+$", "", token) for token in list(tokens))
+    return {token for token in tokens if token}
+
+
+def flatten_schema_fields(
+    schema: Any, pointer: str = ""
+) -> list[tuple[str, Any, str]]:
+    """Flatten scalar schema samples together with descriptions for binding inference."""
+    fields: list[tuple[str, Any, str]] = []
+    if not isinstance(schema, dict):
+        return fields
+    properties = schema.get("properties")
+    if isinstance(properties, dict):
+        for key, child in properties.items():
+            escaped = escape_pointer_token(str(key))
+            fields.extend(flatten_schema_fields(child, pointer + "/" + escaped))
+        return fields
+    if schema.get("type") == "array" and isinstance(schema.get("items"), dict):
+        fields.extend(flatten_schema_fields(schema["items"], pointer + "/0"))
+        return fields
+    sample = schema.get("sampleValue")
+    if "sampleValue" in schema:
+        if sample is not None and not isinstance(sample, (dict, list)):
+            description = schema.get("description")
+            fields.append((pointer or "/", sample, description if isinstance(description, str) else ""))
+        return fields
+    for key, child in schema.items():
+        if key in {"type", "description", "maxLength"}:
+            continue
+        escaped = escape_pointer_token(str(key))
+        fields.extend(flatten_schema_fields(child, pointer + "/" + escaped))
+    return fields
+
+
+def infer_binding_path(
+    node: AltNode,
+    component: str,
+    static_value: Any,
+    task_spec: dict[str, Any],
+    used_paths: set[str],
+) -> str | None:
+    """Infer a safe scalar binding when a model emitted a semantic literal.
+
+    Exact sample matches are authoritative.  Otherwise use only node/role/path
+    semantics and require a non-trivial score; unrelated UI copy remains static.
+    """
+    if not isinstance(static_value, (str, int, float)) or isinstance(static_value, bool):
+        return None
+    role = auto_role(node)
+    node_tokens = binding_tokens(node.node_id)
+    ignored = {"text", "label", "value", "item", "row", "column", "image", "icon", "button"}
+    node_tokens -= ignored
+    role_tokens = ROLE_BINDING_TOKENS.get(role, set())
+    candidates: list[tuple[int, str]] = []
+    for pointer, sample, description in flatten_schema_fields(task_spec["dataModelSchema"]):
+        if pointer in used_paths or isinstance(sample, bool):
+            continue
+        if component == "Button" and not isinstance(sample, (str, int, float)):
+            continue
+        if component == "Button":
+            field_tokens = binding_tokens(pointer + " " + description)
+            conflict_tokens = {
+                "load",
+                "score",
+                "value",
+                "count",
+                "total",
+                "status",
+                "state",
+                "alert",
+                "warning",
+                "risk",
+                "condition",
+                "progress",
+                "temperature",
+                "current",
+            }
+            action_tokens = {
+                "action",
+                "button",
+                "command",
+                "event",
+                "entry",
+                "launch",
+                "open",
+                "navigate",
+                "setting",
+                "live",
+                "app",
+            }
+            if field_tokens & conflict_tokens and not field_tokens & action_tokens:
+                continue
+        if component == "Text" and isinstance(sample, (dict, list)):
+            continue
+        score = 0
+        if sample == static_value or str(sample) == str(static_value):
+            score += 1000
+        field_tokens = binding_tokens(pointer + " " + description)
+        score += len(node_tokens & field_tokens) * 50
+        score += len(role_tokens & field_tokens) * 30
+        leaf = pointer.rsplit("/", 1)[-1].lower()
+        if leaf in node_tokens:
+            score += 60
+        candidates.append((score, pointer))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: (-item[0], item[1]))
+    best_score, best_path = candidates[0]
+    second_score = candidates[1][0] if len(candidates) > 1 else -1
+    if best_score >= 1000:
+        return best_path
+    if best_score < 30:
+        return None
+    if best_score < 60 and best_score == second_score:
+        return None
+    if best_score - second_score < 10 and best_score < 80:
+        return None
+    return best_path
+
+
+def normalize_auto_bindings(
+    document: AltDocument,
+    task_spec: dict[str, Any],
+    asc: dict[str, dict[str, Any]],
+) -> tuple[dict[str, dict[str, Any]], list[str]]:
+    """Prefer DataModel scalar bindings while retaining legitimate fixed copy."""
+    result = copy.deepcopy(asc)
+    used_paths = {
+        value.get("bind")
+        for value in result.values()
+        if isinstance(value, dict) and isinstance(value.get("bind"), str)
+    }
+    notes: list[str] = []
+    for node in alt_nodes(document):
+        if node.component not in {"Text", "Button"}:
+            continue
+        attrs = result.get(node.node_id)
+        if not isinstance(attrs, dict) or "expr" in attrs:
+            continue
+        if node.component == "Button" and isinstance(attrs.get("bind"), str):
+            field_tokens = binding_tokens(attrs["bind"])
+            conflict_tokens = {
+                "load", "score", "value", "count", "total", "status", "state",
+                "alert", "warning", "risk", "condition", "progress", "temperature", "current",
+            }
+            action_tokens = {
+                "action", "button", "command", "event", "entry", "launch", "open",
+                "navigate", "setting", "live", "app",
+            }
+            if field_tokens & conflict_tokens and not field_tokens & action_tokens:
+                rejected_path = attrs["bind"]
+                attrs.pop("bind", None)
+                attrs["label"] = humanize_id(node.node_id, "Button")
+                notes.append(f"{node.node_id}: rejected non-action Button binding {rejected_path!r}")
+            else:
+                used_paths.add(attrs["bind"])
+                continue
+        if "bind" in attrs:
+            used_paths.add(attrs["bind"])
+            continue
+        key = "label" if node.component == "Button" else "text"
+        if key not in attrs:
+            continue
+        path = infer_binding_path(node, node.component, attrs[key], task_spec, used_paths)
+        if path is None:
+            continue
+        attrs.pop(key, None)
+        attrs["bind"] = path
+        used_paths.add(path)
+        notes.append(f"{node.node_id}: inferred bind={path} from static {key}")
+    return result, notes
+
+
+def serialize_asc(document: AltDocument, asc: dict[str, dict[str, Any]]) -> str:
+    """Serialize normalized semantic attributes in ALT preorder."""
+    lines: list[str] = []
+    for node in alt_nodes(document):
+        attrs = asc.get(node.node_id)
+        if not isinstance(attrs, dict) or not attrs:
+            continue
+        tokens = [node.component, node.node_id]
+        for key, value in attrs.items():
+            tokens.append(f"{key}={encode_alt_value(value)}")
+        lines.append(" ".join(tokens))
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def repair_auto_structure(document: AltDocument) -> tuple[AltDocument, list[str]]:
+    """Group excess siblings into semantic containers without changing leaf meaning."""
+    result = copy.deepcopy(document)
+    used_ids = {node.node_id for node in alt_nodes(result)}
+    notes: list[str] = []
+    sequence = 0
+
+    def new_group_id(node_id: str) -> str:
+        nonlocal sequence
+        while True:
+            sequence += 1
+            candidate = f"{node_id}_group_{sequence}"
+            if candidate not in used_ids:
+                used_ids.add(candidate)
+                return candidate
+
+    def visit(node: AltNode) -> None:
+        for child in list(node.children):
+            visit(child)
+        if node.component not in {"Row", "Column"}:
+            return
+        while len(node.children) > 3:
+            reserve_tail = node.component == "Column" and (
+                node.children[-1].component == "Button"
+                or node.children[-1].component in CONTAINERS | VIRTUAL_COMPONENTS
+            )
+            middle_end = -1 if reserve_tail else None
+            middle = node.children[1:middle_end]
+            if not middle:
+                break
+            wrapper = AltNode(
+                "Column" if node.component == "Column" else "Row",
+                new_group_id(node.node_id),
+                {},
+                middle,
+            )
+            node.children = node.children[:1] + [wrapper] + node.children[-1:] if reserve_tail else node.children[:1] + [wrapper]
+            notes.append(f"{node.node_id}: grouped {len(middle)} excess children under {wrapper.node_id}")
+            visit(wrapper)
+
+    visit(result.root)
+    return result, notes
+
+
+def repair_long_auto_text_roles(
+    document: AltDocument,
+    task_spec: dict[str, Any],
+    asc: dict[str, dict[str, Any]],
+) -> list[str]:
+    """Downgrade long protected facts to support before they cause clipping."""
+    size = str(task_spec.get("size"))
+    canvas = LAYOUT_PROFILE.get("canvas", {}).get(size, {})
+    padding = float(canvas.get("padding", 12)) if isinstance(canvas, dict) else 12.0
+    width = float(canvas.get("width", 140 if size == "2x2" else 300)) if isinstance(canvas, dict) else 140.0
+    available = max(1.0, width - padding * 2)
+    data_model = sample_data_model(task_spec["dataModelSchema"])
+    density = "compact" if size == "2x2" else "regular"
+    notes: list[str] = []
+    for node in alt_nodes(document):
+        if node.component != "Text" or auto_role(node) not in configured_single_line_roles():
+            continue
+        role = auto_role(node)
+        content = auto_semantic_text(node, asc, data_model, [])
+        font_size, font_weight = auto_font(role, content, density)
+        candidate_sizes = text_font_candidates(role, content, density)
+        smallest_size = candidate_sizes[-1] if candidate_sizes else font_size
+        required = estimated_text_width(content, smallest_size, font_weight, TEXT_WIDTH_SAFETY)
+        if required > available + EPSILON:
+            old_role = auto_role(node)
+            node.attrs["role"] = "support"
+            notes.append(f"{node.node_id}: downgraded long role={old_role} text to support")
+    return notes
+
+
+def repair_missing_auto_roles(document: AltDocument) -> list[str]:
+    """Fill the deterministic semantic role when a model omits it."""
+    notes: list[str] = []
+    for node in alt_nodes(document):
+        if node.component in CONTAINERS | VIRTUAL_COMPONENTS or isinstance(node.attrs.get("role"), str):
+            continue
+        role = node_role(node.node_id, node.component)
+        node.attrs["role"] = role
+        notes.append(f"{node.node_id}: inferred missing role={role}")
+    return notes
+
+
+def repair_auto_depth(document: AltDocument, size: str) -> list[str]:
+    """Flatten same-axis nested groups when they only add unsafe depth."""
+    limits_value = LAYOUT_PROFILE.get("limits", {}).get(size, {})
+    limits = limits_value if isinstance(limits_value, dict) else {}
+    max_depth = limits.get("maxDepth")
+    if not isinstance(max_depth, int):
+        return []
+    notes: list[str] = []
+
+    def depths(node: AltNode, depth: int = 1) -> list[tuple[AltNode, int]]:
+        result = [(node, depth)]
+        for child in node.children:
+            result.extend(depths(child, depth + 1))
+        return result
+
+    while True:
+        over_depth = [(node, depth) for node, depth in depths(document.root) if depth > max_depth]
+        if not over_depth:
+            break
+        target_depth = max(depth for _, depth in over_depth)
+        candidate: tuple[AltNode, AltNode] | None = None
+
+        def find(node: AltNode, depth: int = 1) -> None:
+            nonlocal candidate
+            if candidate is not None:
+                return
+            for child in node.children:
+                if child.component == node.component and any(
+                    child_depth >= target_depth
+                    for _, child_depth in depths(child, depth + 1)
+                ):
+                    candidate = (node, child)
+                    return
+                find(child, depth + 1)
+
+        find(document.root)
+        if candidate is None:
+            break
+        parent, child = candidate
+        index = parent.children.index(child)
+        parent.children[index:index + 1] = child.children
+        notes.append(f"{child.node_id}: flattened same-axis group to satisfy {size} maxDepth={max_depth}")
+    return notes
+
+
+def repair_narrow_text_row(document: AltDocument, task_spec: dict[str, Any], asc: dict[str, dict[str, Any]]) -> list[str]:
+    """Use a vertical group when a 2x2 all-text header cannot fit horizontally."""
+    size = str(task_spec.get("size"))
+    if size != "2x2":
+        return []
+    canvas = LAYOUT_PROFILE.get("canvas", {}).get(size, {})
+    width = float(canvas.get("width", 140)) if isinstance(canvas, dict) else 140.0
+    padding = float(canvas.get("padding", 12)) if isinstance(canvas, dict) else 12.0
+    available = max(1.0, width - padding * 2)
+    data_model = sample_data_model(task_spec["dataModelSchema"])
+    notes: list[str] = []
+    for node in alt_nodes(document):
+        if node.component != "Row" or len(node.children) < 2 or not all(child.component == "Text" for child in node.children):
+            continue
+        total = 0.0
+        for child in node.children:
+            content = auto_semantic_text(child, asc, data_model, [])
+            role = auto_role(child)
+            font_size, font_weight = auto_font(role, content, "compact")
+            total += estimated_text_width(content, font_size, font_weight, TEXT_WIDTH_SAFETY)
+        total += auto_gap(node, 1, "compact") * max(0, len(node.children) - 1)
+        if total > available + EPSILON:
+            node.component = "Column"
+            notes.append(f"{node.node_id}: changed narrow all-text Row to Column")
+    return notes
+
+
+def prune_auto_low_priority_leaf(document: AltDocument, size: str) -> str | None:
+    """Remove one low-priority leaf only after the automatic layout is infeasible."""
+    if size not in {"2x2", "2x4"}:
+        return None
+    parent_map: dict[str, AltNode] = {}
+
+    def visit(node: AltNode) -> None:
+        for child in node.children:
+            parent_map[child.node_id] = node
+            visit(child)
+
+    visit(document.root)
+    candidates: list[tuple[int, AltNode]] = []
+    for node in alt_nodes(document):
+        parent = parent_map.get(node.node_id)
+        if parent is None or len(parent.children) <= 1:
+            continue
+        role = auto_role(node)
+        if node.component == "Image" and parent is not None and parent.component != "Row":
+            candidates.append((0, node))
+        elif node.component == "Progress" and role == "metric":
+            candidates.append((1, node))
+        elif size == "2x4" and node.component == "Text" and role == "selection":
+            candidates.append((1, node))
+        elif node.component == "Text" and role in {"meta", "support", "selection"}:
+            candidates.append((2, node))
+    if not candidates:
+        return None
+    _, target = sorted(candidates, key=lambda item: (item[0], item[1].node_id))[0]
+    parent = parent_map[target.node_id]
+    parent.children.remove(target)
+    return target.node_id
+
+
 def source_expression(source: Any, repeat_context: bool = False) -> Any:
     if not isinstance(source, str) or not source:
         return None
@@ -1877,22 +2560,22 @@ def text_units(text: str) -> float:
     units = 0.0
     for character in text:
         if character.isspace():
-            units += 0.35
+            units += float(TEXT_UNIT_WEIGHTS.get("space", 0.35))
         elif unicodedata.east_asian_width(character) in {"W", "F"}:
-            units += 1.0
+            units += float(TEXT_UNIT_WEIGHTS.get("cjk", 1.0))
         elif character.isupper():
-            units += 0.68
+            units += float(TEXT_UNIT_WEIGHTS.get("upper", 0.68))
         elif character.islower():
-            units += 0.56
+            units += float(TEXT_UNIT_WEIGHTS.get("lower", 0.56))
         elif character.isdigit():
-            units += 0.62
+            units += float(TEXT_UNIT_WEIGHTS.get("digit", 0.62))
         else:
-            units += 0.45
+            units += float(TEXT_UNIT_WEIGHTS.get("other", 0.45))
     return units
 
 
 def estimated_text_width(text: str, font_size: float, font_weight: int = 400, safety: float = 1.0) -> float:
-    weight_factor = 1.0 + max(0, font_weight - 400) / 5000.0
+    weight_factor = 1.0 + max(0, font_weight - 400) / float(tuning_value("text.weightFactorDivisor", 5000.0))
     return text_units(text) * font_size * weight_factor * safety
 
 
@@ -1938,7 +2621,54 @@ def configured_text_max_lines(role: str, content: str) -> int:
         configured = max(1, int(configured))
     except (TypeError, ValueError):
         configured = 1
-    return configured if configured > 1 and text_units(content) > 6 else 1
+    return (
+        configured
+        if configured > 1 and text_units(content) > LONG_TEXT_UNITS_THRESHOLD
+        else 1
+    )
+
+
+def text_font_candidates(role: str, content: str, density: str) -> list[int]:
+    """Return descending readable font sizes for automatic text fitting."""
+    preferred, _ = auto_font(role, content, density)
+    rules = LAYOUT_PROFILE.get("textRules", {})
+    adaptation = rules.get("fontAdaptation", {}) if isinstance(rules, dict) else {}
+    config = adaptation.get(role, {}) if isinstance(adaptation, dict) else {}
+    if not isinstance(config, dict):
+        config = {}
+    try:
+        minimum = int(
+            config.get(
+                "minSize",
+                max(FONT_ADAPTATION_DEFAULT_MIN_SIZE, preferred - 4),
+            )
+        )
+    except (TypeError, ValueError):
+        minimum = max(FONT_ADAPTATION_DEFAULT_MIN_SIZE, preferred - 4)
+    try:
+        step = max(1, int(config.get("step", FONT_ADAPTATION_DEFAULT_STEP)))
+    except (TypeError, ValueError):
+        step = FONT_ADAPTATION_DEFAULT_STEP
+    minimum = min(preferred, max(FONT_ADAPTATION_ABSOLUTE_MIN_SIZE, minimum))
+    candidates = list(range(preferred, minimum - 1, -step))
+    if not candidates or candidates[-1] != minimum:
+        candidates.append(minimum)
+    return candidates
+
+
+def fit_text_font(
+    role: str,
+    content: str,
+    density: str,
+    available_width: float,
+) -> tuple[int, int]:
+    """Choose the largest configured font that keeps a Text on one line."""
+    preferred, font_weight = auto_font(role, content, density)
+    for font_size in text_font_candidates(role, content, density):
+        required = estimated_text_width(content, font_size, font_weight, TEXT_WIDTH_SAFETY)
+        if required <= available_width + EPSILON:
+            return font_size, font_weight
+    return text_font_candidates(role, content, density)[-1], font_weight
 
 
 def auto_semantic_text(
@@ -1951,6 +2681,23 @@ def auto_semantic_text(
     key = "label" if node.component in {"Button", "Checkbox"} else "text"
     value = attrs.get(key)
     if isinstance(value, (str, int, float)):
+        if isinstance(value, str) and is_dynamic(value):
+            resolved, _, expression_error = resolve_text_expression(value, data_model)
+            if resolved is not None:
+                return resolved
+            diagnostics.append(
+                ValidationIssue(
+                    "warning",
+                    node.node_id,
+                    (
+                        "dynamic label/text cannot be measured safely; "
+                        f"layout uses a semantic fallback ({expression_error})"
+                        if expression_error
+                        else "dynamic label/text has no statically measurable upper bound; layout uses a semantic fallback"
+                    ),
+                )
+            )
+            return humanize_id(node.node_id, node.component)
         return str(value)
     pointer = attrs.get("bind")
     if isinstance(pointer, str) and pointer.startswith("/"):
@@ -1969,19 +2716,19 @@ def auto_semantic_text(
         )
     expression = attrs.get("expr")
     if isinstance(expression, str):
-        pointer = binding_path(expression)
-        if pointer:
-            try:
-                resolved = pointer_get(data_model, pointer)
-            except ConversionError:
-                resolved = None
-            if isinstance(resolved, (str, int, float, bool)):
-                return str(resolved)
+        resolved, _, expression_error = resolve_text_expression(expression, data_model)
+        if resolved is not None:
+            return resolved
         diagnostics.append(
             ValidationIssue(
                 "warning",
                 node.node_id,
-                "complex dynamic text has no statically measurable upper bound; layout uses a semantic fallback",
+                (
+                    "complex dynamic text cannot be measured safely; "
+                    f"layout uses a semantic fallback ({expression_error})"
+                    if expression_error
+                    else "complex dynamic text has no statically measurable upper bound; layout uses a semantic fallback"
+                ),
             )
         )
     return humanize_id(node.node_id, node.component)
@@ -2023,13 +2770,16 @@ def auto_font(role: str, content: str, density: str) -> tuple[int, int]:
     font_size, font_weight = int(value[0]), int(value[1])
     units = text_units(content)
     if role == "primary":
-        if units > 12:
-            font_size = 16
-        elif units > 8:
-            font_size = 18
-        elif units > 3:
-            font_size = 20
-        elif ":" in content or any(token in content for token in ("分钟", "小时", "天")):
+        banded = False
+        for band in PRIMARY_FONT_BANDS:
+            if units > float(band["aboveUnits"]):
+                font_size = int(band["fontSize"])
+                banded = True
+                break
+        if not banded and (
+            ":" in content
+            or any(token in content for token in ("分钟", "小时", "天"))
+        ):
             # A compact time/duration is still a primary-sized fact, but the
             # 32fp hero treatment would consume 36vp of vertical space in a
             # 2x2 status group.  Keep the semantic role while using the safe
@@ -2166,13 +2916,19 @@ def auto_layout_document(
             )
         )
     density = "compact" if (
-        len(alt_nodes(result)) > (7 if size == "2x2" else 13)
-        or visible_units > max_units * 0.72
+        size == "2x2"
+        or len(alt_nodes(result))
+        > (
+            int(tuning_value("density.compactNodeThreshold2x2", 7))
+            if size == "2x2"
+            else int(tuning_value("density.compactNodeThreshold2x4", 13))
+        )
+        or visible_units > max_units * float(tuning_value("density.compactUnitsRatio", 0.72))
     ) else "regular"
 
-    components = LAYOUT_PROFILE.get("components", {})
-    button_profile = components.get("button", {})
-    checkbox_profile = components.get("checkbox", {})
+    components = TUNING.get("components", {})
+    button_profile = components.get("autoButton", components.get("button", {}))
+    checkbox_profile = components.get("autoCheckbox", components.get("checkbox", {}))
     image_profile = components.get("image", {})
     progress_profile = components.get("progress", {})
     divider_profile = components.get("divider", {})
@@ -2184,14 +2940,20 @@ def auto_layout_document(
             content = semantic_text.get(node.node_id, "信息")
             font_size, font_weight = auto_font(role, content, density)
             maximum_lines = configured_text_max_lines(role, content)
-            preferred_width = estimated_text_width(content, font_size, font_weight, 1.10)
-            line_height = font_size + 4
-            minimum_width = max(font_size * 2.0, preferred_width / maximum_lines)
+            preferred_width = estimated_text_width(content, font_size, font_weight, TEXT_WIDTH_SAFETY)
+            line_height = font_size + LINE_HEIGHT_PADDING
+            candidate_sizes = text_font_candidates(role, content, density)
+            minimum_font_size = candidate_sizes[-1] if candidate_sizes else font_size
+            minimum_width = max(
+                minimum_font_size * TEXT_MINIMUM_WIDTH_CHARS,
+                estimated_text_width(content, minimum_font_size, font_weight, TEXT_WIDTH_SAFETY)
+                / maximum_lines,
+            )
             value = AutoMeasure(
                 preferred_width,
                 line_height,
                 minimum_width,
-                line_height,
+                (minimum_font_size + LINE_HEIGHT_PADDING) * maximum_lines,
                 font_size,
                 font_weight,
                 maximum_lines,
@@ -2204,11 +2966,11 @@ def auto_layout_document(
             safety = float(button_profile.get("widthSafety", 4))
             preferred_width = max(
                 float(button_profile.get("minimumWidth", 48)),
-                estimated_text_width(content, font_size, font_weight, 1.08) + horizontal + safety,
+                estimated_text_width(content, font_size, font_weight, BUTTON_WIDTH_SAFETY) + horizontal + safety,
             )
             preferred_height = max(
                 float(button_profile.get("minimumHeight", 32)),
-                font_size + 4 + float(button_profile.get("paddingVertical", 8)) * 2,
+                font_size + LINE_HEIGHT_PADDING + float(button_profile.get("paddingVertical", 8)) * 2,
             )
             value = AutoMeasure(
                 preferred_width,
@@ -2228,7 +2990,7 @@ def auto_layout_document(
                 + float(checkbox_profile.get("controlMargin", 2)) * 2
                 + float(checkbox_profile.get("labelGap", 12))
             )
-            preferred_width = fixed + estimated_text_width(content, font_size, 400, 1.10)
+            preferred_width = fixed + estimated_text_width(content, font_size, 400, TEXT_WIDTH_SAFETY)
             preferred_height = float(checkbox_profile.get("outerHeight", 48))
             value = AutoMeasure(
                 preferred_width,
@@ -2290,11 +3052,19 @@ def auto_layout_document(
         measure_value = measures[node.node_id]
         role = auto_role(node)
         if node.component == "Text":
+            fitted_font_size, fitted_font_weight = fit_text_font(
+                role,
+                measure_value.content,
+                density,
+                available_width,
+            )
+            measure_value.font_size = fitted_font_size
+            measure_value.font_weight = fitted_font_weight
             measured_width = estimated_text_width(
                 measure_value.content,
                 measure_value.font_size,
                 measure_value.font_weight,
-                1.10,
+                TEXT_WIDTH_SAFETY,
             )
             width_value = max(1.0, min(available_width, max(measure_value.minimum_width, measured_width)))
             required_lines = max(1, int(math.ceil(measured_width / max(width_value, 1.0))))
@@ -2309,8 +3079,8 @@ def auto_layout_document(
                     )
                 )
             lines = min(required_lines, measure_value.max_lines)
-            height_value = (measure_value.font_size + 4) * lines
-            if height_value > available_height + 0.01:
+            height_value = (measure_value.font_size + LINE_HEIGHT_PADDING) * lines
+            if height_value > available_height + EPSILON:
                 diagnostics.append(
                     ValidationIssue(
                         "error",
@@ -2342,7 +3112,7 @@ def auto_layout_document(
         elif node.component == "Button":
             width_value = measure_value.preferred_width
             height_value = measure_value.preferred_height
-            if width_value > available_width + 0.01 or height_value > available_height + 0.01:
+            if width_value > available_width + EPSILON or height_value > available_height + EPSILON:
                 diagnostics.append(
                     ValidationIssue(
                         "error",
@@ -2352,7 +3122,10 @@ def auto_layout_document(
                 )
             width_value = min(width_value, available_width)
             height_value = min(height_value, available_height)
-            chars = max(1, int(math.floor((width_value - 24.0) / max(measure_value.font_size, 1.0))))
+            chars = max(
+                1,
+                int(math.floor((width_value - BUTTON_CHARS_RESERVE) / max(measure_value.font_size, 1.0))),
+            )
             node.attrs.update(
                 {
                     "box": f"{rounded_dimension(width_value)}x{rounded_dimension(height_value)}",
@@ -2368,7 +3141,7 @@ def auto_layout_document(
         elif node.component == "Checkbox":
             width_value = min(measure_value.preferred_width, available_width)
             height_value = measure_value.preferred_height
-            if measure_value.preferred_width > available_width + 0.01 or height_value > available_height + 0.01:
+            if measure_value.preferred_width > available_width + EPSILON or height_value > available_height + EPSILON:
                 diagnostics.append(
                     ValidationIssue(
                         "error",
@@ -2388,7 +3161,7 @@ def auto_layout_document(
             )
         elif node.component == "Image":
             image_size = min(measure_value.preferred_width, available_width, available_height)
-            if image_size + 0.01 < measure_value.minimum_width:
+            if image_size + EPSILON < measure_value.minimum_width:
                 diagnostics.append(
                     ValidationIssue("error", node.node_id, f"SVG icon requires {measure_value.minimum_width:g}vp square")
                 )
@@ -2405,7 +3178,7 @@ def auto_layout_document(
                 node.attrs.update(
                     {"size": rounded_dimension(progress_size), "type": "ring", "color": theme["progress"]["fill"]}
                 )
-                if progress_size + 0.01 < measure_value.minimum_width:
+                if progress_size + EPSILON < measure_value.minimum_width:
                     diagnostics.append(
                         ValidationIssue("error", node.node_id, f"ring Progress requires {measure_value.minimum_width:g}vp square")
                     )
@@ -2465,7 +3238,27 @@ def auto_layout_document(
                 [item.minimum_width for item in child_measures],
                 max(1.0, content_width - gap_total),
             )
-            if sum(item.minimum_width for item in child_measures) + gap_total > content_width + 0.01:
+            minimum_width_total = sum(item.minimum_width for item in child_measures)
+            if (
+                minimum_width_total + gap_total > content_width + EPSILON
+                and gap > COLUMN_COMPACT_GAP_MINIMUM
+            ):
+                compact_gap = max(COLUMN_COMPACT_GAP_MINIMUM, gap - COLUMN_COMPACT_GAP_MINIMUM)
+                compact_gap_total = compact_gap * max(0, len(children) - 1)
+                if minimum_width_total + compact_gap_total <= content_width + EPSILON:
+                    gap = compact_gap
+                    gap_total = compact_gap_total
+                    child_widths = allocate_axis(
+                        [item.preferred_width for item in child_measures],
+                        [item.minimum_width for item in child_measures],
+                        max(1.0, content_width - gap_total),
+                    )
+                    child_widths = round_axis_dimensions(
+                        child_widths,
+                        [item.minimum_width for item in child_measures],
+                        max(1.0, content_width - gap_total),
+                    )
+            if minimum_width_total + gap_total > content_width + EPSILON:
                 diagnostics.append(
                     ValidationIssue(
                         "error",
@@ -2493,8 +3286,17 @@ def auto_layout_document(
             minimum_heights: list[float] = []
             for child, item in zip(children, child_measures):
                 if child.component == "Text":
-                    lines = min(item.max_lines, max(1, int(math.ceil(item.preferred_width / content_width))))
-                    text_height = (item.font_size + 4) * lines
+                    fitted_size, _ = fit_text_font(
+                        auto_role(child), item.content, density, content_width
+                    )
+                    fitted_width = estimated_text_width(
+                        item.content, fitted_size, item.font_weight, TEXT_WIDTH_SAFETY
+                    )
+                    lines = min(
+                        item.max_lines,
+                        max(1, int(math.ceil(fitted_width / content_width))),
+                    )
+                    text_height = (fitted_size + 4) * lines
                     preferred_heights.append(text_height)
                     minimum_heights.append(text_height)
                 else:
@@ -2510,7 +3312,27 @@ def auto_layout_document(
                 minimum_heights,
                 max(1.0, content_height - gap_total),
             )
-            if sum(minimum_heights) + gap_total > content_height + 0.01:
+            minimum_height_total = sum(minimum_heights)
+            if (
+                minimum_height_total + gap_total > content_height + EPSILON
+                and gap > COLUMN_COMPACT_GAP_MINIMUM
+            ):
+                compact_gap = max(COLUMN_COMPACT_GAP_MINIMUM, gap - COLUMN_COMPACT_GAP_MINIMUM)
+                compact_gap_total = compact_gap * max(0, len(children) - 1)
+                if minimum_height_total + compact_gap_total <= content_height + EPSILON:
+                    gap = compact_gap
+                    gap_total = compact_gap_total
+                    child_heights = allocate_axis(
+                        preferred_heights,
+                        minimum_heights,
+                        max(1.0, content_height - gap_total),
+                    )
+                    child_heights = round_axis_dimensions(
+                        child_heights,
+                        minimum_heights,
+                        max(1.0, content_height - gap_total),
+                    )
+            if minimum_height_total + gap_total > content_height + EPSILON:
                 diagnostics.append(
                     ValidationIssue(
                         "error",
@@ -2520,11 +3342,25 @@ def auto_layout_document(
                 )
             has_bottom_action = children[-1].component == "Button"
             anchor_action = has_bottom_action and len(children) >= 3
-            if sum(preferred_heights) + gap_total < content_height - 18 and anchor_action:
+            if (
+                sum(preferred_heights) + gap_total
+                < content_height - COLUMN_BOTTOM_ACTION_ANCHOR_GAP
+                and anchor_action
+            ):
                 node.attrs.update({"main": "between", "cross": "center"})
                 node.attrs.pop("gap", None)
             else:
-                node.attrs.update({"gap": gap, "main": "center" if sum(preferred_heights) < content_height * 0.7 else "start", "cross": "center"})
+                node.attrs.update(
+                    {
+                        "gap": gap,
+                        "main": (
+                            "center"
+                            if sum(preferred_heights) < content_height * COLUMN_CENTER_MAIN_RATIO
+                            else "start"
+                        ),
+                        "cross": "center",
+                    }
+                )
             for child, child_height in zip(children, child_heights):
                 if child.component in CONTAINERS | VIRTUAL_COMPONENTS or child.component in {"Text", "Progress", "Divider"}:
                     child_width = content_width
@@ -2713,6 +3549,10 @@ def apply_alt_styles(node: AltNode) -> tuple[dict[str, Any], dict[str, Any]]:
             weight = parse_dimension_token(parts[1])
             styles["fontWeight"] = weight if weight is not None else parts[1]
     if node.component == "Text":
+        # Text alignment is a rendering default, not a model-facing layout
+        # decision.  Preserve an explicit ALT value, otherwise center every
+        # Text box so sparse automatic trees do not inherit renderer defaults.
+        styles.setdefault("textAlign", "center")
         if "lines" in attrs:
             styles["maxLines"] = attrs["lines"]
         if "overflow" in attrs:
@@ -2854,8 +3694,11 @@ def alt_to_dsl(
                         f"characters but ALT chars={chars}"
                     )
             if validate_content and button_width is not None:
-                required_width = estimated_text_width(top["label"], node_font_size(node, 16.0)) + 24.0
-                if button_width + 0.01 < required_width:
+                required_width = (
+                    estimated_text_width(top["label"], node_font_size(node, BUTTON_LABEL_FONT_FALLBACK))
+                    + BUTTON_CHARS_RESERVE
+                )
+                if button_width + EPSILON < required_width:
                     raise ConversionError(
                         f"{node.node_id}: Button width {button_width:g} cannot contain label {top['label']!r}; "
                         f"requires at least {required_width:g}vp"
@@ -2867,8 +3710,15 @@ def alt_to_dsl(
             top["label"], top["select"] = resolver.checkbox(node, repeat_context)
             checkbox_width, _ = node_box(node, intrinsic=False)
             if validate_content and node.attrs.get("protect") is True and checkbox_width is not None and top["label"]:
-                required_width = estimated_text_width(top["label"], 16.0) + 36.0
-                if checkbox_width + 0.01 < required_width:
+                checkbox_profile = checkbox_layout_profile(automatic=is_auto_layout(document))
+                label_font_size = float(checkbox_profile.get("labelFontSize", 16))
+                fixed_width = (
+                    float(checkbox_profile.get("controlSize", 20))
+                    + float(checkbox_profile.get("controlMargin", 2)) * 2
+                    + float(checkbox_profile.get("labelGap", 12))
+                )
+                required_width = estimated_text_width(top["label"], label_font_size) + fixed_width
+                if checkbox_width + EPSILON < required_width:
                     raise ConversionError(
                         f"{node.node_id}: Checkbox width {checkbox_width:g} cannot contain protected label "
                         f"{top['label']!r}; requires at least {required_width:g}vp"
@@ -3122,10 +3972,39 @@ def main() -> int:
             else:
                 task_spec = load_task_spec(task_path)
                 document = parse_alt(alt_path)
+                structure_notes: list[str] = []
+                binding_notes: list[str] = []
+                role_notes: list[str] = []
+                depth_notes: list[str] = []
+                missing_role_notes: list[str] = []
+                narrow_row_notes: list[str] = []
+                auto_alt_changed = False
+                auto_asc_changed = False
+                if is_auto_layout(document):
+                    document, structure_notes = repair_auto_structure(document)
+                    depth_notes = repair_auto_depth(document, str(task_spec.get("size")))
+                    if depth_notes:
+                        document, extra_structure_notes = repair_auto_structure(document)
+                        structure_notes.extend(extra_structure_notes)
+                    missing_role_notes = repair_missing_auto_roles(document)
+                    for note in structure_notes:
+                        LOGGER.info("%s repair: %s", prefix, note)
+                    for note in depth_notes + missing_role_notes:
+                        LOGGER.info("%s repair: %s", prefix, note)
+                    auto_alt_changed = bool(structure_notes or depth_notes or missing_role_notes)
                 asc = parse_asc(asc_path, document)
                 compiled_document = document
                 auto_issues: list[ValidationIssue] = []
                 if is_auto_layout(document):
+                    asc, binding_notes = normalize_auto_bindings(document, task_spec, asc)
+                    role_notes = repair_long_auto_text_roles(document, task_spec, asc)
+                    narrow_row_notes = repair_narrow_text_row(document, task_spec, asc)
+                    for note in binding_notes + role_notes:
+                        LOGGER.info("%s semantic repair: %s", prefix, note)
+                    for note in narrow_row_notes:
+                        LOGGER.info("%s layout repair: %s", prefix, note)
+                    auto_alt_changed = auto_alt_changed or bool(role_notes or narrow_row_notes)
+                    auto_asc_changed = bool(binding_notes)
                     validate_auto_asc(document, task_spec, asc)
                     protocol_issues = validate_auto_protocol(document, str(task_spec.get("size")))
                     protocol_errors = [issue for issue in protocol_issues if issue.severity == "error"]
@@ -3146,6 +4025,27 @@ def main() -> int:
                         )
                         raise ConversionError(f"automatic ALT protocol is invalid: {detail}")
                     compiled_document, auto_issues = auto_layout_document(document, task_spec, asc)
+                    for _ in range(4):
+                        hard_auto_issues = [
+                            issue for issue in auto_issues if issue.severity == "error"
+                        ]
+                        if not hard_auto_issues:
+                            break
+                        removed_id = prune_auto_low_priority_leaf(
+                            document, str(task_spec.get("size"))
+                        )
+                        if removed_id is None:
+                            break
+                        LOGGER.info(
+                            "%s layout repair: removed low-priority node %s",
+                            prefix,
+                            removed_id,
+                        )
+                        asc.pop(removed_id, None)
+                        auto_alt_changed = True
+                        auto_asc_changed = True
+                        validate_auto_asc(document, task_spec, asc)
+                        compiled_document, auto_issues = auto_layout_document(document, task_spec, asc)
                 issues = auto_issues + validate_layout(compiled_document, task_spec["size"])
                 base_text, warnings = alt_to_dsl(
                     compiled_document,
@@ -3172,6 +4072,11 @@ def main() -> int:
                 if is_auto_layout(document) and hard_errors:
                     detail = "; ".join(f"{issue.node_id}: {issue.message}" for issue in hard_errors)
                     raise ConversionError(f"automatic layout is infeasible: {detail}")
+                if is_auto_layout(document):
+                    if auto_alt_changed:
+                        atomic_write(alt_path, serialize_alt(document))
+                    if auto_asc_changed:
+                        atomic_write(asc_path, serialize_asc(document, asc))
                 atomic_write(dsl_path, dsl_text)
                 LOGGER.info(
                     "%s DONE alt=%s asc=%s dsl=%s layout_report=%s issues=%d",

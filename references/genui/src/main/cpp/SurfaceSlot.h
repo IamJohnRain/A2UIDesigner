@@ -65,6 +65,7 @@ public:
 
     bool UpdateComponents(const JsonValue& messageBody);
     bool UpdateDataModel(const JsonValue& messageBody);
+    bool HasReceivedDataModelUpdate() const;
     std::shared_ptr<BindingEngine> GetBindingEngine() const;
 
     void SetSurfaceId(const std::string& surfaceId);
@@ -141,7 +142,14 @@ public:
     void OnTemplateExpansionResolved(const std::string& containerId);
 
 private:
+    struct RootBuildState;
+
     std::shared_ptr<Component> BuildComponent(const std::string& componentType);
+    bool CanBuildComponent(const std::string& componentType) const;
+    std::shared_ptr<Component> BuildExtendedProtocolComponent(
+        const std::string& componentType, bool traceButtonRouting) const;
+    std::shared_ptr<Component> BuildStandardProtocolComponent(
+        const std::string& componentType, bool traceButtonRouting) const;
     std::shared_ptr<Component> BuildExtendedComponent(const std::string& componentType) const;
     void ApplyExtendedComponentDescriptor(const JsonValue& nodeValue, const std::shared_ptr<Component>& node,
         bool isNewNode, const RenderContext& renderContext) const;
@@ -152,6 +160,19 @@ private:
         const JsonValue& componentsValue, bool& hasProcessedNode, bool& sawRootDescriptor);
     void DebugPrintGlobalMapsInternal() const;
     void PrepareDescriptorById(const JsonValue& componentsValue);
+    void PrepareRootBuildState(const std::string& rootId, const std::map<std::string, JsonValue>& descriptorsById,
+        RootBuildState& state, bool& sawRootDescriptor) const;
+    bool ResolveRootBuildComponentType(
+        const std::string& nodeId, const JsonValue& nodeValue, std::string& componentType) const;
+    bool HandleSpecialRootBuildDescriptor(const std::string& rootId,
+        const std::map<std::string, JsonValue>& descriptorsById, const std::string& nodeId, const JsonValue& nodeValue,
+        const std::string& componentType, RootBuildState& state, bool& hasProcessedNode);
+    void AddRootBuildCandidate(const std::string& rootId, const std::string& nodeId, const JsonValue& nodeValue,
+        const std::string& componentType, RootBuildState& state, bool& hasProcessedNode, bool& sawRootDescriptor,
+        bool updateSurfaceRoot);
+    void UpdateResolvedRootFromCandidate(const std::string& rootId, const std::shared_ptr<Component>& node,
+        RootBuildState& state, bool& sawRootDescriptor, bool updateSurfaceRoot);
+    void FinalizeRootBuildState(RootBuildState& state);
     std::shared_ptr<Component> GetOrCreateComponentNode(
         const JsonValue& nodeValue, const std::string& nodeId, const std::string& componentType, bool& isNewNode);
     void RegisterComponentIfNeeded(const std::shared_ptr<Component>& node, bool isNewNode) const;
@@ -173,6 +194,10 @@ private:
 
     void ProcessPendingTemplateContainers();
 
+    bool ValidateDataModelValue(const JsonValue& messageBody, JsonValue& value, bool& hasValue) const;
+    bool ExecuteDataModelOperation(
+        const std::string& path, const JsonValue& value, bool hasValue, const std::string& surfaceId);
+
     A2UINodeContentHandle contentHandle_ = nullptr;
     std::shared_ptr<Catalog> catalog_;
     SurfaceContext surfaceContext_;
@@ -192,6 +217,7 @@ private:
     std::string surfaceCatalogId_;
     bool hasSurfaceCatalogId_ = false;
     std::unique_ptr<ModalCoordinator> modalCoordinator_;
+    bool hasReceivedDataModelUpdate_ = false;
 
     // Render ID 用于标识所属的 RenderSlot
     int32_t renderId_ = -1;
@@ -204,7 +230,6 @@ private:
     float viewportHeightVp_ = 0.0F;
     bool forceRootFill_ = false;
     float fontSizeScale_ = 1.0F;
-    int32_t apiVersion_ = 0;
 
     SurfaceProtocolMode surfaceProtocolMode_ = SurfaceProtocolMode::UNKNOWN;
 

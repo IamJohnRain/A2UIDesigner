@@ -46,6 +46,7 @@ export enum CatalogItemType {
 export interface CatalogItemOptions {
   category?: CatalogCategory;
   isInnerNative?: boolean;
+  preserveDynamicDescriptors?: boolean;
 }
 
 /**
@@ -56,17 +57,19 @@ export class CatalogItem implements PublicCatalogItem {
   private static readonly STRICT_SCHEMA_VALIDATION_FATAL: boolean = false;
 
   // 默认使用 A2UI 标准组件
-  category: CatalogCategory;
+  public category: CatalogCategory;
   // 必选
-  readonly type: CatalogItemType;
+  public readonly type: CatalogItemType;
   // 必选
-  readonly name: string;
+  public readonly name: string;
   // 必选，是否为 native 侧 inner 实现，仅支持框架预置实现，默认为 ets 侧实现
-  isInnerNative: boolean;
+  public isInnerNative: boolean;
   // 必选
-  readonly schemaProvider: SchemaProvider;
+  public readonly schemaProvider: SchemaProvider;
   // 可选，注册组件时提供，function 不提供
-  readonly componentBuilder: ComponentBuilder;
+  public readonly componentBuilder: ComponentBuilder;
+  // Public custom component builders receive the original DynamicValue descriptors.
+  public readonly preserveDynamicDescriptors: boolean;
 
   private constructor(
     name: string,
@@ -80,6 +83,7 @@ export class CatalogItem implements PublicCatalogItem {
     this.componentBuilder = componentBuilder;
     this.category = options?.category ?? CatalogCategory.OHOS_EXTENDS;
     this.isInnerNative = options?.isInnerNative ?? false;
+    this.preserveDynamicDescriptors = options?.preserveDynamicDescriptors ?? false;
   }
 
   public markCategory(category: CatalogCategory): CatalogItem {
@@ -117,7 +121,9 @@ export class CatalogItem implements PublicCatalogItem {
     if (item.schemaProvider === undefined || item.componentBuilder === undefined) {
       return undefined;
     }
-    return CatalogItem.forComponent(name, item.schemaProvider, item.componentBuilder);
+    return CatalogItem.forComponent(name, item.schemaProvider, item.componentBuilder, {
+      preserveDynamicDescriptors: true
+    });
   }
 
   private static validateStrictComponentSchema(name: string, schemaProvider: SchemaProvider): void {

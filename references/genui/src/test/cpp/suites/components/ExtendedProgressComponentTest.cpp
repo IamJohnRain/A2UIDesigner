@@ -1112,4 +1112,242 @@ TEST_F(ExtendedProgressComponentSchemaWarningTest,
     EXPECT_GE(TestHelpers::CountWarningRequests(mockNapiPtr_, "ERROR_CODE_TYPE_MISMATCH", "styles"), 1U);
 }
 
+TEST_F(ExtendedProgressComponentTest, L0_should_capture_default_stroke_width_on_construction)
+{
+    TestableExtendedProgressComponent component;
+
+    EXPECT_FLOAT_EQ(component.GetStrokeWidthForTest(), 4.0F);
+}
+
+TEST_F(ExtendedProgressComponentTest, L0_should_apply_progress_stroke_width_when_number_value_provided)
+{
+    TestableExtendedProgressComponent component;
+    ArkUINodeApiAdapter applier = CreateNodeApiAdapter(component);
+
+    std::unique_ptr<JsonAdapter> styles = JsonAdapter::Parse(R"({
+        "strokeWidth": 10
+    })");
+    ASSERT_NE(styles, nullptr);
+    component.ApplyComponentSpecificStyles(styles->GetRoot(), applier);
+
+    EXPECT_FLOAT_EQ(component.GetStrokeWidthForTest(), 10.0F);
+}
+
+TEST_F(ExtendedProgressComponentTest, L0_should_use_default_stroke_width_when_style_omitted)
+{
+    TestableExtendedProgressComponent component;
+    ArkUINodeApiAdapter applier = CreateNodeApiAdapter(component);
+
+    std::unique_ptr<JsonAdapter> emptyStyles = JsonAdapter::Parse(R"({})");
+    ASSERT_NE(emptyStyles, nullptr);
+    component.ApplyComponentSpecificStyles(emptyStyles->GetRoot(), applier);
+
+    EXPECT_FLOAT_EQ(component.GetStrokeWidthForTest(), 4.0F);
+}
+
+TEST_F(ExtendedProgressComponentSchemaWarningTest, L0_should_fallback_progress_stroke_width_boolean_to_default)
+{
+    TestableExtendedProgressComponent component;
+    component.SetRenderId(1006);
+    component.SetSurfaceId("surface-progress-stroke-width-bool-warning");
+    component.SetComponentId("root");
+    ArkUINodeApiAdapter applier = CreateNodeApiAdapter(component);
+
+    std::unique_ptr<JsonAdapter> styles = JsonAdapter::Parse(R"({
+        "strokeWidth": true
+    })");
+    ASSERT_NE(styles, nullptr);
+    component.ApplyComponentSpecificStyles(styles->GetRoot(), applier);
+
+    EXPECT_FLOAT_EQ(component.GetStrokeWidthForTest(), 4.0F);
+    EXPECT_GE(TestHelpers::CountWarningRequests(mockNapiPtr_, "ERROR_CODE_TYPE_MISMATCH", "styles.strokeWidth"), 1U);
+}
+
+TEST_F(ExtendedProgressComponentSchemaWarningTest, L0_should_fallback_progress_stroke_width_string_to_default)
+{
+    TestableExtendedProgressComponent component;
+    component.SetRenderId(1007);
+    component.SetSurfaceId("surface-progress-stroke-width-string-warning");
+    component.SetComponentId("root");
+    ArkUINodeApiAdapter applier = CreateNodeApiAdapter(component);
+
+    std::unique_ptr<JsonAdapter> styles = JsonAdapter::Parse(R"({
+        "strokeWidth": "10"
+    })");
+    ASSERT_NE(styles, nullptr);
+    component.ApplyComponentSpecificStyles(styles->GetRoot(), applier);
+
+    EXPECT_FLOAT_EQ(component.GetStrokeWidthForTest(), 4.0F);
+    EXPECT_GE(TestHelpers::CountWarningRequests(mockNapiPtr_, "ERROR_CODE_TYPE_MISMATCH", "styles.strokeWidth"), 1U);
+}
+
+TEST_F(ExtendedProgressComponentTest, L0_should_pass_through_negative_stroke_width_without_validation)
+{
+    TestableExtendedProgressComponent component;
+    ArkUINodeApiAdapter applier = CreateNodeApiAdapter(component);
+
+    std::unique_ptr<JsonAdapter> styles = JsonAdapter::Parse(R"({
+        "strokeWidth": -5
+    })");
+    ASSERT_NE(styles, nullptr);
+    component.ApplyComponentSpecificStyles(styles->GetRoot(), applier);
+
+    EXPECT_FLOAT_EQ(component.GetStrokeWidthForTest(), -5.0F);
+}
+
+TEST_F(ExtendedProgressComponentTest, L0_should_pass_through_zero_stroke_width_without_validation)
+{
+    TestableExtendedProgressComponent component;
+    ArkUINodeApiAdapter applier = CreateNodeApiAdapter(component);
+
+    std::unique_ptr<JsonAdapter> styles = JsonAdapter::Parse(R"({
+        "strokeWidth": 0
+    })");
+    ASSERT_NE(styles, nullptr);
+    component.ApplyComponentSpecificStyles(styles->GetRoot(), applier);
+
+    EXPECT_FLOAT_EQ(component.GetStrokeWidthForTest(), 0.0F);
+}
+
+TEST_F(ExtendedProgressComponentTest, L0_should_retain_stroke_width_default_when_value_is_invalid)
+{
+    TestableExtendedProgressComponent component;
+
+    JsonValue invalidValue;
+    component.ApplyStrokeWidthValueForTest(invalidValue);
+
+    EXPECT_FLOAT_EQ(component.GetStrokeWidthForTest(), 4.0F);
+}
+
+TEST_F(ExtendedProgressComponentTest, L0_should_resolve_progress_stroke_width_path_binding_to_number)
+{
+    slot_.SetCatalog(BuildExtendedProtocolCatalog());
+    std::unique_ptr<JsonAdapter> model = JsonAdapter::Parse(R"({
+        "value": {
+            "width": 8
+        }
+    })");
+    ASSERT_NE(model, nullptr);
+    ASSERT_TRUE(slot_.UpdateDataModel(model->GetRoot()));
+
+    std::unique_ptr<JsonAdapter> message = JsonAdapter::Parse(R"({
+        "components": [
+            {
+                "id": "root",
+                "component": "Progress",
+                "styles": {
+                    "strokeWidth": {
+                        "path": "/width"
+                    }
+                }
+            }
+        ]
+    })");
+    ASSERT_NE(message, nullptr);
+    ASSERT_TRUE(slot_.UpdateComponents(message->GetRoot()));
+
+    std::shared_ptr<ExtendedProgressComponent> progress =
+        std::dynamic_pointer_cast<ExtendedProgressComponent>(slot_.FindComponentById("root"));
+    ASSERT_NE(progress, nullptr);
+    EXPECT_FLOAT_EQ(progress->GetStrokeWidthForTest(), 8.0F);
+
+    std::unique_ptr<JsonAdapter> updatedModel = JsonAdapter::Parse(R"({
+        "value": {
+            "width": 12
+        }
+    })");
+    ASSERT_NE(updatedModel, nullptr);
+    ASSERT_TRUE(slot_.UpdateDataModel(updatedModel->GetRoot()));
+    EXPECT_FLOAT_EQ(progress->GetStrokeWidthForTest(), 12.0F);
+}
+
+TEST_F(ExtendedProgressComponentTest, L0_should_apply_progress_stroke_width_delta_update)
+{
+    TestableExtendedProgressComponent component;
+    RenderContext context =
+        RenderContext::Create(13, "surface-progress-stroke-width-delta", nullptr, BuildExtendedProtocolCatalog());
+    std::unique_ptr<JsonAdapter> descriptor = JsonAdapter::Parse(R"({
+        "id": "root",
+        "component": "Progress",
+        "styles": {
+            "strokeWidth": 6
+        }
+    })");
+    ASSERT_NE(descriptor, nullptr);
+    ASSERT_TRUE(component.InitFromDescriptor(descriptor->GetRoot(), context));
+    EXPECT_FLOAT_EQ(component.GetStrokeWidthForTest(), 6.0F);
+
+    std::unique_ptr<JsonAdapter> deltaValue = JsonAdapter::Parse("15");
+    ASSERT_NE(deltaValue, nullptr);
+    component.OnDataUpdate(StyleResolver::BuildStyleBindingProperty("strokeWidth"), deltaValue->GetRoot());
+    EXPECT_FLOAT_EQ(component.GetStrokeWidthForTest(), 15.0F);
+}
+
+TEST_F(ExtendedProgressComponentTest, L0_should_retain_previous_stroke_width_and_warn_on_delta_string_value)
+{
+    TestHelpers::RegisterWarningDispatchCallback(mockNapiPtr_);
+    TestableExtendedProgressComponent component;
+    RenderContext context = RenderContext::Create(
+        13, "surface-progress-stroke-width-delta-string", nullptr, BuildExtendedProtocolCatalog());
+    std::unique_ptr<JsonAdapter> descriptor = JsonAdapter::Parse(R"({
+        "id": "root",
+        "component": "Progress",
+        "styles": {
+            "strokeWidth": 6
+        }
+    })");
+    ASSERT_NE(descriptor, nullptr);
+    ASSERT_TRUE(component.InitFromDescriptor(descriptor->GetRoot(), context));
+    EXPECT_FLOAT_EQ(component.GetStrokeWidthForTest(), 6.0F);
+
+    std::unique_ptr<JsonAdapter> stringDelta = JsonAdapter::Parse(R"("10")");
+    ASSERT_NE(stringDelta, nullptr);
+    component.OnDataUpdate(StyleResolver::BuildStyleBindingProperty("strokeWidth"), stringDelta->GetRoot());
+    EXPECT_FLOAT_EQ(component.GetStrokeWidthForTest(), 6.0F);
+    EXPECT_GE(TestHelpers::CountWarningRequests(mockNapiPtr_, "ERROR_CODE_TYPE_MISMATCH", "styles.strokeWidth"), 1U);
+}
+
+TEST_F(ExtendedProgressComponentTest, L0_should_retain_previous_stroke_width_and_warn_on_delta_boolean_value)
+{
+    TestHelpers::RegisterWarningDispatchCallback(mockNapiPtr_);
+    TestableExtendedProgressComponent component;
+    RenderContext context = RenderContext::Create(
+        13, "surface-progress-stroke-width-delta-boolean", nullptr, BuildExtendedProtocolCatalog());
+    std::unique_ptr<JsonAdapter> descriptor = JsonAdapter::Parse(R"({
+        "id": "root",
+        "component": "Progress",
+        "styles": {
+            "strokeWidth": 8
+        }
+    })");
+    ASSERT_NE(descriptor, nullptr);
+    ASSERT_TRUE(component.InitFromDescriptor(descriptor->GetRoot(), context));
+    EXPECT_FLOAT_EQ(component.GetStrokeWidthForTest(), 8.0F);
+
+    std::unique_ptr<JsonAdapter> booleanDelta = JsonAdapter::Parse("true");
+    ASSERT_NE(booleanDelta, nullptr);
+    component.OnDataUpdate(StyleResolver::BuildStyleBindingProperty("strokeWidth"), booleanDelta->GetRoot());
+    EXPECT_FLOAT_EQ(component.GetStrokeWidthForTest(), 8.0F);
+    EXPECT_GE(TestHelpers::CountWarningRequests(mockNapiPtr_, "ERROR_CODE_TYPE_MISMATCH", "styles.strokeWidth"), 1U);
+}
+
+#ifdef ENABLE_EXPRESSION_ENGINE
+TEST_F(ExtendedProgressComponentTest, L0_should_resolve_progress_stroke_width_expression_to_number)
+{
+    TestableExtendedProgressComponent component;
+    RenderContext context =
+        RenderContext::Create(13, "surface-progress-stroke-width-expression", nullptr, BuildExtendedProtocolCatalog());
+    std::unique_ptr<JsonAdapter> descriptor = JsonAdapter::Parse(R"({
+        "id": "root",
+        "component": "Progress",
+        "styles": {
+            "strokeWidth": "{{ 7 + 3 }}"
+        }
+    })");
+    ASSERT_NE(descriptor, nullptr);
+    ASSERT_TRUE(component.InitFromDescriptor(descriptor->GetRoot(), context));
+    EXPECT_FLOAT_EQ(component.GetStrokeWidthForTest(), 10.0F);
+}
+#endif
+
 } // namespace

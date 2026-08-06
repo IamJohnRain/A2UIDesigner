@@ -15,59 +15,50 @@
 
 #include "A2UIArkUITypeConverter.h"
 
+#include <unordered_map>
+
 namespace NativeModule {
+
+namespace {
+
+#ifdef ARKUI_NODE_DIVIDER
+constexpr ArkUI_NodeType DIVIDER_NODE_TYPE = ARKUI_NODE_DIVIDER;
+#else
+constexpr ArkUI_NodeType DIVIDER_NODE_TYPE = ARKUI_NODE_ROW;
+#endif
+
+static const std::unordered_map<A2UINodeType, ArkUI_NodeType> TYPE_MAP = {
+    { A2UINodeType::TEXT, ARKUI_NODE_TEXT },
+    { A2UINodeType::COLUMN, ARKUI_NODE_COLUMN },
+    { A2UINodeType::ROW, ARKUI_NODE_ROW },
+    { A2UINodeType::BUTTON, ARKUI_NODE_BUTTON },
+    { A2UINodeType::IMAGE, ARKUI_NODE_IMAGE },
+    { A2UINodeType::LIST, ARKUI_NODE_LIST },
+    { A2UINodeType::LIST_ITEM, ARKUI_NODE_LIST_ITEM },
+    { A2UINodeType::TEXT_INPUT, ARKUI_NODE_TEXT_INPUT },
+    { A2UINodeType::CHECKBOX, ARKUI_NODE_CHECKBOX },
+    { A2UINodeType::SLIDER, ARKUI_NODE_SLIDER },
+    { A2UINodeType::SCROLL, ARKUI_NODE_SCROLL },
+    { A2UINodeType::STACK, ARKUI_NODE_STACK },
+    { A2UINodeType::TEXT_AREA, ARKUI_NODE_TEXT_AREA },
+    { A2UINodeType::RADIO, ARKUI_NODE_RADIO },
+    { A2UINodeType::PROGRESS, ARKUI_NODE_PROGRESS },
+    { A2UINodeType::GRID, ARKUI_NODE_GRID },
+    { A2UINodeType::GRID_ITEM, ARKUI_NODE_GRID_ITEM },
+    { A2UINodeType::TOGGLE, ARKUI_NODE_TOGGLE },
+    { A2UINodeType::FLEX, ARKUI_NODE_FLEX },
+    { A2UINodeType::CHECKBOX_GROUP, ARKUI_NODE_CHECKBOX_GROUP },
+    { A2UINodeType::DIVIDER, DIVIDER_NODE_TYPE },
+};
+
+} // namespace
 
 ArkUI_NodeType A2UIArkUITypeConverter::ToArkUINodeType(A2UINodeType type)
 {
-    switch (type) {
-        case A2UINodeType::TEXT:
-            return ARKUI_NODE_TEXT;
-        case A2UINodeType::COLUMN:
-            return ARKUI_NODE_COLUMN;
-        case A2UINodeType::ROW:
-            return ARKUI_NODE_ROW;
-        case A2UINodeType::BUTTON:
-            return ARKUI_NODE_BUTTON;
-        case A2UINodeType::IMAGE:
-            return ARKUI_NODE_IMAGE;
-        case A2UINodeType::LIST:
-            return ARKUI_NODE_LIST;
-        case A2UINodeType::LIST_ITEM:
-            return ARKUI_NODE_LIST_ITEM;
-        case A2UINodeType::TEXT_INPUT:
-            return ARKUI_NODE_TEXT_INPUT;
-        case A2UINodeType::CHECKBOX:
-            return ARKUI_NODE_CHECKBOX;
-        case A2UINodeType::SLIDER:
-            return ARKUI_NODE_SLIDER;
-        case A2UINodeType::SCROLL:
-            return ARKUI_NODE_SCROLL;
-        case A2UINodeType::STACK:
-            return ARKUI_NODE_STACK;
-        case A2UINodeType::TEXT_AREA:
-            return ARKUI_NODE_TEXT_AREA;
-        case A2UINodeType::RADIO:
-            return ARKUI_NODE_RADIO;
-        case A2UINodeType::PROGRESS:
-            return ARKUI_NODE_PROGRESS;
-        case A2UINodeType::GRID:
-            return ARKUI_NODE_GRID;
-        case A2UINodeType::GRID_ITEM:
-            return ARKUI_NODE_GRID_ITEM;
-        case A2UINodeType::TOGGLE:
-            return ARKUI_NODE_TOGGLE;
-        case A2UINodeType::FLEX:
-            return ARKUI_NODE_FLEX;
-        case A2UINodeType::CHECKBOX_GROUP:
-            return ARKUI_NODE_CHECKBOX_GROUP;
-        case A2UINodeType::DIVIDER:
-#ifdef ARKUI_NODE_DIVIDER
-            return ARKUI_NODE_DIVIDER;
-#else
-            return ARKUI_NODE_ROW;
-#endif
+    auto it = TYPE_MAP.find(type);
+    if (it != TYPE_MAP.end()) {
+        return it->second;
     }
-
     return ARKUI_NODE_TEXT;
 }
 
@@ -265,11 +256,6 @@ A2UIObjectFit A2UIArkUITypeConverter::FromArkUIObjectFit(ArkUI_ObjectFit value)
 
 ArkUI_SliderStyle A2UIArkUITypeConverter::ToArkUISliderStyle(A2UISliderStyle value)
 {
-    switch (value) {
-        case A2UISliderStyle::OUT_SET:
-            return ARKUI_SLIDER_STYLE_OUT_SET;
-    }
-
     return ARKUI_SLIDER_STYLE_OUT_SET;
 }
 
@@ -358,6 +344,10 @@ ArkUI_NodeEventType A2UIArkUITypeConverter::ToArkUINodeEventType(A2UINodeEventTy
             return NODE_TEXT_AREA_ON_CHANGE;
         case A2UINodeEventType::ON_APPEAR:
             return NODE_EVENT_ON_APPEAR;
+        case A2UINodeEventType::ON_AREA_CHANGE:
+            return NODE_EVENT_ON_AREA_CHANGE;
+        case A2UINodeEventType::ON_SIZE_CHANGE:
+            return NODE_ON_SIZE_CHANGE;
         case A2UINodeEventType::ON_CLICK_EVENT:
             return NODE_ON_CLICK_EVENT;
         case A2UINodeEventType::TOGGLE_ON_CHANGE:
@@ -388,6 +378,10 @@ A2UINodeEventType A2UIArkUITypeConverter::FromArkUINodeEventType(ArkUI_NodeEvent
             return A2UINodeEventType::TEXT_AREA_ON_CHANGE;
         case NODE_EVENT_ON_APPEAR:
             return A2UINodeEventType::ON_APPEAR;
+        case NODE_EVENT_ON_AREA_CHANGE:
+            return A2UINodeEventType::ON_AREA_CHANGE;
+        case NODE_ON_SIZE_CHANGE:
+            return A2UINodeEventType::ON_SIZE_CHANGE;
         case NODE_ON_CLICK_EVENT:
             return A2UINodeEventType::ON_CLICK_EVENT;
         case NODE_TOGGLE_ON_CHANGE:

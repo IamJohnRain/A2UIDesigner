@@ -17,6 +17,7 @@ import { A2UIValueType } from '../../types/types';
 import { A2UIFunctionCall } from '../FunctionCall';
 
 export type A2UIFunctionInvoker = (functionCall: A2UIFunctionCall) => A2UIValueType;
+export type A2UIResolveErrorReporter = (source: ResolveSource, errorMessage: string) => void;
 
 export interface A2UIResolveContext {
   renderId?: number;
@@ -24,6 +25,7 @@ export interface A2UIResolveContext {
   componentId?: string;
   dataModel?: ESObject;
   invokeFunction?: A2UIFunctionInvoker;
+  reportError?: A2UIResolveErrorReporter;
 }
 
 export type ResolveSource = 'literal' | 'binding' | 'function' | 'expression';

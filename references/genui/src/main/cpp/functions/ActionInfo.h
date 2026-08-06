@@ -29,7 +29,7 @@ enum class ActionType { UNKNOWN = 0, FUNCTION_CALL = 1, EVENT = 2 };
 class ActionInfo {
 public:
     ActionInfo() = default;
-    ActionInfo(
+    explicit ActionInfo(
         const std::shared_ptr<FunctionCallInfo>& functionCall, const JsonValue& functionCallDescriptor = JsonValue());
     ActionInfo(const std::string& eventName, const JsonValue& eventContextDescriptor);
     ~ActionInfo() = default;

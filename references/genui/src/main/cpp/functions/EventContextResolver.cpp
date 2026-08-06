@@ -103,6 +103,8 @@ JsonValue CreateNullJsonValue()
     return nullAdapter->GetRoot();
 }
 
+bool ResolveObjectContextNode(const JsonValue& value, const DynamicResolveContext& context, JsonValue& resolvedValue);
+
 bool ResolveContextNodeRecursively(
     const JsonValue& value, const DynamicResolveContext& context, JsonValue& resolvedValue)
 {
@@ -112,39 +114,7 @@ bool ResolveContextNodeRecursively(
     }
 
     if (value.IsObject()) {
-        bool hasCall = value.Has("call");
-        bool hasPath = value.Has("path");
-        if (hasCall || hasPath) {
-            ResolvedValue resolved = DynamicValueResolver::ResolveRecursively(value, context);
-            if (!resolved.success || !resolved.value.IsValid()) {
-                return false;
-            }
-            return CloneJsonValue(resolved.value, resolvedValue);
-        }
-
-        std::unique_ptr<JsonAdapter> objectAdapter = JsonAdapter::CreateObject();
-        if (objectAdapter == nullptr) {
-            return false;
-        }
-        JsonValue objectValue = objectAdapter->GetRoot();
-
-        for (JsonValue child = value.GetChild(); child.IsValid(); child = child.GetNext()) {
-            std::string key = child.GetKey();
-            if (key.empty()) {
-                continue;
-            }
-
-            JsonValue childResolved;
-            if (!ResolveContextNodeRecursively(child, context, childResolved)) {
-                continue;
-            }
-            if (!objectValue.Put(key.c_str(), childResolved)) {
-                return false;
-            }
-        }
-
-        resolvedValue = objectValue;
-        return true;
+        return ResolveObjectContextNode(value, context, resolvedValue);
     }
 
     if (value.IsArray()) {
@@ -159,9 +129,9 @@ bool ResolveContextNodeRecursively(
             JsonValue itemResolved;
             if (!ResolveContextNodeRecursively(value.GetArrayItem(index), context, itemResolved)) {
                 itemResolved = CreateNullJsonValue();
-                if (!itemResolved.IsValid()) {
-                    return false;
-                }
+            }
+            if (!itemResolved.IsValid()) {
+                return false;
             }
             if (!arrayValue.Append(itemResolved)) {
                 return false;
@@ -177,6 +147,43 @@ bool ResolveContextNodeRecursively(
         return false;
     }
     return CloneJsonValue(resolved.value, resolvedValue);
+}
+
+bool ResolveObjectContextNode(const JsonValue& value, const DynamicResolveContext& context, JsonValue& resolvedValue)
+{
+    bool hasCall = value.Has("call");
+    bool hasPath = value.Has("path");
+    if (hasCall || hasPath) {
+        ResolvedValue resolved = DynamicValueResolver::ResolveRecursively(value, context);
+        if (!resolved.success || !resolved.value.IsValid()) {
+            return false;
+        }
+        return CloneJsonValue(resolved.value, resolvedValue);
+    }
+
+    std::unique_ptr<JsonAdapter> objectAdapter = JsonAdapter::CreateObject();
+    if (objectAdapter == nullptr) {
+        return false;
+    }
+    JsonValue objectValue = objectAdapter->GetRoot();
+
+    for (JsonValue child = value.GetChild(); child.IsValid(); child = child.GetNext()) {
+        std::string key = child.GetKey();
+        if (key.empty()) {
+            continue;
+        }
+
+        JsonValue childResolved;
+        if (!ResolveContextNodeRecursively(child, context, childResolved)) {
+            continue;
+        }
+        if (!objectValue.Put(key.c_str(), childResolved)) {
+            return false;
+        }
+    }
+
+    resolvedValue = objectValue;
+    return true;
 }
 
 } // namespace

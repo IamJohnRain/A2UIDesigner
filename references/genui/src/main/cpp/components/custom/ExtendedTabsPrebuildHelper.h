@@ -28,13 +28,6 @@ namespace NativeModule {
 
 class SurfaceSlot;
 
-inline constexpr char EXTENDED_TABS_COMPONENT_TYPE[] = "Extended.Tabs";
-
-inline bool IsExtendedTabsComponentType(const std::string& componentType)
-{
-    return componentType == EXTENDED_TABS_COMPONENT_TYPE;
-}
-
 bool IsExtendedTabsChildComponentType(const std::string& componentType);
 ChildListDescriptor ParseExtendedTabsChildList(const JsonValue& descriptor);
 std::list<std::string> ResolveExtendedTabsChildIds(const JsonValue& descriptor,

@@ -47,7 +47,7 @@ export struct CustomDivider {
   private lastResolvedSignature: string = '';
 
   aboutToAppear(): void {
-    console.log("ArkTS CustomDivider start build");
+    console.log('ArkTS CustomDivider start build');
   }
 
   build() {

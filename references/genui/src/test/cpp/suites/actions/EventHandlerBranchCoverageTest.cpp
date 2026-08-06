@@ -16,6 +16,7 @@
 #include <gtest/gtest.h>
 #include <stdexcept>
 
+#include "components/actions/BuiltInActions.h"
 #include "components/actions/EventHandlerChainExecutor.h"
 #include "components/actions/EventHandlerParser.h"
 #include "components/actions/NativeActionRegistry.h"
@@ -227,15 +228,12 @@ TEST_F(EventHandlerBranchCoverageTest, L0_should_return_early_when_component_not
     EXPECT_FALSE(result.IsValid());
 }
 
-TEST_F(EventHandlerBranchCoverageTest, L0_should_execute_navigate_stub)
+TEST_F(EventHandlerBranchCoverageTest, L0_should_not_register_navigate_as_builtin_action)
 {
-    EventHandlerChainExecutor::ExecutionContext context;
-    context.surfaceId = "surf1";
+    RegisterBuiltInActions(NativeActionRegistry::GetInstance());
 
-    auto args = JsonAdapter::Parse(R"({"componentId": "nav1", "targetComponentId": "page2"})");
-    auto result = NativeActionRegistry::GetInstance().Execute("navigate", args->GetRoot(), context);
-
-    EXPECT_FALSE(result.IsValid());
+    EXPECT_FALSE(NativeActionRegistry::GetInstance().HasAction("navigate"));
+    EXPECT_TRUE(NativeFunctionRegistry::GetInstance().HasFunction("navigate"));
 }
 
 TEST_F(EventHandlerBranchCoverageTest, L0_should_return_false_from_function_bridge_when_env_null)

@@ -116,6 +116,20 @@ export default function CustomComponentFactoryCatalogRoutingUnitTest() {
       expect(item.schemaProvider('v0.9')).assertEqual('navigation-schema');
     });
 
+    it('should_build_catalog_item_from_definition_without_registered_type_lookup', 0, () => {
+      let registeredBuilder = createBuilder();
+      let directBuilder = createBuilder();
+      let directDefinition = createDefinition('Tabs', directBuilder, 'direct-tabs-schema');
+
+      CustomComponentFactory.registerCustomComponent(createDefinition('Tabs', registeredBuilder, 'registered-tabs-schema'));
+
+      let item = CustomComponentFactory.createCatalogItemFromDefinition(directDefinition);
+
+      expect(item.name).assertEqual('Tabs');
+      expect(item.componentBuilder === directBuilder).assertTrue();
+      expect(item.schemaProvider('v0.9')).assertEqual('direct-tabs-schema');
+    });
+
     it('should_include_component_type_in_missing_component_error', 0, () => {
       let thrown: boolean = false;
       let message: string = '';

@@ -28,10 +28,12 @@
 #include <cfloat>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <functional>
 #include <gtest/gtest.h>
 #include <limits>
 #include <memory>
+#include <new>
 #include <set>
 #include <string>
 #include <vector>
@@ -41,9 +43,12 @@
 #include "catalog/CatalogConstants.h"
 #include "catalog/CatalogItem.h"
 #include "components/A2UI/A2UIComponent.h"
+#include "components/custom/CustomComponent.h"
 #include "components/extended/ExtendedColumnComponent.h"
 #include "components/extended/ExtendedComponent.h"
 #include "components/extended/ExtendedDescriptorNormalizer.h"
+#include "components/extended/ExtendedListComponent.h"
+#include "components/extended/ExtendedRowComponent.h"
 #include "components/extended/ExtendedStyleResolver.h"
 #include "functions/FunctionResult.h"
 #include "functions/NativeFunctionBase.h"
@@ -61,6 +66,120 @@
 #include "TestFixture.h"
 
 using namespace NativeModule;
+
+namespace {
+
+#if !defined(_MSC_VER)
+thread_local int32_t gComponentAllocFailCountdown = -1;
+
+void* AllocateWithComponentFailHook(std::size_t size)
+{
+    if (gComponentAllocFailCountdown == 0) {
+        throw std::bad_alloc();
+    }
+    if (gComponentAllocFailCountdown > 0) {
+        --gComponentAllocFailCountdown;
+    }
+    void* pointer = std::malloc(size == 0 ? 1 : size);
+    if (pointer == nullptr) {
+        throw std::bad_alloc();
+    }
+    return pointer;
+}
+
+class ScopedComponentAllocFail {
+public:
+    explicit ScopedComponentAllocFail(int32_t failAfter) : previousCountdown_(gComponentAllocFailCountdown)
+    {
+        gComponentAllocFailCountdown = failAfter;
+    }
+
+    ~ScopedComponentAllocFail()
+    {
+        gComponentAllocFailCountdown = previousCountdown_;
+    }
+
+private:
+    int32_t previousCountdown_ = -1;
+};
+
+template<typename Callback>
+int32_t ExerciseComponentAllocationFailures(Callback callback, int32_t maxFailAfter)
+{
+    int32_t caughtFailures = 0;
+    for (int32_t failAfter = 0; failAfter <= maxFailAfter; ++failAfter) {
+        try {
+            ScopedComponentAllocFail fail(failAfter);
+            callback();
+        } catch (const std::bad_alloc&) {
+            ++caughtFailures;
+        }
+    }
+    return caughtFailures;
+}
+#endif
+
+} // namespace
+
+#if !defined(_MSC_VER)
+void* operator new(std::size_t size)
+{
+    return AllocateWithComponentFailHook(size);
+}
+
+void* operator new[](std::size_t size)
+{
+    return AllocateWithComponentFailHook(size);
+}
+
+void* operator new(std::size_t size, const std::nothrow_t&) noexcept
+{
+    try {
+        return AllocateWithComponentFailHook(size);
+    } catch (...) {
+        return nullptr;
+    }
+}
+
+void* operator new[](std::size_t size, const std::nothrow_t&) noexcept
+{
+    try {
+        return AllocateWithComponentFailHook(size);
+    } catch (...) {
+        return nullptr;
+    }
+}
+
+void operator delete(void* pointer) noexcept
+{
+    std::free(pointer);
+}
+
+void operator delete[](void* pointer) noexcept
+{
+    std::free(pointer);
+}
+
+void operator delete(void* pointer, std::size_t) noexcept
+{
+    std::free(pointer);
+}
+
+void operator delete[](void* pointer, std::size_t) noexcept
+{
+    std::free(pointer);
+}
+
+void operator delete(void* pointer, const std::nothrow_t&) noexcept
+{
+    std::free(pointer);
+}
+
+void operator delete[](void* pointer, const std::nothrow_t&) noexcept
+{
+    std::free(pointer);
+}
+#endif
 
 namespace {
 
@@ -103,6 +222,7 @@ public:
     using ExtendedComponent::RegisterClickHandler;
     using ExtendedComponent::RegisterComponentSpecificListeners;
     using ExtendedComponent::RegisterExtendedListeners;
+    using ExtendedComponent::SetPropertyFromDescriptor;
 
     bool CallInitFromDescriptor(const JsonValue& descriptor, const RenderContext& context)
     {
@@ -151,7 +271,42 @@ public:
     {
         return componentType_.empty() ? "Column" : componentType_;
     }
+
+    PropertyDeclaration GetPrivatePropertyDeclaration(const std::string& propertyName) override
+    {
+        if (propertyName == "customValue") {
+            return PropertyDeclaration { .name = "customValue",
+                .type = PropertyValueType::STRING,
+                .allowDynamic = true,
+                .allowExpression = true,
+                .fallbackString = "" };
+        }
+        return ExtendedComponent::GetPrivatePropertyDeclaration(propertyName);
+    }
+
     std::string componentType_;
+};
+
+class CovTestableRowComponent : public ExtendedRowComponent {
+public:
+    using ExtendedRowComponent::ApplyComponentSpecificStyles;
+    using ExtendedRowComponent::ApplyPrivateAttributes;
+    using ExtendedRowComponent::GetPrivatePropertyDeclaration;
+
+    void SetApplyingStyleDeltaUpdateForTest(bool value)
+    {
+        isApplyingStyleDeltaUpdate_ = value;
+    }
+};
+
+class CovTestableColumnComponent : public ExtendedColumnComponent {
+public:
+    using ExtendedColumnComponent::GetPrivatePropertyDeclaration;
+};
+
+class CovTestableListComponent : public ExtendedListComponent {
+public:
+    using ExtendedListComponent::GetPrivatePropertyDeclaration;
 };
 
 // ============================================================================
@@ -188,6 +343,281 @@ protected:
         slot_.SetRenderId(1);
     }
 };
+
+/**
+ * @tc.name: ExtendedRow 全部布局枚举与增量样式
+ * @tc.desc: 验证 justifyContent、alignItems、wrap 的全部枚举、默认回退及增量样式分支。
+ * @tc.type: FUNC
+ */
+TEST_F(ExtendedBranchCoverageTddTest, ExtendedRow_AllLayoutEnumsAndDeltaStyles)
+{
+    CovTestableRowComponent component;
+    PropertyDeclaration justifyDeclaration = component.GetPrivatePropertyDeclaration("justifyContent");
+    PropertyDeclaration alignDeclaration = component.GetPrivatePropertyDeclaration("alignItems");
+    PropertyDeclaration wrapDeclaration = component.GetPrivatePropertyDeclaration("wrap");
+    ASSERT_TRUE(static_cast<bool>(justifyDeclaration.applyValue));
+    ASSERT_TRUE(static_cast<bool>(alignDeclaration.applyValue));
+    ASSERT_TRUE(static_cast<bool>(wrapDeclaration.applyValue));
+
+    for (const auto& value : { "start", "center", "end", "spaceAround", "spaceBetween", "spaceEvenly", "invalid" }) {
+        auto adapter = JsonAdapter::CreateString(value);
+        ASSERT_NE(adapter, nullptr);
+        justifyDeclaration.applyValue(adapter->GetRoot());
+    }
+    for (const auto& value : { "top", "center", "bottom", "invalid" }) {
+        auto adapter = JsonAdapter::CreateString(value);
+        ASSERT_NE(adapter, nullptr);
+        alignDeclaration.applyValue(adapter->GetRoot());
+    }
+    for (const auto& value : { "noWrap", "wrap", "invalid" }) {
+        auto adapter = JsonAdapter::CreateString(value);
+        ASSERT_NE(adapter, nullptr);
+        wrapDeclaration.applyValue(adapter->GetRoot());
+    }
+
+    auto fullStyles = JsonAdapter::Parse(R"({"alignItems":"bottom","justifyContent":"spaceBetween","wrap":"wrap"})");
+    ASSERT_NE(fullStyles, nullptr);
+    ArkUINodeApiAdapter applier = MakeApplier(component.GetNativeView());
+    mockArkUIPtr_->setAttributeRecords_.clear();
+    component.SetApplyingStyleDeltaUpdateForTest(false);
+    component.ApplyComponentSpecificStyles(fullStyles->GetRoot(), applier);
+    EXPECT_FALSE(mockArkUIPtr_->setAttributeRecords_.empty());
+
+    auto deltaStyles = JsonAdapter::Parse(R"({"justifyContent":"center"})");
+    ASSERT_NE(deltaStyles, nullptr);
+    mockArkUIPtr_->setAttributeRecords_.clear();
+    component.SetApplyingStyleDeltaUpdateForTest(true);
+    component.ApplyComponentSpecificStyles(deltaStyles->GetRoot(), applier);
+    EXPECT_FALSE(mockArkUIPtr_->setAttributeRecords_.empty());
+
+    auto emptyStyles = JsonAdapter::Parse(R"({})");
+    ASSERT_NE(emptyStyles, nullptr);
+    component.ApplyComponentSpecificStyles(emptyStyles->GetRoot(), applier);
+    component.ApplyComponentSpecificStyles(JsonValue(), applier);
+}
+
+/**
+ * @tc.name: ExtendedRow 顶层布局属性完整与默认初始化
+ * @tc.desc: 验证顶层 itemMargin、justifyContent、alignItems、wrap 的显式值和缺省回退路径。
+ * @tc.type: FUNC
+ */
+TEST_F(ExtendedBranchCoverageTddTest, ExtendedRow_TopLevelLayoutAttributesAndFallbacks)
+{
+    CovTestableRowComponent component;
+    auto descriptor = JsonAdapter::Parse(R"({
+        "itemMargin":24,
+        "justifyContent":"end",
+        "alignItems":"top",
+        "wrap":"wrap"
+    })");
+    ASSERT_NE(descriptor, nullptr);
+
+    mockArkUIPtr_->setAttributeRecords_.clear();
+    component.ApplyPrivateAttributes(descriptor->GetRoot());
+    EXPECT_FALSE(mockArkUIPtr_->setAttributeRecords_.empty());
+
+    auto emptyDescriptor = JsonAdapter::Parse(R"({})");
+    ASSERT_NE(emptyDescriptor, nullptr);
+    mockArkUIPtr_->setAttributeRecords_.clear();
+    component.ApplyPrivateAttributes(emptyDescriptor->GetRoot());
+    EXPECT_FALSE(mockArkUIPtr_->setAttributeRecords_.empty());
+}
+
+/**
+ * @tc.name: 扩展线性容器间距 NaN 回退
+ * @tc.desc: 验证 Row、Column 的 itemMargin 和 List 的 space 遇到 NaN 时走非法值回退分支。
+ * @tc.type: FUNC
+ */
+TEST_F(ExtendedBranchCoverageTddTest, ExtendedLinearContainers_NaNSpacingFallsBack)
+{
+    auto nanValue = JsonAdapter::CreateNumber(std::numeric_limits<double>::quiet_NaN());
+    ASSERT_NE(nanValue, nullptr);
+
+    CovTestableRowComponent row;
+    PropertyDeclaration rowMargin = row.GetPrivatePropertyDeclaration("itemMargin");
+    ASSERT_TRUE(static_cast<bool>(rowMargin.applyValue));
+    rowMargin.applyValue(nanValue->GetRoot());
+
+    CovTestableColumnComponent column;
+    PropertyDeclaration columnMargin = column.GetPrivatePropertyDeclaration("itemMargin");
+    ASSERT_TRUE(static_cast<bool>(columnMargin.applyValue));
+    columnMargin.applyValue(nanValue->GetRoot());
+
+    CovTestableListComponent list;
+    PropertyDeclaration listSpace = list.GetPrivatePropertyDeclaration("space");
+    ASSERT_TRUE(static_cast<bool>(listSpace.applyValue));
+    listSpace.applyValue(nanValue->GetRoot());
+}
+
+/**
+ * @tc.name: 仅全局变量表达式创建无路径绑定
+ * @tc.desc: 验证表达式包含全局变量但不包含 __dataModel 路径时创建单个无 dataPath 的表达式绑定。
+ * @tc.type: FUNC
+ */
+TEST_F(ExtendedBranchCoverageTddTest, Component_GlobalVariableExpressionCreatesPathlessBinding)
+{
+    CovTestableComponent component;
+    auto descriptor = JsonAdapter::Parse(R"({"customValue":"{{ $__widthBreakpoint }}"})");
+    ASSERT_NE(descriptor, nullptr);
+
+    component.SetPropertyFromDescriptor("customValue", descriptor->GetRoot());
+
+    ASSERT_EQ(component.GetDataBindings().size(), 1U);
+    EXPECT_EQ(component.GetDataBindings().front().propertyName_, "customValue");
+    EXPECT_TRUE(component.GetDataBindings().front().dataPath_.empty());
+    EXPECT_EQ(component.GetDataBindings().front().expression_, "$__widthBreakpoint");
+    EXPECT_EQ(component.GetDataBindings().front().globalVarDeps_, (std::vector<std::string> { "__widthBreakpoint" }));
+}
+
+/**
+ * @tc.name: 表达式重复依赖只创建唯一绑定
+ * @tc.desc: 验证重复全局变量和重复 __dataModel 路径会去重，并分别创建唯一的数据路径绑定。
+ * @tc.type: FUNC
+ */
+TEST_F(ExtendedBranchCoverageTddTest, Component_DuplicateExpressionDependenciesCreateUniqueBindings)
+{
+    CovTestableComponent component;
+    auto descriptor = JsonAdapter::Parse(R"({
+        "customValue":"{{ $__widthBreakpoint + $__widthBreakpoint +
+            $__dataModel.user.score + $__dataModel.user.score + $__dataModel.user.level }}"
+    })");
+    ASSERT_NE(descriptor, nullptr);
+
+    component.SetPropertyFromDescriptor("customValue", descriptor->GetRoot());
+
+    ASSERT_EQ(component.GetDataBindings().size(), 2U);
+    std::set<std::string> paths;
+    for (const auto& binding : component.GetDataBindings()) {
+        EXPECT_EQ(binding.propertyName_, "customValue");
+        EXPECT_EQ(binding.type_, BindingType::EXPRESSION);
+        EXPECT_EQ(binding.globalVarDeps_, (std::vector<std::string> { "__widthBreakpoint", "__dataModel" }));
+        paths.insert(binding.dataPath_);
+    }
+    EXPECT_EQ(paths, (std::set<std::string> { "/user/level", "/user/score" }));
+}
+
+/**
+ * @tc.name: Component 与 Row 标准分配失败分支
+ * @tc.desc: 定点触发标准库分配失败，验证表达式绑定和 Row 属性声明能够传播 bad_alloc。
+ * @tc.type: FUNC
+ */
+TEST_F(ExtendedBranchCoverageTddTest, ComponentAndRow_StdAllocationFailureEdges)
+{
+#if defined(_MSC_VER)
+    GTEST_SKIP() << "standard allocation failure hook is disabled on MSVC";
+#else
+    CovTestableRowComponent row;
+    CovTestableColumnComponent column;
+    CovTestableListComponent list;
+    CovTestableComponent component;
+    PropertyDeclaration rowMargin = row.GetPrivatePropertyDeclaration("itemMargin");
+    PropertyDeclaration columnMargin = column.GetPrivatePropertyDeclaration("itemMargin");
+    PropertyDeclaration listSpace = list.GetPrivatePropertyDeclaration("space");
+    auto negativeValue = JsonAdapter::CreateNumber(-1.0);
+    auto descriptor = JsonAdapter::Parse(R"({
+        "customValue":"{{ $__widthBreakpoint + $__dataModel.user.score + $__dataModel.user.level }}"
+    })");
+    ASSERT_TRUE(static_cast<bool>(rowMargin.applyValue));
+    ASSERT_TRUE(static_cast<bool>(columnMargin.applyValue));
+    ASSERT_TRUE(static_cast<bool>(listSpace.applyValue));
+    ASSERT_NE(negativeValue, nullptr);
+    ASSERT_NE(descriptor, nullptr);
+
+    int32_t rowFailures = ExerciseComponentAllocationFailures(
+        [&row]() {
+            (void)row.GetPrivatePropertyDeclaration("justifyContent");
+            (void)row.GetPrivatePropertyDeclaration("alignItems");
+            (void)row.GetPrivatePropertyDeclaration("wrap");
+        },
+        2048);
+    int32_t expressionFailures = ExerciseComponentAllocationFailures(
+        [&component, &descriptor]() { component.SetPropertyFromDescriptor("customValue", descriptor->GetRoot()); },
+        2048);
+    int32_t spacingFailures = ExerciseComponentAllocationFailures(
+        [&rowMargin, &columnMargin, &listSpace, &negativeValue]() {
+            rowMargin.applyValue(negativeValue->GetRoot());
+            columnMargin.applyValue(negativeValue->GetRoot());
+            listSpace.applyValue(negativeValue->GetRoot());
+        },
+        2048);
+
+    EXPECT_GT(rowFailures, 0);
+    EXPECT_GT(expressionFailures, 0);
+    EXPECT_GT(spacingFailures, 0);
+#endif
+}
+
+/**
+ * @tc.name: Tabs 与 TabContent 校验标准分配失败分支
+ * @tc.desc: 定点触发校验告警字符串和重置路径的 bad_alloc，覆盖 Tabs 与 TabContent 异常分支。
+ * @tc.type: FUNC
+ */
+TEST_F(ExtendedBranchCoverageTddTest, CustomTabsAndTabContent_StdAllocationFailureEdges)
+{
+#if defined(_MSC_VER)
+    GTEST_SKIP() << "standard allocation failure hook is disabled on MSVC";
+#else
+    CustomComponent tabs("Tabs");
+    CustomComponent tabContent("TabContent");
+    int32_t caughtFailures = 0;
+
+    for (int32_t failAfter = 0; failAfter <= 2048; ++failAfter) {
+        auto stylesAdapter = JsonAdapter::Parse(R"({"fontSize":-1,"iconSize":-2,"space":-3})");
+        auto negativeIndexAdapter = JsonAdapter::CreateNumber(-1.0);
+        auto fractionalIndexAdapter = JsonAdapter::CreateNumber(1.5);
+        ASSERT_NE(stylesAdapter, nullptr);
+        ASSERT_NE(negativeIndexAdapter, nullptr);
+        ASSERT_NE(fractionalIndexAdapter, nullptr);
+        JsonValue styles = stylesAdapter->GetRoot();
+        JsonValue negativeIndex = negativeIndexAdapter->GetRoot();
+        JsonValue fractionalIndex = fractionalIndexAdapter->GetRoot();
+        try {
+            ScopedComponentAllocFail fail(failAfter);
+            tabContent.NormalizeExtendedTabContentStyles(styles);
+            tabs.NormalizeExtendedTabsProperty("tabIndex", negativeIndex);
+            tabs.NormalizeExtendedTabsProperty("tabIndex", fractionalIndex);
+        } catch (const std::bad_alloc&) {
+            ++caughtFailures;
+        }
+    }
+
+    EXPECT_GT(caughtFailures, 0);
+#endif
+}
+
+/**
+ * @tc.name: StyleResolver 表达式绑定标准分配失败分支
+ * @tc.desc: 定点触发表达式依赖收集和绑定计划创建时的 bad_alloc，并验证异常向调用方传播。
+ * @tc.type: FUNC
+ */
+TEST_F(ExtendedBranchCoverageTddTest, StyleResolver_ExpressionBindingStdAllocationFailureEdges)
+{
+#if defined(_MSC_VER)
+    GTEST_SKIP() << "standard allocation failure hook is disabled on MSVC";
+#else
+    auto expressionAdapter =
+        JsonAdapter::CreateString("{{ $__widthBreakpoint + $__dataModel.user.score + $__dataModel.user.level }}");
+    ASSERT_NE(expressionAdapter, nullptr);
+    StyleProperty property { .rawName = "width",
+        .name = StylePropertyName::WIDTH,
+        .kind = StyleValueKind::EXPRESSION,
+        .rawValue = expressionAdapter->GetRoot() };
+    DynamicResolveContext context;
+    int32_t caughtFailures = 0;
+
+    for (int32_t failAfter = 0; failAfter <= 2048; ++failAfter) {
+        StyleResolveResult result;
+        try {
+            ScopedComponentAllocFail fail(failAfter);
+            (void)StyleResolver::ResolveProperty(property, context, result);
+        } catch (const std::bad_alloc&) {
+            ++caughtFailures;
+        }
+    }
+
+    EXPECT_GT(caughtFailures, 0);
+#endif
+}
 
 // ################################################################################
 // SECTION A: ExtendedStyleResolver.cpp — targeted uncovered branches
@@ -231,6 +661,7 @@ TEST_F(ExtendedBranchCoverageTddTest, ConstraintSize_TwoPercentFields_GeneratesC
     dispatchCtx.componentId = "cov-comp";
     dispatchCtx.nodeUniqueId = 42;
     dispatchCtx.componentType = "Column";
+    dispatchCtx.apiVersion = 20;
     auto styles = JsonAdapter::Parse(R"({"constraintSize": {"minWidth": "10%", "maxHeight": "90%"}})");
     ASSERT_NE(styles, nullptr);
     ExtendedStyleResolver::ResolveAndApply(styles->GetRoot(), applier, dispatchCtx);
@@ -760,6 +1191,7 @@ TEST_F(ExtendedBranchCoverageTddTest, CommonNodeStyles_ConstraintSizePercent_Dis
     dispatchCtx.componentId = "cov-comp";
     dispatchCtx.nodeUniqueId = 42;
     dispatchCtx.componentType = "Column";
+    dispatchCtx.apiVersion = 20;
     auto styles = JsonAdapter::Parse(R"({"constraintSize": {"minWidth": "10%", "maxWidth": "90%"}})");
     ASSERT_NE(styles, nullptr);
     ExtendedStyleResolver::ResolveAndApply(styles->GetRoot(), applier, dispatchCtx);
@@ -831,7 +1263,7 @@ TEST_F(ExtendedBranchCoverageTddTest, TextComponent_MaxFontSizePreferred_Applies
 }
 
 // ============================================================================
-// A30. ApplyBackgroundImage — invalid parse, null propertyName (via backgroundimageSizeWithStyle)
+// A30. ApplyBackgroundImage — invalid parse, null propertyName (via backgroundImageSizeWithStyle)
 // Actually propertyName is always passed. Test invalid background image with object value
 // ============================================================================
 TEST_F(ExtendedBranchCoverageTddTest, BackgroundImage_ObjectValue_ReportsIssue)
@@ -2047,6 +2479,7 @@ TEST_F(ExtendedBranchCoverageTddTest, CommonNode_ConstraintSizePercent_WithDispa
     dispatchCtx.componentId = "cov-comp-cs";
     dispatchCtx.nodeUniqueId = 77;
     dispatchCtx.componentType = "Column";
+    dispatchCtx.apiVersion = 20;
     auto styles = JsonAdapter::Parse(R"({"constraintSize": {"maxWidth": "80%"}})");
     ASSERT_NE(styles, nullptr);
     std::vector<DescriptorValidationIssue> issues;

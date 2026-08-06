@@ -18,8 +18,8 @@ import { A2UIComponentId } from './ComponentCommon'
 export type A2UIChildListValue = string[] | A2UIDynamicChildListTemplate
 
 export class A2UIDynamicChildListTemplate {
-  componentId: string = ''
-  path: string = ''
+  public componentId: string = ''
+  public path: string = ''
 
   static schema(): string {
     return `{

@@ -16,6 +16,7 @@
 #include "Lexer.h"
 
 #include <cctype>
+#include <unordered_map>
 
 namespace NativeModule {
 
@@ -31,9 +32,59 @@ bool IsIdentifierChar(char ch)
     return std::isalnum(static_cast<unsigned char>(ch)) != 0 || ch == '_';
 }
 
+bool TrySetDoubleOperatorToken(char current, char next, Token& token)
+{
+    if (current == '!' && next == '=') {
+        token.type = TokenType::NEQ;
+        token.value = "!=";
+        return true;
+    }
+    if (current == '=' && next == '=') {
+        token.type = TokenType::EQ;
+        token.value = "==";
+        return true;
+    }
+    if (current == '<' && next == '=') {
+        token.type = TokenType::LTE;
+        token.value = "<=";
+        return true;
+    }
+    if (current == '>' && next == '=') {
+        token.type = TokenType::GTE;
+        token.value = ">=";
+        return true;
+    }
+    if (current == '&' && next == '&') {
+        token.type = TokenType::AND;
+        token.value = "&&";
+        return true;
+    }
+    if (current == '|' && next == '|') {
+        token.type = TokenType::OR;
+        token.value = "||";
+        return true;
+    }
+    return false;
+}
+
+void SetSingleOperatorToken(char current, Token& token)
+{
+    static const std::unordered_map<char, TokenType> simpleOps = { { '+', TokenType::PLUS }, { '-', TokenType::MINUS },
+        { '*', TokenType::STAR }, { '/', TokenType::SLASH }, { '%', TokenType::PERCENT }, { '(', TokenType::LPAREN },
+        { ')', TokenType::RPAREN }, { '[', TokenType::LBRACKET }, { ']', TokenType::RBRACKET }, { '.', TokenType::DOT },
+        { ',', TokenType::COMMA }, { '?', TokenType::QUESTION }, { ':', TokenType::COLON }, { '!', TokenType::BANG },
+        { '<', TokenType::LT }, { '>', TokenType::GT } };
+
+    auto it = simpleOps.find(current);
+    if (it != simpleOps.end()) {
+        token.type = it->second;
+    }
+    token.value = std::string(1, current);
+}
+
 } // namespace
 
-Token Lexer::ScanString(const std::string& input, size_t& pos, int32_t& line, int32_t& column)
+Token Lexer::ScanString(const std::string& input, size_t& pos, int32_t& line, int32_t& column) const
 {
     size_t start = pos;
     int32_t startCol = column;
@@ -85,7 +136,7 @@ Token Lexer::ScanString(const std::string& input, size_t& pos, int32_t& line, in
     return token;
 }
 
-Token Lexer::ScanNumber(const std::string& input, size_t& pos, int32_t& line, int32_t& column)
+Token Lexer::ScanNumber(const std::string& input, size_t& pos, int32_t& line, int32_t& column) const
 {
     size_t start = pos;
     while (pos < input.size() && std::isdigit(static_cast<unsigned char>(input[pos])) != 0) {
@@ -117,7 +168,7 @@ Token Lexer::ScanNumber(const std::string& input, size_t& pos, int32_t& line, in
 }
 
 void Lexer::ScanDollar(
-    const std::string& input, size_t& pos, int32_t& line, int32_t& column, std::vector<Token>& tokens)
+    const std::string& input, size_t& pos, int32_t& line, int32_t& column, std::vector<Token>& tokens) const
 {
     size_t start = pos;
     int32_t startCol = column;
@@ -143,7 +194,7 @@ void Lexer::ScanDollar(
     }
 }
 
-Token Lexer::ScanIdentifier(const std::string& input, size_t& pos, int32_t& line, int32_t& column)
+Token Lexer::ScanIdentifier(const std::string& input, size_t& pos, int32_t& line, int32_t& column) const
 {
     size_t start = pos;
     while (pos < input.size() && IsIdentifierChar(input[pos])) {
@@ -165,143 +216,63 @@ Token Lexer::ScanIdentifier(const std::string& input, size_t& pos, int32_t& line
     return token;
 }
 
-Token Lexer::ScanOperator(const std::string& input, size_t& pos, int32_t& line, int32_t& column)
+Token Lexer::ScanOperator(const std::string& input, size_t& pos, int32_t& line, int32_t& column) const
 {
     char current = input[pos];
     Token token;
     token.line = line;
     token.column = column;
 
-    switch (current) {
-        case '+':
-            token.type = TokenType::PLUS;
-            token.value = "+";
-            break;
-        case '-':
-            token.type = TokenType::MINUS;
-            token.value = "-";
-            break;
-        case '*':
-            token.type = TokenType::STAR;
-            token.value = "*";
-            break;
-        case '/':
-            token.type = TokenType::SLASH;
-            token.value = "/";
-            break;
-        case '%':
-            token.type = TokenType::PERCENT;
-            token.value = "%";
-            break;
-        case '(':
-            token.type = TokenType::LPAREN;
-            token.value = "(";
-            break;
-        case ')':
-            token.type = TokenType::RPAREN;
-            token.value = ")";
-            break;
-        case '[':
-            token.type = TokenType::LBRACKET;
-            token.value = "[";
-            break;
-        case ']':
-            token.type = TokenType::RBRACKET;
-            token.value = "]";
-            break;
-        case '.':
-            token.type = TokenType::DOT;
-            token.value = ".";
-            break;
-        case ',':
-            token.type = TokenType::COMMA;
-            token.value = ",";
-            break;
-        case '?':
-            token.type = TokenType::QUESTION;
-            token.value = "?";
-            break;
-        case ':':
-            token.type = TokenType::COLON;
-            token.value = ":";
-            break;
-        case '!':
-            if (pos + 1 < input.size() && input[pos + 1] == '=') {
-                token.type = TokenType::NEQ;
-                token.value = "!=";
-                ++pos;
-                ++column;
-            } else {
-                token.type = TokenType::BANG;
-                token.value = "!";
-            }
-            break;
-        case '=':
-            if (pos + 1 < input.size() && input[pos + 1] == '=') {
-                token.type = TokenType::EQ;
-                token.value = "==";
-                ++pos;
-                ++column;
-            } else {
-                token.type = TokenType::ILLEGAL;
-                token.value = "=";
-            }
-            break;
-        case '<':
-            if (pos + 1 < input.size() && input[pos + 1] == '=') {
-                token.type = TokenType::LTE;
-                token.value = "<=";
-                ++pos;
-                ++column;
-            } else {
-                token.type = TokenType::LT;
-                token.value = "<";
-            }
-            break;
-        case '>':
-            if (pos + 1 < input.size() && input[pos + 1] == '=') {
-                token.type = TokenType::GTE;
-                token.value = ">=";
-                ++pos;
-                ++column;
-            } else {
-                token.type = TokenType::GT;
-                token.value = ">";
-            }
-            break;
-        case '&':
-            if (pos + 1 < input.size() && input[pos + 1] == '&') {
-                token.type = TokenType::AND;
-                token.value = "&&";
-                ++pos;
-                ++column;
-            } else {
-                token.type = TokenType::ILLEGAL;
-                token.value = "&";
-            }
-            break;
-        case '|':
-            if (pos + 1 < input.size() && input[pos + 1] == '|') {
-                token.type = TokenType::OR;
-                token.value = "||";
-                ++pos;
-                ++column;
-            } else {
-                token.type = TokenType::ILLEGAL;
-                token.value = "|";
-            }
-            break;
-        default:
-            token.type = TokenType::ILLEGAL;
-            token.value = std::string(1, current);
-            break;
+    if (pos + 1 >= input.size() || !TrySetDoubleOperatorToken(current, input[pos + 1], token)) {
+        SetSingleOperatorToken(current, token);
     }
-    ++pos;
-    ++column;
+
+    pos += token.value.size();
+    column += static_cast<int32_t>(token.value.size());
     return token;
 }
 
-std::vector<Token> Lexer::Tokenize(const std::string& input)
+void Lexer::ScanNextToken(
+    const std::string& input, size_t& pos, int32_t& line, int32_t& column, std::vector<Token>& tokens) const
+{
+    char current = input[pos];
+    if (current == '\n') {
+        ++line;
+        column = 1;
+        ++pos;
+        return;
+    }
+    if (std::isspace(static_cast<unsigned char>(current)) != 0) {
+        ++pos;
+        ++column;
+        return;
+    }
+    if (current == '\'') {
+        tokens.push_back(ScanString(input, pos, line, column));
+        return;
+    }
+    if (current == '`') {
+        tokens.push_back(Token { .type = TokenType::ILLEGAL, .value = "`", .line = line, .column = column });
+        ++pos;
+        ++column;
+        return;
+    }
+    if (std::isdigit(static_cast<unsigned char>(current)) != 0) {
+        tokens.push_back(ScanNumber(input, pos, line, column));
+        return;
+    }
+    if (current == '$') {
+        ScanDollar(input, pos, line, column, tokens);
+        return;
+    }
+    if (IsIdentifierStart(current)) {
+        tokens.push_back(ScanIdentifier(input, pos, line, column));
+        return;
+    }
+    tokens.push_back(ScanOperator(input, pos, line, column));
+}
+
+std::vector<Token> Lexer::Tokenize(const std::string& input) const
 {
     std::vector<Token> tokens;
     int32_t line = 1;
@@ -309,53 +280,7 @@ std::vector<Token> Lexer::Tokenize(const std::string& input)
     size_t pos = 0;
 
     while (pos < input.size()) {
-        char current = input[pos];
-
-        if (current == '\n') {
-            ++line;
-            column = 1;
-            ++pos;
-            continue;
-        }
-        if (std::isspace(static_cast<unsigned char>(current)) != 0) {
-            ++pos;
-            ++column;
-            continue;
-        }
-
-        if (current == '\'') {
-            tokens.push_back(ScanString(input, pos, line, column));
-            continue;
-        }
-
-        if (current == '`') {
-            Token token;
-            token.type = TokenType::ILLEGAL;
-            token.value = "`";
-            token.line = line;
-            token.column = column;
-            tokens.push_back(token);
-            ++pos;
-            ++column;
-            continue;
-        }
-
-        if (std::isdigit(static_cast<unsigned char>(current)) != 0) {
-            tokens.push_back(ScanNumber(input, pos, line, column));
-            continue;
-        }
-
-        if (current == '$') {
-            ScanDollar(input, pos, line, column, tokens);
-            continue;
-        }
-
-        if (IsIdentifierStart(current)) {
-            tokens.push_back(ScanIdentifier(input, pos, line, column));
-            continue;
-        }
-
-        tokens.push_back(ScanOperator(input, pos, line, column));
+        ScanNextToken(input, pos, line, column, tokens);
     }
 
     Token eof;

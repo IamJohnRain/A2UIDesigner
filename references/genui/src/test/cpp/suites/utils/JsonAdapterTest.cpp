@@ -1027,11 +1027,10 @@ TEST(StyleParserTest, StyleParserTest001)
     EXPECT_EQ(StyleParser::ToPropertyName("width"), StylePropertyName::WIDTH);
     EXPECT_EQ(StyleParser::ToPropertyName("flexShrink"), StylePropertyName::FLEX_SHRINK);
     EXPECT_EQ(StyleParser::ToPropertyName("backgroundImage"), StylePropertyName::BACKGROUND_IMAGE);
-    EXPECT_EQ(StyleParser::ToPropertyName("backgroundimage"), StylePropertyName::BACKGROUND_IMAGE);
-    EXPECT_EQ(StyleParser::ToPropertyName("backgroundImageSize"), StylePropertyName::BACKGROUND_IMAGE_SIZE);
-    EXPECT_EQ(StyleParser::ToPropertyName("backgroundimageSize"), StylePropertyName::BACKGROUND_IMAGE_SIZE);
+    // backgroundImageSize is no longer registered in the name map; the resolver still applies it
+    // through its raw JSON key, so ToPropertyName resolves it to UNKNOWN.
+    EXPECT_EQ(StyleParser::ToPropertyName("backgroundImageSize"), StylePropertyName::UNKNOWN);
     EXPECT_EQ(StyleParser::ToPropertyName("backgroundImageSizeWithStyle"), StylePropertyName::BACKGROUND_IMAGE_SIZE);
-    EXPECT_EQ(StyleParser::ToPropertyName("backgroundimageSizeWithStyle"), StylePropertyName::BACKGROUND_IMAGE_SIZE);
     EXPECT_EQ(StyleParser::ToPropertyName("linearGradient"), StylePropertyName::LINEAR_GRADIENT);
     EXPECT_EQ(StyleParser::ToPropertyName("clip"), StylePropertyName::CLIP);
     EXPECT_EQ(StyleParser::ToPropertyName("textOverflow"), StylePropertyName::TEXT_OVERFLOW);

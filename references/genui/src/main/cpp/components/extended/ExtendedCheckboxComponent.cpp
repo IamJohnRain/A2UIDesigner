@@ -119,8 +119,6 @@ ExtendedCheckboxComponent::ExtendedCheckboxComponent()
 
     ArkUINodeApiAdapter::SetNodeHeight(nativeView_, 48.0f);
 
-    ArkUINodeApiAdapter::SetNodeLayoutWeight(textNode_, 1U);
-
     ArkUINodeApiAdapter::SetNodeTextMaxLines(textNode_, 1);
 
     ArkUINodeApiAdapter::SetNodeTextOverflow(textNode_, 2);
@@ -379,72 +377,34 @@ void ExtendedCheckboxComponent::ValidateStylesSchema(const JsonValue& styles)
         }
     }
 
-    if (!styles.Has("mark")) {
-        return;
-    }
-    JsonValue markValue = styles.GetItem("mark");
-    if (IsDynamicValueDescriptor(markValue)) {
-        return;
-    }
-    if (!markValue.IsObject()) {
-        ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
-            "Property styles.mark expects object, fallback/reset has been applied", "styles.mark");
-        return;
-    }
-    for (JsonValue child = markValue.GetChild(); child.IsValid(); child = child.GetNext()) {
-        std::string key = child.GetKey();
-        if (!key.empty() && !IsSupportedMarkMember(key)) {
-            std::string path = "styles.mark." + key;
-            ReportExtendedSchemaWarning(
-                SCHEMA_ERROR_CODE_UNDEFINED_FIELD, "Property " + path + " is undefined and has been ignored", path);
-        }
-    }
-    if (!HasSupportedMarkMember(markValue)) {
-        return;
-    }
-    std::unique_ptr<JsonAdapter> resolvedMarkAdapter = ResolveMarkDynamicMembers(markValue);
-    if (resolvedMarkAdapter != nullptr) {
-        ValidateResolvedMarkDfx(resolvedMarkAdapter->GetRoot());
-    }
-    if (markValue.Has("strokeColor")) {
-        uint32_t color = 0;
-        JsonValue strokeColorValue = markValue.GetItem("strokeColor");
-        if (IsDynamicValueDescriptor(strokeColorValue)) {
-            // Dynamic mark values are handled by DFX fallback/reset after resolution.
-        } else if (!strokeColorValue.IsString()) {
-            ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
-                "Property styles.mark.strokeColor expects string color, fallback/reset has been applied",
-                "styles.mark.strokeColor");
-        } else if (!ExtendedStyleResolver::ParseColor(strokeColorValue, color)) {
-            ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
-                "Property styles.mark.strokeColor expects color value, fallback/reset has been applied",
-                "styles.mark.strokeColor");
-        }
-    }
-    auto reportMarkNumber = [this, &markValue](const char* key) {
-        if (key == nullptr || !markValue.Has(key)) {
-            return;
-        }
-        JsonValue value = markValue.GetItem(key);
-        if (IsDynamicValueDescriptor(value)) {
-            return;
-        }
-        if (!value.IsNumber()) {
-            ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
-                "Property styles.mark." + std::string(key) + " expects number, fallback/reset has been applied",
-                "styles.mark." + std::string(key));
-            return;
-        }
-        if (value.GetNumberValue(0.0) <= 0.0) {
-            ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
-                "Property styles.mark." + std::string(key) +
-                    " expects positive number, fallback/reset has been applied",
-                "styles.mark." + std::string(key));
-        }
-    };
-    reportMarkNumber("size");
-    reportMarkNumber("strokeWidth");
+    ValidateMarkStylesSchema(styles);
 }
+
+namespace {
+bool TryPutResolvedMarkMember(JsonValue& resolvedRoot, const std::string& key, const JsonValue& child,
+    const RenderContext& renderContext, const DynamicResolveContext& context)
+{
+    if (child.Has("path") && renderContext.bindingEngine != nullptr) {
+        std::string path = child.GetString("path", "");
+        std::shared_ptr<DataModel> dataModel =
+            renderContext.bindingEngine->GetOrCreateDataModel(renderContext.surfaceId);
+        if (dataModel != nullptr) {
+            std::optional<JsonValue> value = dataModel->GetNode(path);
+            if (value.has_value()) {
+                resolvedRoot.Put(key.c_str(), value.value());
+                return true;
+            }
+        }
+    }
+
+    ResolvedValue resolvedValue = DynamicValueResolver::Resolve(child, context);
+    if (!resolvedValue.success || !resolvedValue.value.IsValid()) {
+        return false;
+    }
+    resolvedRoot.Put(key.c_str(), resolvedValue.value);
+    return true;
+}
+} // namespace
 
 std::unique_ptr<JsonAdapter> ExtendedCheckboxComponent::ResolveMarkDynamicMembers(const JsonValue& markValue) const
 {
@@ -463,7 +423,8 @@ std::unique_ptr<JsonAdapter> ExtendedCheckboxComponent::ResolveMarkDynamicMember
         .surfaceId = renderContext.surfaceId,
         .componentId = GetComponentId(),
         .dataModel = renderContext.dataModel,
-        .allowExpression = true };
+        .allowExpression = true,
+        .missingPathPolicy = MissingPathPolicy::DEFER_UNTIL_DATA_UPDATE };
     for (JsonValue child = markValue.GetChild(); child.IsValid(); child = child.GetNext()) {
         std::string key = child.GetKey();
         if (key.empty()) {
@@ -471,21 +432,7 @@ std::unique_ptr<JsonAdapter> ExtendedCheckboxComponent::ResolveMarkDynamicMember
         }
         if (IsDynamicValueDescriptor(child)) {
             hasDynamicMember = true;
-            if (child.Has("path") && renderContext.bindingEngine != nullptr) {
-                std::string path = child.GetString("path", "");
-                std::shared_ptr<DataModel> dataModel =
-                    renderContext.bindingEngine->GetOrCreateDataModel(renderContext.surfaceId);
-                if (dataModel != nullptr) {
-                    std::optional<JsonValue> value = dataModel->GetNode(path);
-                    if (value.has_value()) {
-                        resolvedRoot.Put(key.c_str(), value.value());
-                        continue;
-                    }
-                }
-            }
-            ResolvedValue resolvedValue = DynamicValueResolver::Resolve(child, context);
-            if (resolvedValue.success && resolvedValue.value.IsValid()) {
-                resolvedRoot.Put(key.c_str(), resolvedValue.value);
+            if (TryPutResolvedMarkMember(resolvedRoot, key, child, renderContext, context)) {
                 continue;
             }
         }
@@ -536,6 +483,76 @@ void ExtendedCheckboxComponent::ValidateResolvedMarkDfx(const JsonValue& markVal
     };
     validateMarkNumber("size");
     validateMarkNumber("strokeWidth");
+}
+
+void ExtendedCheckboxComponent::ValidateMarkStylesSchema(const JsonValue& styles)
+{
+    if (!styles.Has("mark")) {
+        return;
+    }
+    JsonValue markValue = styles.GetItem("mark");
+    if (IsDynamicValueDescriptor(markValue)) {
+        return;
+    }
+    if (!markValue.IsObject()) {
+        ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
+            "Property styles.mark expects object, fallback/reset has been applied", "styles.mark");
+        return;
+    }
+    for (JsonValue child = markValue.GetChild(); child.IsValid(); child = child.GetNext()) {
+        std::string key = child.GetKey();
+        if (!key.empty() && !IsSupportedMarkMember(key)) {
+            std::string path = "styles.mark." + key;
+            ReportExtendedSchemaWarning(
+                SCHEMA_ERROR_CODE_UNDEFINED_FIELD, "Property " + path + " is undefined and has been ignored", path);
+        }
+    }
+    if (!HasSupportedMarkMember(markValue)) {
+        return;
+    }
+    std::unique_ptr<JsonAdapter> resolvedMarkAdapter = ResolveMarkDynamicMembers(markValue);
+    if (resolvedMarkAdapter != nullptr) {
+        ValidateResolvedMarkDfx(resolvedMarkAdapter->GetRoot());
+    }
+    if (markValue.Has("strokeColor")) {
+        uint32_t color = 0;
+        JsonValue strokeColorValue = markValue.GetItem("strokeColor");
+        if (IsDynamicValueDescriptor(strokeColorValue)) {
+            // Dynamic mark values are handled by DFX fallback/reset after resolution.
+        } else if (!strokeColorValue.IsString()) {
+            ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
+                "Property styles.mark.strokeColor expects string color, fallback/reset has been applied",
+                "styles.mark.strokeColor");
+        } else if (!ExtendedStyleResolver::ParseColor(strokeColorValue, color)) {
+            ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
+                "Property styles.mark.strokeColor expects color value, fallback/reset has been applied",
+                "styles.mark.strokeColor");
+        }
+    }
+    ReportMarkNumberIssue(markValue, "size");
+    ReportMarkNumberIssue(markValue, "strokeWidth");
+}
+
+void ExtendedCheckboxComponent::ReportMarkNumberIssue(const JsonValue& markValue, const char* key)
+{
+    if (key == nullptr || !markValue.Has(key)) {
+        return;
+    }
+    JsonValue value = markValue.GetItem(key);
+    if (IsDynamicValueDescriptor(value)) {
+        return;
+    }
+    if (!value.IsNumber()) {
+        ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
+            "Property styles.mark." + std::string(key) + " expects number, fallback/reset has been applied",
+            "styles.mark." + std::string(key));
+        return;
+    }
+    if (value.GetNumberValue(0.0) <= 0.0) {
+        ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
+            "Property styles.mark." + std::string(key) + " expects positive number, fallback/reset has been applied",
+            "styles.mark." + std::string(key));
+    }
 }
 
 void ExtendedCheckboxComponent::ValidateComponentSpecificStylesSchema(const JsonValue& styles)

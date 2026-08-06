@@ -38,6 +38,9 @@ struct CommonStyleProps {
     bool hasAccessibilityLabel = false;
     std::string accessibilityDescription;
     bool hasAccessibilityDescription = false;
+    double flexShrinkParentDefault = 0.0;
+    bool hasFlexShrinkParentDefault = false;
+    bool resetFlexShrinkToParentDefault = false;
 };
 
 struct CustomComponentDescriptor {

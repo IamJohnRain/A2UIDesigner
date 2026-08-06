@@ -71,6 +71,93 @@ def automatic_document() -> converter.AltDocument:
 
 
 class AutomaticAltTest(unittest.TestCase):
+    def test_composite_text_expression_resolves_all_scalar_references(self) -> None:
+        data_model = {
+            "data": {
+                "calendar": {
+                    "items": [{"dtStart": "14:00", "dtEnd": "15:00"}]
+                }
+            }
+        }
+        sample, references, error = converter.resolve_text_expression(
+            "{{ ${/data/calendar/items/0/dtStart} + '-' + ${/data/calendar/items/0/dtEnd} }}",
+            data_model,
+        )
+        self.assertIsNone(error)
+        self.assertEqual(sample, "14:00-15:00")
+        self.assertEqual(
+            references,
+            [
+                "/data/calendar/items/0/dtStart",
+                "/data/calendar/items/0/dtEnd",
+            ],
+        )
+
+    def test_composite_text_expression_uses_real_sample_for_font_adaptation(self) -> None:
+        spec = task_spec()
+        spec["dataModelSchema"] = {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "type": "object",
+                    "properties": {
+                        "calendar": {
+                            "type": "object",
+                            "properties": {
+                                "items": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "dtStart": {"type": "string", "sampleValue": "14:00"},
+                                            "dtEnd": {"type": "string", "sampleValue": "15:00"},
+                                        },
+                                    },
+                                },
+                            },
+                        },
+                    },
+                }
+            },
+        }
+        document = converter.AltDocument(
+            converter.AltNode(
+                "Column",
+                "root",
+                {"card": "2x2", "theme": "neutral-light"},
+                [converter.AltNode("Text", "schedule_time", {"role": "metric"})],
+            )
+        )
+        expression = (
+            "{{ ${/data/calendar/items/0/dtStart} + '-' + "
+            "${/data/calendar/items/0/dtEnd} }}"
+        )
+        asc = {"schedule_time": {"expr": expression}}
+
+        converter.validate_auto_asc(document, spec, asc)
+        compiled, issues = converter.auto_layout_document(document, spec, asc)
+        self.assertFalse([issue for issue in issues if issue.severity == "error"])
+        self.assertFalse(
+            [issue for issue in issues if "semantic fallback" in issue.message]
+        )
+        node = next(
+            item for item in converter.alt_nodes(compiled) if item.node_id == "schedule_time"
+        )
+        self.assertEqual(node.attrs["font"], "16/500")
+        self.assertGreaterEqual(converter.parse_box(node.attrs["box"])[0], 113)
+
+        base_text, _ = converter.alt_to_dsl(
+            compiled, spec, strict_layout=False, validate_content=False
+        )
+        dsl_text = converter.apply_asc_to_dsl(base_text, document, spec, asc)
+        _, update, _ = converter.parse_jsonl_messages(dsl_text)
+        output = next(
+            item
+            for item in update["updateComponents"]["components"]
+            if item["id"] == "schedule_time"
+        )
+        self.assertEqual(output["content"], expression)
+
     def test_auto_layout_compiles_button_and_theme_colored_svg(self) -> None:
         document = automatic_document()
         spec = task_spec()
@@ -209,7 +296,7 @@ class AutomaticAltTest(unittest.TestCase):
             any("Checkbox nodes" in issue.message and issue.severity == "error" for issue in issues)
         )
 
-    def test_2x4_checkbox_uses_fixed_native_outer_height(self) -> None:
+    def test_2x4_checkbox_uses_compact_automatic_outer_height(self) -> None:
         root = converter.AltNode(
             "Column", "root", {"card": "2x4", "theme": "ambient-light"}
         )
@@ -220,9 +307,14 @@ class AutomaticAltTest(unittest.TestCase):
         ]
         document = converter.AltDocument(root)
         spec = task_spec(size="2x4")
+        spec["dataModelSchema"]["properties"]["battery"]["properties"]["enabled"] = {
+            "type": "boolean",
+            "description": "省电状态",
+            "sampleValue": True,
+        }
         asc = {
             "title": {"text": "省电设置"},
-            "power_toggle": {"label": "降低刷新率", "select": True},
+            "power_toggle": {"label": "降低刷新率", "bind": "/battery/enabled"},
             "action_button": {"label": "保存设置", "event": 0},
         }
 
@@ -233,8 +325,46 @@ class AutomaticAltTest(unittest.TestCase):
             node for node in converter.alt_nodes(compiled) if node.node_id == "power_toggle"
         )
         _, height = converter.parse_box(checkbox.attrs["box"])
-        self.assertEqual(height, 48)
+        self.assertEqual(height, 22)
         self.assertNotIn("font", checkbox.attrs)
+
+    def test_auto_checkbox_resolves_dynamic_label_and_boolean_state(self) -> None:
+        spec = task_spec(size="2x4")
+        spec["dataModelSchema"]["properties"]["battery"]["properties"].update(
+            {
+                "enabled": {
+                    "type": "boolean",
+                    "description": "省电状态",
+                    "sampleValue": True,
+                },
+                "label": {
+                    "type": "string",
+                    "description": "设置名称",
+                    "sampleValue": "省电模式",
+                },
+            }
+        )
+        root = converter.AltNode(
+            "Column", "root", {"card": "2x4", "theme": "neutral-light"}
+        )
+        root.children = [
+            converter.AltNode("Checkbox", "power_toggle", {"role": "selection"})
+        ]
+        document = converter.AltDocument(root)
+        asc = {
+            "power_toggle": {
+                "label": "{{ ${/battery/label} }}",
+                "bind": "/battery/enabled",
+            }
+        }
+        converter.validate_auto_asc(document, spec, asc)
+        compiled, issues = converter.auto_layout_document(document, spec, asc)
+        self.assertFalse([issue for issue in issues if issue.severity == "error"])
+        checkbox = next(
+            node for node in converter.alt_nodes(compiled) if node.node_id == "power_toggle"
+        )
+        self.assertEqual(converter.parse_box(checkbox.attrs["box"])[1], 22)
+        self.assertNotIn("semantic fallback", " ".join(issue.message for issue in issues))
 
     def test_auto_layout_rejects_png_asset(self) -> None:
         document = automatic_document()
@@ -357,7 +487,7 @@ class AutomaticAltTest(unittest.TestCase):
             converter.THEME_CONFIG["themes"]["focus-dark"]["status"]["warning"],
         )
 
-    def test_button_label_rejects_data_model_binding(self) -> None:
+    def test_button_data_model_binding_compiles_to_dynamic_label(self) -> None:
         document = converter.AltDocument(
             converter.AltNode(
                 "Column",
@@ -368,14 +498,68 @@ class AutomaticAltTest(unittest.TestCase):
         document.root.children = [
             converter.AltNode("Button", "action_button", {"role": "action"})
         ]
-        with self.assertRaisesRegex(
-            converter.ConversionError, "Button label must be a short static string"
-        ):
-            converter.validate_auto_asc(
-                document,
-                task_spec(),
-                {"action_button": {"label": "/mode/actionLabel", "event": 0}},
-            )
+        asc = {"action_button": {"bind": "/battery/levelText", "event": 0}}
+        converter.validate_auto_asc(document, task_spec(), asc)
+        compiled, issues = converter.auto_layout_document(document, task_spec(), asc)
+        issues += converter.validate_layout(compiled, "2x2")
+        self.assertFalse([issue for issue in issues if issue.severity == "error"])
+        base_text, _ = converter.alt_to_dsl(
+            compiled, task_spec(), strict_layout=False, validate_content=False
+        )
+        dsl_text = converter.apply_asc_to_dsl(base_text, document, task_spec(), asc)
+        _, update, _ = converter.parse_jsonl_messages(dsl_text)
+        button = next(
+            item for item in update["updateComponents"]["components"] if item["id"] == "action_button"
+        )
+        self.assertEqual(button["label"], "{{ ${/battery/levelText} }}")
+
+    def test_auto_text_defaults_to_center_alignment(self) -> None:
+        top, styles = converter.apply_alt_styles(
+            converter.AltNode("Text", "title", {"role": "title"})
+        )
+        self.assertEqual(top["id"], "title")
+        self.assertEqual(styles["textAlign"], "center")
+
+        _, explicit_styles = converter.apply_alt_styles(
+            converter.AltNode("Text", "title", {"text": "start"})
+        )
+        self.assertEqual(explicit_styles["textAlign"], "start")
+
+    def test_static_semantic_text_is_repaired_to_data_model_binding(self) -> None:
+        document = automatic_document()
+        asc = {
+            "battery_icon": {"asset": 0},
+            "title": {"text": "电量状态"},
+            "battery_value": {"text": "鍓╀綑 20%"},
+            "action_button": {"label": "绔嬪嵆鐪佺數", "event": 0},
+        }
+        normalized, notes = converter.normalize_auto_bindings(document, task_spec(), asc)
+        self.assertIn("battery_value", normalized)
+        self.assertEqual(normalized["battery_value"]["bind"], "/battery/levelText")
+        self.assertNotIn("text", normalized["battery_value"])
+        self.assertTrue(any("battery_value" in note for note in notes))
+
+    def test_excess_children_are_grouped_and_long_protected_text_is_downgraded(self) -> None:
+        document = automatic_document()
+        document.root.children.insert(
+            1, converter.AltNode("Text", "warning", {"role": "status"})
+        )
+        asc = {
+            "battery_icon": {"asset": 0},
+            "title": {"text": "标题"},
+            "battery_value": {"text": "剩余 20%"},
+            "warning": {"text": "这是一个很长的状态说明，需要动态展示"},
+            "action_button": {"label": "打开", "event": 0},
+        }
+        repaired, structure_notes = converter.repair_auto_structure(document)
+        role_notes = converter.repair_long_auto_text_roles(repaired, task_spec(), asc)
+        self.assertLessEqual(len(repaired.root.children), 3)
+        self.assertTrue(structure_notes)
+        self.assertEqual(
+            next(node for node in converter.alt_nodes(repaired) if node.node_id == "warning").attrs["role"],
+            "support",
+        )
+        self.assertTrue(role_notes)
 
     def test_legacy_geometry_document_remains_readable_but_is_not_auto(self) -> None:
         root = converter.AltNode(
@@ -572,7 +756,12 @@ class AutomaticAltTest(unittest.TestCase):
             self.assertIn("Row 横向分配空间", system)
             self.assertNotIn("Checkbox：label", system)
             self.assertNotIn("maxVisibleListItems", system)
-            self.assertNotIn("{{", system)
+            for unresolved in (
+                "{{TASK_CONTEXT_JSON}}",
+                "{{POLICY_CONTEXT_JSON}}",
+                "{{REFERENCE_CONTEXT_JSON}}",
+            ):
+                self.assertNotIn(unresolved, system)
             self.assertNotIn("<think>", assistant)
             self.assertTrue(assistant.startswith("<alt>\n"))
             self.assertIn("<alt>\nColumn root card=2x2 theme=neutral-light", assistant)
@@ -592,11 +781,15 @@ class AutomaticAltTest(unittest.TestCase):
         self.assertTrue(policy["axes"]["rowChildrenMayBeContainers"])
         self.assertIn("Row", policy["hardProtocol"]["allowedComponents"])
         self.assertIn("Column", policy["hardProtocol"]["allowedComponents"])
-        self.assertIn("两个独立信息组", policy["shapeStrategy"])
+        self.assertIn("selection cards", policy["shapeStrategy"])
         self.assertIn("Column primary_group", system)
         self.assertEqual(policy["textRules"]["maxLines"]["status"], 1)
         self.assertIn("status", policy["textRules"]["protectedSingleLineRoles"])
-        self.assertFalse(policy["capabilities"]["selection"]["interactive"])
+        self.assertTrue(policy["capabilities"]["selection"]["interactive"])
+        self.assertEqual(policy["capabilities"]["selection"]["mode"], "checkbox")
+        self.assertIn("Checkbox", policy["hardProtocol"]["allowedComponents"])
+        self.assertNotIn("Checkbox", policy["hardProtocol"]["forbiddenComponents"])
+        self.assertEqual(policy["limits"]["maxCheckbox"], 3)
 
     def test_case_context_excludes_null_and_non_scalar_bindings(self) -> None:
         spec = task_spec()
@@ -630,6 +823,24 @@ class AutomaticAltTest(unittest.TestCase):
             context["presentationSlots"], {"battery_icon": {"assetCandidate": 0}}
         )
         self.assertNotIn("source", json.dumps(context, ensure_ascii=False))
+
+    def test_reference_context_exposes_selection_fact_relations(self) -> None:
+        spec = task_spec(size="2x4")
+        spec["userQuery"] = "搞个能勾选的几项"
+        spec["dataModelSchema"]["properties"]["guard"] = {
+            "item1Label": {"type": "string", "description": "标签", "sampleValue": "第一项"},
+            "item1Selected": {"type": "boolean", "description": "状态", "sampleValue": True},
+            "selectedCount": {"type": "number", "description": "已选", "sampleValue": 1},
+            "totalCount": {"type": "number", "description": "总数", "sampleValue": 2},
+        }
+        context = request_builder.reference_context(spec)
+        selection = next(
+            relation for relation in context["factRelations"] if relation["kind"] == "selection"
+        )
+        self.assertEqual(selection["selectedCountPath"], "/guard/selectedCount")
+        self.assertEqual(selection["totalCountPath"], "/guard/totalCount")
+        self.assertEqual(request_builder.presentation_requirements(spec)["selection"]["mode"], "checkbox")
+        self.assertNotIn("sample", selection)
 
     def test_task_spec_rejects_out_of_range_presentation_slot_reference(self) -> None:
         spec = task_spec()

@@ -18,7 +18,8 @@
 namespace NativeModule {
 
 CatalogItem::CatalogItem(const std::string& name, CatalogItemType type)
-    : category_(CatalogCategory::OHOS_EXTENDS), type_(type), name_(name), isInnerNative_(false)
+    : category_(CatalogCategory::OHOS_EXTENDS), type_(type), name_(name), isInnerNative_(false),
+      preserveDynamicDescriptors_(false)
 {}
 
 CatalogCategory CatalogItem::GetCategory() const
@@ -59,6 +60,16 @@ bool CatalogItem::IsInnerNative() const
 void CatalogItem::SetInnerNative(bool isInnerNative)
 {
     isInnerNative_ = isInnerNative;
+}
+
+bool CatalogItem::ShouldPreserveDynamicDescriptors() const
+{
+    return preserveDynamicDescriptors_;
+}
+
+void CatalogItem::SetPreserveDynamicDescriptors(bool preserveDynamicDescriptors)
+{
+    preserveDynamicDescriptors_ = preserveDynamicDescriptors;
 }
 
 } // namespace NativeModule

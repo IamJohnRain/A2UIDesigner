@@ -42,16 +42,30 @@ private:
     static constexpr A2UIFlexAlignment DEFAULT_JUSTIFY_CONTENT = A2UIFlexAlignment::START;
     static constexpr A2UIFlexWrap DEFAULT_WRAP = A2UIFlexWrap::NO_WRAP;
 
-    void SetAlignItems(A2UIItemAlignment alignment);
-    void SetJustifyContent(A2UIFlexAlignment alignment);
-    void SetWrap(A2UIFlexWrap wrap);
+    void SetTopLevelAlignItems(A2UIItemAlignment alignment);
+    void SetTopLevelJustifyContent(A2UIFlexAlignment alignment);
+    void SetTopLevelWrap(A2UIFlexWrap wrap);
     void SetItemMargin(float itemMargin);
+    PropertyDeclaration CreateItemMarginPropertyDeclaration();
+    PropertyDeclaration CreateJustifyContentPropertyDeclaration();
+    PropertyDeclaration CreateAlignItemsPropertyDeclaration();
+    PropertyDeclaration CreateWrapPropertyDeclaration();
+    void ApplyEffectiveLayout();
     void ApplyItemMarginSpace();
     void SetSpace(float space);
     void ApplyFlexOptions();
 
     float itemMargin_ = DEFAULT_ITEM_MARGIN;
     bool itemMarginDisabledByJustify_ = false;
+    A2UIItemAlignment topLevelAlignItems_ = DEFAULT_ALIGN_ITEMS;
+    A2UIFlexAlignment topLevelJustifyContent_ = DEFAULT_JUSTIFY_CONTENT;
+    A2UIFlexWrap topLevelWrap_ = DEFAULT_WRAP;
+    A2UIItemAlignment styleAlignItems_ = DEFAULT_ALIGN_ITEMS;
+    A2UIFlexAlignment styleJustifyContent_ = DEFAULT_JUSTIFY_CONTENT;
+    A2UIFlexWrap styleWrap_ = DEFAULT_WRAP;
+    bool hasStyleAlignItems_ = false;
+    bool hasStyleJustifyContent_ = false;
+    bool hasStyleWrap_ = false;
     A2UIItemAlignment alignItems_ = DEFAULT_ALIGN_ITEMS;
     A2UIFlexAlignment justifyContent_ = DEFAULT_JUSTIFY_CONTENT;
     A2UIFlexWrap wrap_ = DEFAULT_WRAP;

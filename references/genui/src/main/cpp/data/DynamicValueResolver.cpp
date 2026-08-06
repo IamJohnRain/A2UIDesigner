@@ -49,13 +49,30 @@ constexpr int32_t MAX_DYNAMIC_RESOLVE_DEPTH = 16;
 
 std::shared_ptr<DataModel> GetDataModel(const DynamicResolveContext& context);
 
-void DispatchDynamicResolveError(const DynamicResolveContext& context, const std::string& message)
+void DispatchDynamicResolveError(const DynamicResolveContext& context, const std::string& message,
+    int32_t errorCode = SURFACE_ERROR_DYNAMIC_VALUE_RESOLVE_FAILED)
 {
     if (context.renderId < 0) {
         return;
     }
-    RuntimeErrorDispatchBridge::GetInstance().Dispatch(context.renderId, context.surfaceId, context.componentId,
-        SURFACE_ERROR_DYNAMIC_VALUE_RESOLVE_FAILED, message, "DynamicValueResolver");
+    RuntimeErrorDispatchBridge::GetInstance().Dispatch(
+        context.renderId, context.surfaceId, context.componentId, errorCode, message, "DynamicValueResolver");
+}
+
+bool ShouldReportMissingPath(const DynamicResolveContext& context)
+{
+    if (context.missingPathPolicy == MissingPathPolicy::REPORT_ALWAYS) {
+        return true;
+    }
+    SurfaceSlot* surfaceSlot = RenderManager::GetInstance().FindSurface(context.renderId, context.surfaceId);
+    return surfaceSlot != nullptr && surfaceSlot->HasReceivedDataModelUpdate();
+}
+
+void DispatchMissingPathError(const DynamicResolveContext& context, const std::string& path)
+{
+    if (ShouldReportMissingPath(context)) {
+        DispatchDynamicResolveError(context, "path not found: " + path);
+    }
 }
 
 #ifdef ENABLE_EXPRESSION_ENGINE
@@ -75,34 +92,21 @@ bool IsSoftExpressionContextError(ExpressionError error)
            error == ExpressionError::EVAL_UNDEFINED_VARIABLE || IsIllegalExpressionContextError(error);
 }
 
-int32_t ResolveExpressionRuntimeErrorCode(ExpressionError error)
-{
-    if (error == ExpressionError::EVAL_NO_GLOBAL_VARIABLE) {
-        return SURFACE_ERROR_GLOBAL_VARIABLE_NOT_FOUND;
-    }
-    if (IsIllegalExpressionContextError(error)) {
-        return SURFACE_ERROR_ILLEGAL_EXPRESSION;
-    }
-    return SURFACE_ERROR_DYNAMIC_VALUE_RESOLVE_FAILED;
-}
-
-std::string ResolveExpressionRuntimeErrorMessage(const EvaluationContext& evalContext)
-{
-    if (IsIllegalExpressionContextError(evalContext.lastError) &&
-        evalContext.errorMessage.rfind("illegal expression", 0) != 0) {
-        return "illegal expression: " + evalContext.errorMessage;
-    }
-    return evalContext.errorMessage;
-}
-
 void DispatchExpressionResolveError(const DynamicResolveContext& context, const EvaluationContext& evalContext)
 {
     if (context.renderId < 0 || !HasExpressionContextError(evalContext)) {
         return;
     }
+    if (evalContext.lastError == ExpressionError::EVAL_PATH_NOT_FOUND && !ShouldReportMissingPath(context)) {
+        return;
+    }
+    std::string errorMessage = evalContext.errorMessage;
+    if (IsIllegalExpressionContextError(evalContext.lastError) && errorMessage.rfind("illegal expression", 0) != 0 &&
+        errorMessage.rfind("Built-in function", 0) != 0) {
+        errorMessage = "illegal expression: " + errorMessage;
+    }
     RuntimeErrorDispatchBridge::GetInstance().Dispatch(context.renderId, context.surfaceId, context.componentId,
-        ResolveExpressionRuntimeErrorCode(evalContext.lastError), ResolveExpressionRuntimeErrorMessage(evalContext),
-        "DynamicValueResolver");
+        SURFACE_ERROR_ILLEGAL_EXPRESSION, errorMessage, "DynamicValueResolver");
 }
 
 void ApplyLocalVariables(EvaluationContext& evalContext, const DynamicResolveContext& context)
@@ -146,6 +150,13 @@ void AppendUniqueString(std::vector<std::string>& values, const std::string& val
 }
 
 using ArgPath = std::vector<std::string>;
+
+struct FunctionArgResolveContext {
+    const std::string& functionName;
+    const DynamicResolveContext& dynamicContext;
+    ArgPath path;
+    int32_t depth = 0;
+};
 
 constexpr const char ARG_ARRAY_ITEM_SEGMENT[] = "[]";
 
@@ -277,6 +288,27 @@ std::string JsonValueToTemplateOutput(const JsonValue& value)
     return value.ToJsonLiteral();
 }
 
+bool TryAppendDataPathValue(const std::string& expr, const DynamicResolveContext& context,
+    std::shared_ptr<DataModel>& dataModel, std::string& resolved)
+{
+    if (expr.empty() || expr[0] != '/' || !IsValidDataPath(expr)) {
+        return false;
+    }
+    if (dataModel == nullptr) {
+        dataModel = GetDataModel(context);
+    }
+    if (dataModel == nullptr) {
+        return true;
+    }
+    std::optional<JsonValue> nodeOpt = dataModel->GetNode(expr);
+    if (nodeOpt.has_value()) {
+        resolved.append(JsonValueToTemplateOutput(nodeOpt.value()));
+    } else {
+        DispatchDynamicResolveError(context, "path not found: " + expr, SURFACE_ERROR_ILLEGAL_EXPRESSION);
+    }
+    return true;
+}
+
 std::optional<ResolvedValue> ResolveJsonPointerTemplateValue(
     const JsonValue& value, const DynamicResolveContext& context)
 {
@@ -311,18 +343,7 @@ std::optional<ResolvedValue> ResolveJsonPointerTemplateValue(
             }
 
             std::string expr = raw.substr(index + 2, closePos - index - 2);
-            if (!expr.empty() && expr[0] == '/' && IsValidDataPath(expr)) {
-                if (dataModel == nullptr) {
-                    dataModel = GetDataModel(context);
-                }
-                if (dataModel != nullptr) {
-                    std::optional<JsonValue> nodeOpt = dataModel->GetNode(expr);
-                    if (nodeOpt.has_value()) {
-                        resolved.append(JsonValueToTemplateOutput(nodeOpt.value()));
-                    } else {
-                        DispatchDynamicResolveError(context, "path not found: " + expr);
-                    }
-                }
+            if (TryAppendDataPathValue(expr, context, dataModel, resolved)) {
                 touched = true;
                 index = closePos + 1;
                 continue;
@@ -368,6 +389,28 @@ std::string ExtractExpressionCandidate(const std::string& value)
     return ExpressionEngine::ExtractExpression(TrimExpressionString(value));
 }
 
+void EnrichEvaluationContextFromSurface(EvaluationContext& evalContext, const DynamicResolveContext& context)
+{
+    RenderSlot* renderSlot = RenderManager::GetInstance().FindRenderSlot(context.renderId);
+    if (renderSlot == nullptr) {
+        return;
+    }
+    std::shared_ptr<SurfaceManager> surfaceManager = renderSlot->GetSurfaceManager();
+    if (surfaceManager == nullptr) {
+        return;
+    }
+    evalContext.SetThemeContext(&surfaceManager->GetThemeContext());
+
+    if (context.surfaceId.empty() || context.dataModel != nullptr) {
+        return;
+    }
+    SurfaceSlot* surfaceSlot = surfaceManager->FindSurface(context.surfaceId);
+    if (surfaceSlot != nullptr && surfaceSlot->GetBindingEngine() != nullptr) {
+        auto dataModel = surfaceSlot->GetBindingEngine()->GetOrCreateDataModel(context.surfaceId);
+        evalContext.SetDataModel(dataModel.get());
+    }
+}
+
 ResolvedValue ResolveExpressionValue(const JsonValue& value, const DynamicResolveContext& context)
 {
     if (!value.IsString()) {
@@ -393,40 +436,29 @@ ResolvedValue ResolveExpressionValue(const JsonValue& value, const DynamicResolv
         evalContext.SetDataModel(context.dataModel.get());
     }
 
-    auto& renderManager = RenderManager::GetInstance();
-    RenderSlot* renderSlot = renderManager.FindRenderSlot(context.renderId);
-    if (renderSlot != nullptr) {
-        std::shared_ptr<SurfaceManager> surfaceManager = renderSlot->GetSurfaceManager();
-        if (surfaceManager != nullptr) {
-            evalContext.SetThemeContext(&surfaceManager->GetThemeContext());
-
-            if (!context.surfaceId.empty() && context.dataModel == nullptr) {
-                SurfaceSlot* surfaceSlot = surfaceManager->FindSurface(context.surfaceId);
-                if (surfaceSlot != nullptr && surfaceSlot->GetBindingEngine() != nullptr) {
-                    auto dataModel = surfaceSlot->GetBindingEngine()->GetOrCreateDataModel(context.surfaceId);
-                    evalContext.SetDataModel(dataModel.get());
-                }
-            }
-        }
-    }
+    EnrichEvaluationContextFromSurface(evalContext, context);
 
     JsonValue resolvedJson = ExpressionEngine::GetInstance().EvaluateAsJsonValue(expression, evalContext);
     bool hasContextError = HasExpressionContextError(evalContext);
+    std::string errorMessage = evalContext.errorMessage;
+    if (hasContextError && IsIllegalExpressionContextError(evalContext.lastError) &&
+        errorMessage.rfind("illegal expression", 0) != 0 && errorMessage.rfind("Built-in function", 0) != 0) {
+        errorMessage = "illegal expression: " + errorMessage;
+    }
     if (hasContextError && (IsSoftExpressionContextError(evalContext.lastError) || !resolvedJson.IsValid())) {
         DispatchExpressionResolveError(context, evalContext);
     }
     if (!resolvedJson.IsValid()) {
-        std::string errorMessage =
-            hasContextError ? ResolveExpressionRuntimeErrorMessage(evalContext) : "expression evaluation failed";
         if (!hasContextError) {
-            DispatchDynamicResolveError(context, "expression evaluation failed");
+            errorMessage = "expression evaluation failed";
+            DispatchDynamicResolveError(context, "expression evaluation failed", SURFACE_ERROR_ILLEGAL_EXPRESSION);
         }
         return ResolvedValue::FailExpression(errorMessage);
     }
 
     ResolvedValue resolved = ResolvedValue::OkExpression(resolvedJson);
     if (hasContextError) {
-        resolved.errorMessage = ResolveExpressionRuntimeErrorMessage(evalContext);
+        resolved.errorMessage = errorMessage;
     }
     return resolved;
 }
@@ -440,6 +472,143 @@ bool ShouldKeepPartialResolveFailure(RecursiveResolveMode mode)
 }
 
 bool ResolveJsonValueRecursivelyWithMode(const JsonValue& value, const DynamicResolveContext& context, int32_t depth,
+    JsonValue& resolvedValue, RecursiveResolveMode mode);
+
+bool TryResolveJsonObject(const JsonValue& value, const DynamicResolveContext& context, int32_t depth,
+    RecursiveResolveMode mode, JsonValue& resolvedValue)
+{
+    bool hasCall = value.Has("call");
+    bool hasPathBinding = HasOnlyPathDescriptorKey(value);
+    if (hasCall || hasPathBinding) {
+        ResolvedValue dynamicResolved = DynamicValueResolver::Resolve(value, context);
+        if (!dynamicResolved.success || !dynamicResolved.value.IsValid()) {
+            return false;
+        }
+        JsonValue clonedValue;
+        if (!CloneJsonValue(dynamicResolved.value, clonedValue)) {
+            return false;
+        }
+        resolvedValue = clonedValue;
+        return true;
+    }
+
+    std::unique_ptr<JsonAdapter> objectAdapter = JsonAdapter::CreateObject();
+    if (objectAdapter == nullptr) {
+        return false;
+    }
+    JsonValue objectValue = objectAdapter->GetRoot();
+    bool hadMember = false;
+    bool keptMember = false;
+    bool skippedMember = false;
+    for (JsonValue child = value.GetChild(); child.IsValid(); child = child.GetNext()) {
+        std::string key = child.GetKey();
+        if (key.empty()) {
+            continue;
+        }
+        hadMember = true;
+        JsonValue childValue;
+        if (!ResolveJsonValueRecursivelyWithMode(child, context, depth + 1, childValue, mode)) {
+            if (ShouldKeepPartialResolveFailure(mode)) {
+                skippedMember = true;
+                continue;
+            }
+            return false;
+        }
+        if (!objectValue.Put(key.c_str(), childValue)) {
+            return false;
+        }
+        keptMember = true;
+    }
+    resolvedValue = objectValue;
+    if (ShouldKeepPartialResolveFailure(mode) && hadMember && skippedMember && !keptMember) {
+        return false;
+    }
+    return true;
+}
+
+bool CreateResolvedNullValue(JsonValue& resolvedValue)
+{
+    std::unique_ptr<JsonAdapter> nullValue = JsonAdapter::CreateNull();
+    if (nullValue == nullptr) {
+        return false;
+    }
+    resolvedValue = nullValue->GetRoot();
+    return false;
+}
+
+bool TryResolveJsonArray(const JsonValue& value, const DynamicResolveContext& context, int32_t depth,
+    RecursiveResolveMode mode, JsonValue& resolvedValue)
+{
+    std::unique_ptr<JsonAdapter> arrayAdapter = JsonAdapter::CreateArray();
+    if (arrayAdapter == nullptr) {
+        return false;
+    }
+
+    JsonValue arrayRoot = arrayAdapter->GetRoot();
+    for (int index = 0; index < value.GetArraySize(); ++index) {
+        JsonValue itemValue;
+        if (!ResolveJsonValueRecursivelyWithMode(value.GetArrayItem(index), context, depth + 1, itemValue, mode)) {
+            return false;
+        }
+        if (!arrayRoot.Append(itemValue)) {
+            return false;
+        }
+    }
+    resolvedValue = arrayRoot;
+    return true;
+}
+
+bool CloneResolvedDynamicValue(const ResolvedValue& resolved, JsonValue& resolvedValue)
+{
+    if (!resolved.success || !resolved.value.IsValid()) {
+        return false;
+    }
+
+    JsonValue clonedValue;
+    if (!CloneJsonValue(resolved.value, clonedValue)) {
+        return false;
+    }
+    resolvedValue = clonedValue;
+    return true;
+}
+
+#ifdef ENABLE_EXPRESSION_ENGINE
+bool TryResolveExpressionString(
+    const JsonValue& value, const DynamicResolveContext& context, JsonValue& resolvedValue, bool& handled)
+{
+    handled = false;
+    if (!context.allowExpression || !value.IsString()) {
+        return true;
+    }
+
+    ResolvedValue expressionResolved = ResolveExpressionValue(value, context);
+    if (expressionResolved.source != ResolveSource::EXPRESSION) {
+        return true;
+    }
+
+    handled = true;
+    return CloneResolvedDynamicValue(expressionResolved, resolvedValue);
+}
+#endif
+
+bool TryResolveTemplateString(
+    const JsonValue& value, const DynamicResolveContext& context, JsonValue& resolvedValue, bool& handled)
+{
+    handled = false;
+    if (!context.allowExpression || !value.IsString()) {
+        return true;
+    }
+
+    std::optional<ResolvedValue> templateResolved = ResolveJsonPointerTemplateValue(value, context);
+    if (!templateResolved.has_value()) {
+        return true;
+    }
+
+    handled = true;
+    return CloneResolvedDynamicValue(templateResolved.value(), resolvedValue);
+}
+
+bool ResolveJsonValueRecursivelyWithMode(const JsonValue& value, const DynamicResolveContext& context, int32_t depth,
     JsonValue& resolvedValue, RecursiveResolveMode mode)
 {
     if (depth > MAX_DYNAMIC_RESOLVE_DEPTH) {
@@ -447,114 +616,33 @@ bool ResolveJsonValueRecursivelyWithMode(const JsonValue& value, const DynamicRe
         return false;
     }
     if (!value.IsValid()) {
-        std::unique_ptr<JsonAdapter> nullValue = JsonAdapter::CreateNull();
-        if (nullValue == nullptr) {
-            return false;
-        }
-        resolvedValue = nullValue->GetRoot();
-        return false;
+        return CreateResolvedNullValue(resolvedValue);
     }
 
     if (value.IsObject()) {
-        bool hasCall = value.Has("call");
-        bool hasPathBinding = HasOnlyPathDescriptorKey(value);
-        if (hasCall || hasPathBinding) {
-            ResolvedValue dynamicResolved = DynamicValueResolver::Resolve(value, context);
-            if (!dynamicResolved.success || !dynamicResolved.value.IsValid()) {
-                return false;
-            }
-            JsonValue clonedValue;
-            if (!CloneJsonValue(dynamicResolved.value, clonedValue)) {
-                return false;
-            }
-            resolvedValue = clonedValue;
-            return true;
-        }
-
-        std::unique_ptr<JsonAdapter> objectAdapter = JsonAdapter::CreateObject();
-        if (objectAdapter == nullptr) {
-            return false;
-        }
-        JsonValue objectValue = objectAdapter->GetRoot();
-        bool hadMember = false;
-        bool keptMember = false;
-        bool skippedMember = false;
-        for (JsonValue child = value.GetChild(); child.IsValid(); child = child.GetNext()) {
-            std::string key = child.GetKey();
-            if (key.empty()) {
-                continue;
-            }
-            hadMember = true;
-            JsonValue childValue;
-            if (!ResolveJsonValueRecursivelyWithMode(child, context, depth + 1, childValue, mode)) {
-                if (!ShouldKeepPartialResolveFailure(mode)) {
-                    return false;
-                }
-                skippedMember = true;
-                continue;
-            }
-            if (!objectValue.Put(key.c_str(), childValue)) {
-                return false;
-            }
-            keptMember = true;
-        }
-        resolvedValue = objectValue;
-        if (ShouldKeepPartialResolveFailure(mode) && hadMember && skippedMember && !keptMember) {
-            return false;
-        }
-        return true;
+        return TryResolveJsonObject(value, context, depth, mode, resolvedValue);
     }
 
     if (value.IsArray()) {
-        std::unique_ptr<JsonAdapter> arrayAdapter = JsonAdapter::CreateArray();
-        if (arrayAdapter == nullptr) {
-            return false;
-        }
-        JsonValue arrayRoot = arrayAdapter->GetRoot();
-
-        for (int index = 0; index < value.GetArraySize(); ++index) {
-            JsonValue itemValue;
-            if (!ResolveJsonValueRecursivelyWithMode(value.GetArrayItem(index), context, depth + 1, itemValue, mode)) {
-                return false;
-            }
-            if (!arrayRoot.Append(itemValue)) {
-                return false;
-            }
-        }
-        resolvedValue = arrayRoot;
-        return true;
+        return TryResolveJsonArray(value, context, depth, mode, resolvedValue);
     }
 
 #ifdef ENABLE_EXPRESSION_ENGINE
-    if (context.allowExpression && value.IsString()) {
-        ResolvedValue expressionResolved = ResolveExpressionValue(value, context);
-        if (expressionResolved.source == ResolveSource::EXPRESSION) {
-            if (!expressionResolved.success || !expressionResolved.value.IsValid()) {
-                return false;
-            }
-            JsonValue clonedValue;
-            if (!CloneJsonValue(expressionResolved.value, clonedValue)) {
-                return false;
-            }
-            resolvedValue = clonedValue;
-            return true;
-        }
+    bool expressionHandled = false;
+    if (!TryResolveExpressionString(value, context, resolvedValue, expressionHandled)) {
+        return false;
+    }
+    if (expressionHandled) {
+        return true;
     }
 #endif
 
-    if (context.allowExpression && value.IsString()) {
-        std::optional<ResolvedValue> templateResolved = ResolveJsonPointerTemplateValue(value, context);
-        if (templateResolved.has_value()) {
-            if (!templateResolved->success || !templateResolved->value.IsValid()) {
-                return false;
-            }
-            JsonValue clonedValue;
-            if (!CloneJsonValue(templateResolved->value, clonedValue)) {
-                return false;
-            }
-            resolvedValue = clonedValue;
-            return true;
-        }
+    bool templateHandled = false;
+    if (!TryResolveTemplateString(value, context, resolvedValue, templateHandled)) {
+        return false;
+    }
+    if (templateHandled) {
+        return true;
     }
 
     JsonValue literalValue;
@@ -571,10 +659,73 @@ bool ResolveJsonValueRecursively(
     return ResolveJsonValueRecursivelyWithMode(value, context, depth, resolvedValue, RecursiveResolveMode::STRICT);
 }
 
-bool ResolveFunctionArgsWithPolicy(const JsonValue& value, const std::string& functionName,
-    const DynamicResolveContext& context, const ArgPath& path, int32_t depth, JsonValue& resolvedValue)
+bool ResolveFunctionArgsWithPolicy(
+    const JsonValue& value, const FunctionArgResolveContext& context, JsonValue& resolvedValue);
+
+bool ResolveObjectFunctionArgsWithPolicy(
+    const JsonValue& value, const FunctionArgResolveContext& context, JsonValue& resolvedValue)
 {
-    if (depth > MAX_DYNAMIC_RESOLVE_DEPTH) {
+    std::unique_ptr<JsonAdapter> objectAdapter = JsonAdapter::CreateObject();
+    if (objectAdapter == nullptr) {
+        return false;
+    }
+    JsonValue objectValue = objectAdapter->GetRoot();
+    for (JsonValue child = value.GetChild(); child.IsValid(); child = child.GetNext()) {
+        std::string key = child.GetKey();
+        if (key.empty()) {
+            continue;
+        }
+        JsonValue childValue;
+        FunctionArgResolveContext childContext = {
+            .functionName = context.functionName,
+            .dynamicContext = context.dynamicContext,
+            .path = AppendObjectArgPath(context.path, key),
+            .depth = context.depth + 1,
+        };
+        if (!ResolveFunctionArgsWithPolicy(child, childContext, childValue)) {
+            return false;
+        }
+        if (!objectValue.Put(key.c_str(), childValue)) {
+            return false;
+        }
+    }
+    resolvedValue = objectValue;
+    return true;
+}
+
+bool ResolveArrayFunctionArgsWithPolicy(
+    const JsonValue& value, const FunctionArgResolveContext& context, JsonValue& resolvedValue)
+{
+    std::unique_ptr<JsonAdapter> arrayAdapter = JsonAdapter::CreateArray();
+    if (arrayAdapter == nullptr) {
+        return false;
+    }
+    JsonValue arrayRoot = arrayAdapter->GetRoot();
+    ArgPath itemPath = AppendArrayItemArgPath(context.path);
+    int itemCount = value.GetArraySize();
+    for (int index = 0; index < itemCount; ++index) {
+        JsonValue itemValue;
+        FunctionArgResolveContext itemContext = {
+            .functionName = context.functionName,
+            .dynamicContext = context.dynamicContext,
+            .path = itemPath,
+            .depth = context.depth + 1,
+        };
+        if (!ResolveFunctionArgsWithPolicy(value.GetArrayItem(index), itemContext, itemValue)) {
+            return false;
+        }
+        if (!arrayRoot.Append(itemValue)) {
+            return false;
+        }
+    }
+    resolvedValue = arrayRoot;
+    return true;
+}
+
+bool ResolveFunctionArgsWithPolicy(
+    const JsonValue& value, const FunctionArgResolveContext& context, JsonValue& resolvedValue)
+{
+    if (context.depth > MAX_DYNAMIC_RESOLVE_DEPTH) {
         LOG_A2UI(LOG_WARN, "ResolveFunctionArgsWithPolicy: max depth exceeded");
         return false;
     }
@@ -587,64 +738,27 @@ bool ResolveFunctionArgsWithPolicy(const JsonValue& value, const std::string& fu
         return false;
     }
 
-    if (IsExpressionAllowedArgPath(functionName, path)) {
-        DynamicResolveContext argsContext = context;
-        argsContext.allowExpression = true;
-        return ResolveJsonValueRecursively(value, argsContext, depth, resolvedValue);
+    if (value.IsObject() && (value.Has("call") || HasOnlyPathDescriptorKey(value))) {
+        return ResolveJsonValueRecursively(value, context.dynamicContext, context.depth, resolvedValue);
     }
 
-    if (!MayContainExpressionAllowedArgPath(functionName, path)) {
+    if (IsExpressionAllowedArgPath(context.functionName, context.path)) {
+        DynamicResolveContext argsContext = context.dynamicContext;
+        argsContext.allowExpression = true;
+        return ResolveJsonValueRecursively(value, argsContext, context.depth, resolvedValue);
+    }
+
+    if (!MayContainExpressionAllowedArgPath(context.functionName, context.path) && !value.IsObject() &&
+        !value.IsArray()) {
         return CloneJsonValue(value, resolvedValue);
     }
 
     if (value.IsObject()) {
-        if (value.Has("call") || HasOnlyPathDescriptorKey(value)) {
-            return CloneJsonValue(value, resolvedValue);
-        }
-
-        std::unique_ptr<JsonAdapter> objectAdapter = JsonAdapter::CreateObject();
-        if (objectAdapter == nullptr) {
-            return false;
-        }
-        JsonValue objectValue = objectAdapter->GetRoot();
-        for (JsonValue child = value.GetChild(); child.IsValid(); child = child.GetNext()) {
-            std::string key = child.GetKey();
-            if (key.empty()) {
-                continue;
-            }
-            JsonValue childValue;
-            if (!ResolveFunctionArgsWithPolicy(
-                    child, functionName, context, AppendObjectArgPath(path, key), depth + 1, childValue)) {
-                return false;
-            }
-            if (!objectValue.Put(key.c_str(), childValue)) {
-                return false;
-            }
-        }
-        resolvedValue = objectValue;
-        return true;
+        return ResolveObjectFunctionArgsWithPolicy(value, context, resolvedValue);
     }
 
     if (value.IsArray()) {
-        std::unique_ptr<JsonAdapter> arrayAdapter = JsonAdapter::CreateArray();
-        if (arrayAdapter == nullptr) {
-            return false;
-        }
-        JsonValue arrayRoot = arrayAdapter->GetRoot();
-        ArgPath itemPath = AppendArrayItemArgPath(path);
-        int itemCount = value.GetArraySize();
-        for (int index = 0; index < itemCount; ++index) {
-            JsonValue itemValue;
-            if (!ResolveFunctionArgsWithPolicy(
-                    value.GetArrayItem(index), functionName, context, itemPath, depth + 1, itemValue)) {
-                return false;
-            }
-            if (!arrayRoot.Append(itemValue)) {
-                return false;
-            }
-        }
-        resolvedValue = arrayRoot;
-        return true;
+        return ResolveArrayFunctionArgsWithPolicy(value, context, resolvedValue);
     }
 
     return CloneJsonValue(value, resolvedValue);
@@ -658,7 +772,7 @@ ResolvedValue ResolvePathValue(const JsonValue& value, const DynamicResolveConte
     }
 
     std::string path = pathValue.GetStringValue("");
-    if (!IsValidDataPath(path)) {
+    if (!IsValidDataPath(path) && path.find('~') == std::string::npos) {
         return ResolvedValue::FailInvalid("path descriptor contains invalid path");
     }
 
@@ -667,9 +781,9 @@ ResolvedValue ResolvePathValue(const JsonValue& value, const DynamicResolveConte
         return ResolvedValue::FailPath(path, "data model unavailable");
     }
 
-    std::optional<JsonValue> valueOpt = dataModel->GetNode(path);
+    std::optional<JsonValue> valueOpt = dataModel->GetNode(path, true);
     if (!valueOpt.has_value()) {
-        DispatchDynamicResolveError(context, "path not found: " + path);
+        DispatchMissingPathError(context, path);
         return ResolvedValue::FailPath(path, "path not found");
     }
 
@@ -681,6 +795,62 @@ ResolvedValue ResolvePathValue(const JsonValue& value, const DynamicResolveConte
         return ResolvedValue::FailPath(path, "path value conversion failed");
     }
     return ResolvedValue::OkPath(resolvedJson, path);
+}
+
+bool ResolveFunctionCallArgs(const JsonValue& value, const DynamicResolveContext& context,
+    const std::string& functionName, JsonValue& resolvedArgs)
+{
+    JsonValue argsValue = value.GetItem("args");
+    if (!argsValue.IsValid()) {
+        return true;
+    }
+
+    FunctionArgResolveContext argsContext = {
+        .functionName = functionName,
+        .dynamicContext = context,
+        .path = ArgPath(),
+        .depth = 0,
+    };
+    return ResolveFunctionArgsWithPolicy(argsValue, argsContext, resolvedArgs);
+}
+
+ResolvedValue ExecuteBuiltinFunctionCall(const std::string& functionName, const JsonValue& resolvedArgs,
+    const DynamicResolveContext& context, const std::string& returnType)
+{
+    std::shared_ptr<FunctionCallInfo> normalizedCall =
+        std::make_shared<FunctionCallInfo>(functionName, resolvedArgs, returnType);
+    JsonValue normalizedArgs;
+    std::string normalizedReturnType = returnType;
+    bool normalized = FunctionBridge::GetInstance().NormalizeFunctionCall(
+        context.renderId, context.surfaceId, context.componentId, normalizedCall, normalizedArgs, normalizedReturnType);
+    if (!normalized) {
+        return ResolvedValue::FailFunctionCall(functionName, "builtin function schema normalize failed");
+    }
+
+    ResolvedValue nativeResult = NativeFunctionRegistry::GetInstance().Execute(
+        functionName, normalizedArgs, context, normalizedReturnType == "void" ? "" : normalizedReturnType);
+    if (!nativeResult.success) {
+        return nativeResult;
+    }
+    return ResolvedValue::OkFunctionCall(nativeResult.value, functionName);
+}
+
+ResolvedValue ExecuteLocalFunctionCall(const std::string& functionName, const JsonValue& resolvedArgs,
+    const DynamicResolveContext& context, const std::string& returnType)
+{
+    std::shared_ptr<FunctionCallInfo> functionCall =
+        std::make_shared<FunctionCallInfo>(functionName, resolvedArgs, returnType);
+    JsonValue functionResult;
+    bool invokeSuccess = FunctionBridge::GetInstance().InvokeForValue(
+        context.renderId, context.surfaceId, context.componentId, functionCall, functionResult);
+    if (!invokeSuccess) {
+        return ResolvedValue::FailFunctionCall(functionName, "local function invoke failed");
+    }
+
+    if (!functionResult.IsValid()) {
+        return ResolvedValue::FailFunctionCall(functionName, "local function return json conversion failed");
+    }
+    return ResolvedValue::OkFunctionCall(functionResult, functionName);
 }
 
 ResolvedValue ResolveFunctionCallValue(const JsonValue& value, const DynamicResolveContext& context)
@@ -696,45 +866,16 @@ ResolvedValue ResolveFunctionCallValue(const JsonValue& value, const DynamicReso
     }
 
     JsonValue resolvedArgs;
-    JsonValue argsValue = value.GetItem("args");
-    if (argsValue.IsValid()) {
-        if (!ResolveFunctionArgsWithPolicy(argsValue, functionName, context, ArgPath(), 0, resolvedArgs)) {
-            return ResolvedValue::FailFunctionCall(functionName, "failed to resolve function args");
-        }
+    if (!ResolveFunctionCallArgs(value, context, functionName, resolvedArgs)) {
+        return ResolvedValue::FailFunctionCall(functionName, "failed to resolve function args");
     }
     std::string returnType = value.GetString("returnType", "void");
 
     if (NativeFunctionRegistry::GetInstance().HasFunction(functionName)) {
-        std::shared_ptr<FunctionCallInfo> normalizedCall =
-            std::make_shared<FunctionCallInfo>(functionName, resolvedArgs, returnType);
-        JsonValue normalizedArgs;
-        std::string normalizedReturnType = returnType;
-        bool normalized = FunctionBridge::GetInstance().NormalizeFunctionCall(context.renderId, context.surfaceId,
-            context.componentId, normalizedCall, normalizedArgs, normalizedReturnType);
-        if (!normalized) {
-            return ResolvedValue::FailFunctionCall(functionName, "builtin function schema normalize failed");
-        }
-        ResolvedValue nativeResult = NativeFunctionRegistry::GetInstance().Execute(
-            functionName, normalizedArgs, context, normalizedReturnType == "void" ? "" : normalizedReturnType);
-        if (!nativeResult.success) {
-            return nativeResult;
-        }
-        return ResolvedValue::OkFunctionCall(nativeResult.value, functionName);
+        return ExecuteBuiltinFunctionCall(functionName, resolvedArgs, context, returnType);
     }
 
-    std::shared_ptr<FunctionCallInfo> functionCall =
-        std::make_shared<FunctionCallInfo>(functionName, resolvedArgs, returnType);
-    JsonValue functionResult;
-    bool invokeSuccess = FunctionBridge::GetInstance().InvokeForValue(
-        context.renderId, context.surfaceId, context.componentId, functionCall, functionResult);
-    if (!invokeSuccess) {
-        return ResolvedValue::FailFunctionCall(functionName, "local function invoke failed");
-    }
-
-    if (!functionResult.IsValid()) {
-        return ResolvedValue::FailFunctionCall(functionName, "local function return json conversion failed");
-    }
-    return ResolvedValue::OkFunctionCall(functionResult, functionName);
+    return ExecuteLocalFunctionCall(functionName, resolvedArgs, context, returnType);
 }
 
 std::shared_ptr<DataModel> GetDataModel(const DynamicResolveContext& context)
@@ -762,20 +903,28 @@ std::shared_ptr<DataModel> GetDataModel(const DynamicResolveContext& context)
     return surfaceSlot->GetBindingEngine()->GetOrCreateDataModel(context.surfaceId);
 }
 
+bool TryExtractPathDescriptor(const JsonValue& value, std::vector<std::string>& paths)
+{
+    if (!HasOnlyPathDescriptorKey(value)) {
+        return false;
+    }
+    JsonValue pathValue = value.GetItem("path");
+    if (pathValue.IsString()) {
+        std::string path = pathValue.GetStringValue("");
+        if (!path.empty() && std::find(paths.begin(), paths.end(), path) == paths.end()) {
+            paths.push_back(path);
+        }
+    }
+    return true;
+}
+
 void ExtractDataPathsRecursive(const JsonValue& value, std::vector<std::string>& paths)
 {
     if (!value.IsValid()) {
         return;
     }
     if (value.IsObject()) {
-        if (HasOnlyPathDescriptorKey(value)) {
-            JsonValue pathValue = value.GetItem("path");
-            if (pathValue.IsString()) {
-                std::string path = pathValue.GetStringValue("");
-                if (!path.empty() && std::find(paths.begin(), paths.end(), path) == paths.end()) {
-                    paths.push_back(path);
-                }
-            }
+        if (TryExtractPathDescriptor(value, paths)) {
             return;
         }
         for (JsonValue child = value.GetChild(); child.IsValid(); child = child.GetNext()) {
@@ -987,7 +1136,13 @@ std::shared_ptr<FunctionCallInfo> DynamicValueResolver::ResolveFunctionCallDescr
     JsonValue resolvedArgs;
     JsonValue argsValue = value.GetItem("args");
     if (argsValue.IsValid()) {
-        if (!ResolveFunctionArgsWithPolicy(argsValue, functionName, context, ArgPath(), 0, resolvedArgs)) {
+        FunctionArgResolveContext argsContext = {
+            .functionName = functionName,
+            .dynamicContext = context,
+            .path = ArgPath(),
+            .depth = 0,
+        };
+        if (!ResolveFunctionArgsWithPolicy(argsValue, argsContext, resolvedArgs)) {
             LOG_A2UI(LOG_WARN, "ResolveFunctionCallDescriptor: args resolve failed, function=%{public}s",
                 functionName.c_str());
             return nullptr;
@@ -996,6 +1151,11 @@ std::shared_ptr<FunctionCallInfo> DynamicValueResolver::ResolveFunctionCallDescr
 
     std::string returnType = value.GetString("returnType", "void");
     return std::make_shared<FunctionCallInfo>(functionName, resolvedArgs, returnType);
+}
+
+void DynamicValueResolver::ReportMissingPath(const DynamicResolveContext& context, const std::string& path)
+{
+    DispatchMissingPathError(context, path);
 }
 
 ResolvedValue DynamicValueResolver::Resolve(const JsonValue& value, const DynamicResolveContext& context)

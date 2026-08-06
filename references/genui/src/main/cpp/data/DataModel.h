@@ -64,15 +64,15 @@ public:
     void Update(const std::map<std::string, std::string>& data);
 
     // 新的更新方法：支持路径、删除和替换
-    void UpdateByPath(const std::string& path, const JsonValue& value);
-    void DeleteByPath(const std::string& path);
-    void ReplaceAll(const JsonValue& value);
+    bool UpdateByPath(const std::string& path, const JsonValue& value);
+    bool DeleteByPath(const std::string& path);
+    bool ReplaceAll(const JsonValue& value);
 
     // 处理 DataModelUpdate 请求
     void ProcessUpdate(const DataModelUpdate& updateRequest);
 
     // 获取 JsonValue 节点
-    std::optional<JsonValue> GetNode(const std::string& path) const;
+    std::optional<JsonValue> GetNode(const std::string& path, bool decodePointer = false) const;
 
     // 注册组件对某路径的兴趣
     void RegisterInterest(const std::string& path, std::shared_ptr<Component> component);
@@ -103,13 +103,19 @@ public:
 
 private:
     // 路径解析：将 "/user/name" 分割为 ["user", "name"]
-    std::vector<std::string> ParsePath(const std::string& path) const;
+    std::vector<std::string> ParsePath(const std::string& path, bool decodePointer = false) const;
 
     // 解析路径并获取父节点和最后一段键
     std::pair<JsonValue*, std::string> ResolvePathParent(JsonValue* node, const std::vector<std::string>& pathParts);
 
     // 检查路径是否被某个注册路径匹配
     bool IsPathAffected(const std::string& updatedPath, const std::string& registeredPath) const;
+    JsonValue BuildNotificationValue(const std::string& path) const;
+    std::vector<std::shared_ptr<Component>> CollectLiveSubscribers(
+        const std::vector<std::weak_ptr<Component>>& subscribers) const;
+    void NotifySubscribersForPath(const std::string& path, const JsonValue& valueToUpdate,
+        const std::vector<std::shared_ptr<Component>>& liveSubscribers) const;
+    void CleanupExpiredSubscribers(const std::string& path);
 
     std::string surfaceId_;
     std::shared_ptr<JsonValue> root_;

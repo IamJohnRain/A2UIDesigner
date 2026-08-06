@@ -21,6 +21,8 @@
 
 #include "BindingEngine.h"
 
+#include <algorithm>
+
 #include "utils/LogA2UI.h"
 
 #include "PathValidator.h"
@@ -47,6 +49,25 @@ bool HasPendingComponent(
         }
     }
     return false;
+}
+
+using ComponentIdIndex = std::unordered_map<std::string, std::unordered_set<std::string>>;
+
+void InsertComponentIntoIndex(ComponentIdIndex& index, const std::string& key, const std::string& componentId)
+{
+    index[key].insert(componentId);
+}
+
+void EraseComponentFromIndex(ComponentIdIndex& index, const std::string& key, const std::string& componentId)
+{
+    auto it = index.find(key);
+    if (it == index.end()) {
+        return;
+    }
+    it->second.erase(componentId);
+    if (it->second.empty()) {
+        index.erase(it);
+    }
 }
 
 } // namespace
@@ -91,13 +112,13 @@ std::shared_ptr<DataModel> BindingEngine::GetOrCreateDataModel(const std::string
     return dataModel;
 }
 
-void BindingEngine::UpdateDataModelByPath(const std::string& surfaceId, const std::string& path, const JsonValue& value)
+bool BindingEngine::UpdateDataModelByPath(const std::string& surfaceId, const std::string& path, const JsonValue& value)
 {
     LOG_A2UI(LOG_INFO, "UpdateDataModelByPath: surfaceId=%{public}s, path=%{public}s", surfaceId.c_str(), path.c_str());
 
     if (!IsValidDataPath(path)) {
         LOG_A2UI(LOG_WARN, "UpdateDataModelByPath: invalid path=%{public}s", path.c_str());
-        return;
+        return false;
     }
 
     int32_t depth = DataModel::MeasureJsonDepth(value);
@@ -108,29 +129,30 @@ void BindingEngine::UpdateDataModelByPath(const std::string& surfaceId, const st
     }
 
     auto dataModel = GetOrCreateDataModel(surfaceId);
-    dataModel->UpdateByPath(path, value);
-    dataModelReady_ = true;
+    bool success = dataModel->UpdateByPath(path, value);
+    dataModelReady_ = dataModelReady_ || success;
+    return success;
 }
 
-void BindingEngine::DeleteDataModelByPath(const std::string& surfaceId, const std::string& path)
+bool BindingEngine::DeleteDataModelByPath(const std::string& surfaceId, const std::string& path)
 {
     LOG_A2UI(LOG_INFO, "DeleteDataModelByPath: surfaceId=%{public}s, path=%{public}s", surfaceId.c_str(), path.c_str());
 
     if (!IsValidDataPath(path)) {
         LOG_A2UI(LOG_WARN, "DeleteDataModelByPath: invalid path=%{public}s", path.c_str());
-        return;
+        return false;
     }
 
     auto it = dataModels_.find(surfaceId);
     if (it == dataModels_.end()) {
         LOG_A2UI(LOG_WARN, "DataModel not found for surfaceId: %{public}s", surfaceId.c_str());
-        return;
+        return true;
     }
 
-    it->second->DeleteByPath(path);
+    return it->second->DeleteByPath(path);
 }
 
-void BindingEngine::ReplaceDataModel(const std::string& surfaceId, const JsonValue& value)
+bool BindingEngine::ReplaceDataModel(const std::string& surfaceId, const JsonValue& value)
 {
     LOG_A2UI(LOG_INFO, "ReplaceDataModel: surfaceId=%{public}s", surfaceId.c_str());
 
@@ -141,8 +163,9 @@ void BindingEngine::ReplaceDataModel(const std::string& surfaceId, const JsonVal
     }
 
     auto dataModel = GetOrCreateDataModel(surfaceId);
-    dataModel->ReplaceAll(value);
-    dataModelReady_ = true;
+    bool success = dataModel->ReplaceAll(value);
+    dataModelReady_ = dataModelReady_ || success;
+    return success;
 }
 
 void BindingEngine::ProcessUpdate(const DataModelUpdate& updateRequest)
@@ -255,6 +278,7 @@ void BindingEngine::BindComponentImmediate(
             comp->OnDataUpdate(binding.propertyName_, nodeOpt.value());
         } else {
             LOG_A2UI(LOG_INFO, "[WARN] Path not found: %{public}s ", binding.dataPath_.c_str());
+            comp->OnDataUpdate(binding.propertyName_, JsonValue());
         }
     }
 }
@@ -293,38 +317,54 @@ void BindingEngine::RegisterBindingPaths(
     auto dataModel = GetOrCreateDataModel(surfaceId);
     for (const auto& binding : bindings) {
         if (binding.type_ == BindingType::EXPRESSION) {
-            for (const auto& varName : binding.globalVarDeps_) {
-                if (varName == "__dataModel") {
-                    if (!binding.dataPath_.empty()) {
-                        LOG_A2UI(LOG_INFO, "Expression binding (dataModel): %{public}s -> %{public}s",
-                            binding.propertyName_.c_str(), binding.dataPath_.c_str());
-                        bindingIndex_[binding.dataPath_].insert(comp->GetComponentId());
-                        dataModel->RegisterInterest(binding.dataPath_, comp);
-                    }
-                } else {
-                    LOG_A2UI(LOG_INFO, "Expression binding (global): %{public}s -> %{public}s",
-                        binding.propertyName_.c_str(), varName.c_str());
-                    globalVarBindingIndex_[varName].insert(comp->GetComponentId());
-                }
-            }
+            RegisterExpressionBindingPaths(comp, dataModel, binding);
         } else {
-            if (!binding.dataPath_.empty()) {
-                LOG_A2UI(LOG_INFO, "Binding: %{public}s -> binding.dataPath_: %{public}s",
-                    binding.propertyName_.c_str(), binding.dataPath_.c_str());
-                bindingIndex_[binding.dataPath_].insert(comp->GetComponentId());
-                dataModel->RegisterInterest(binding.dataPath_, comp);
-            }
-            if (binding.type_ == BindingType::FUNCTION_CALL) {
-                for (const auto& varName : binding.globalVarDeps_) {
-                    if (varName.empty() || varName == "__dataModel") {
-                        continue;
-                    }
-                    LOG_A2UI(LOG_INFO, "FunctionCall binding (global): %{public}s -> %{public}s",
-                        binding.propertyName_.c_str(), varName.c_str());
-                    globalVarBindingIndex_[varName].insert(comp->GetComponentId());
-                }
-            }
+            RegisterNonExpressionBindingPaths(comp, dataModel, binding);
         }
+    }
+}
+
+void BindingEngine::RegisterExpressionBindingPaths(
+    const std::shared_ptr<Component>& comp, const std::shared_ptr<DataModel>& dataModel, const DataBinding& binding)
+{
+    const std::string componentId = comp->GetComponentId();
+    for (const auto& varName : binding.globalVarDeps_) {
+        if (varName != "__dataModel") {
+            LOG_A2UI(LOG_INFO, "Expression binding (global): %{public}s -> %{public}s", binding.propertyName_.c_str(),
+                varName.c_str());
+            InsertComponentIntoIndex(globalVarBindingIndex_, varName, componentId);
+            continue;
+        }
+        if (binding.dataPath_.empty()) {
+            continue;
+        }
+        LOG_A2UI(LOG_INFO, "Expression binding (dataModel): %{public}s -> %{public}s", binding.propertyName_.c_str(),
+            binding.dataPath_.c_str());
+        InsertComponentIntoIndex(bindingIndex_, binding.dataPath_, componentId);
+        dataModel->RegisterInterest(binding.dataPath_, comp);
+    }
+}
+
+void BindingEngine::RegisterNonExpressionBindingPaths(
+    const std::shared_ptr<Component>& comp, const std::shared_ptr<DataModel>& dataModel, const DataBinding& binding)
+{
+    if (!binding.dataPath_.empty()) {
+        LOG_A2UI(LOG_INFO, "Binding: %{public}s -> binding.dataPath_: %{public}s", binding.propertyName_.c_str(),
+            binding.dataPath_.c_str());
+        InsertComponentIntoIndex(bindingIndex_, binding.dataPath_, comp->GetComponentId());
+        dataModel->RegisterInterest(binding.dataPath_, comp);
+    }
+    if (binding.type_ != BindingType::FUNCTION_CALL) {
+        return;
+    }
+    const std::string componentId = comp->GetComponentId();
+    for (const auto& varName : binding.globalVarDeps_) {
+        if (varName.empty() || varName == "__dataModel") {
+            continue;
+        }
+        LOG_A2UI(LOG_INFO, "FunctionCall binding (global): %{public}s -> %{public}s", binding.propertyName_.c_str(),
+            varName.c_str());
+        InsertComponentIntoIndex(globalVarBindingIndex_, varName, componentId);
     }
 }
 
@@ -335,57 +375,48 @@ void BindingEngine::UnregisterBindingPaths(
         return;
     }
 
+    const std::string componentId = comp->GetComponentId();
     auto dataModel = GetOrCreateDataModel(surfaceId);
     for (const auto& binding : bindings) {
         if (binding.type_ == BindingType::EXPRESSION) {
-            for (const auto& varName : binding.globalVarDeps_) {
-                if (varName == "__dataModel") {
-                    if (!binding.dataPath_.empty()) {
-                        auto bindingIt = bindingIndex_.find(binding.dataPath_);
-                        if (bindingIt != bindingIndex_.end()) {
-                            bindingIt->second.erase(comp->GetComponentId());
-                            if (bindingIt->second.empty()) {
-                                bindingIndex_.erase(bindingIt);
-                            }
-                        }
-                        dataModel->UnregisterInterest(binding.dataPath_, comp->GetComponentId());
-                    }
-                } else {
-                    auto globalIt = globalVarBindingIndex_.find(varName);
-                    if (globalIt != globalVarBindingIndex_.end()) {
-                        globalIt->second.erase(comp->GetComponentId());
-                        if (globalIt->second.empty()) {
-                            globalVarBindingIndex_.erase(globalIt);
-                        }
-                    }
-                }
-            }
+            UnregisterExpressionBindingPaths(dataModel, binding, componentId);
         } else {
-            if (!binding.dataPath_.empty()) {
-                auto bindingIt = bindingIndex_.find(binding.dataPath_);
-                if (bindingIt != bindingIndex_.end()) {
-                    bindingIt->second.erase(comp->GetComponentId());
-                    if (bindingIt->second.empty()) {
-                        bindingIndex_.erase(bindingIt);
-                    }
-                }
-                dataModel->UnregisterInterest(binding.dataPath_, comp->GetComponentId());
-            }
-            if (binding.type_ == BindingType::FUNCTION_CALL) {
-                for (const auto& varName : binding.globalVarDeps_) {
-                    if (varName.empty() || varName == "__dataModel") {
-                        continue;
-                    }
-                    auto globalIt = globalVarBindingIndex_.find(varName);
-                    if (globalIt != globalVarBindingIndex_.end()) {
-                        globalIt->second.erase(comp->GetComponentId());
-                        if (globalIt->second.empty()) {
-                            globalVarBindingIndex_.erase(globalIt);
-                        }
-                    }
-                }
-            }
+            UnregisterNonExpressionBindingPaths(dataModel, binding, componentId);
         }
+    }
+}
+
+void BindingEngine::UnregisterExpressionBindingPaths(
+    const std::shared_ptr<DataModel>& dataModel, const DataBinding& binding, const std::string& componentId)
+{
+    for (const auto& varName : binding.globalVarDeps_) {
+        if (varName != "__dataModel") {
+            EraseComponentFromIndex(globalVarBindingIndex_, varName, componentId);
+            continue;
+        }
+        if (binding.dataPath_.empty()) {
+            continue;
+        }
+        EraseComponentFromIndex(bindingIndex_, binding.dataPath_, componentId);
+        dataModel->UnregisterInterest(binding.dataPath_, componentId);
+    }
+}
+
+void BindingEngine::UnregisterNonExpressionBindingPaths(
+    const std::shared_ptr<DataModel>& dataModel, const DataBinding& binding, const std::string& componentId)
+{
+    if (!binding.dataPath_.empty()) {
+        EraseComponentFromIndex(bindingIndex_, binding.dataPath_, componentId);
+        dataModel->UnregisterInterest(binding.dataPath_, componentId);
+    }
+    if (binding.type_ != BindingType::FUNCTION_CALL) {
+        return;
+    }
+    for (const auto& varName : binding.globalVarDeps_) {
+        if (varName.empty() || varName == "__dataModel") {
+            continue;
+        }
+        EraseComponentFromIndex(globalVarBindingIndex_, varName, componentId);
     }
 }
 
@@ -415,13 +446,8 @@ void BindingEngine::NotifyGlobalVariableChanged(const std::string& varName)
                 continue;
             }
 
-            bool depends = false;
-            for (const auto& dep : binding.globalVarDeps_) {
-                if (dep == varName) {
-                    depends = true;
-                    break;
-                }
-            }
+            bool depends = std::find(binding.globalVarDeps_.begin(), binding.globalVarDeps_.end(), varName) !=
+                           binding.globalVarDeps_.end();
             if (!depends) {
                 continue;
             }

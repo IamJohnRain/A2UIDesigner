@@ -18,6 +18,7 @@
 
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -88,6 +89,9 @@ private:
     Mode mode_ = Mode::EAGER;
     std::shared_ptr<ListAdapterNode> adapterNode_;
     std::vector<ArkUI_NodeHandle> listItems_;
+
+    std::optional<int32_t> ResolveLazyAdapterItemCount(const LazyAdapterConfig& config) const;
+    void ApplyLazyAdapterConfig(const LazyAdapterConfig& config, int32_t itemCount);
 
     // Theme cache
     std::weak_ptr<ListTheme> cachedTheme_;

@@ -13,15 +13,15 @@
  * limitations under the License.
  */
 
-import { CatalogCategory, CatalogItem, EMPTY_COMPONENT_BUILDER } from "../../base/CatalogItem";
-import { SchemaResourceLoader } from "../../schema/SchemaResourceLoader";
-import { SchemaProvider } from "../../types/types";
+import { CatalogCategory, CatalogItem, EMPTY_COMPONENT_BUILDER } from '../../base/CatalogItem';
+import { SchemaResourceLoader } from '../../schema/SchemaResourceLoader';
+import { SchemaProvider } from '../../types/types';
 
 export class A2UICard {
   private constructor() {
   }
 
-  private static type: string = "Card";
+  private static type: string = 'Card';
 
   private static schemaProvider: SchemaProvider = (version: string) => {
     return SchemaResourceLoader.loadA2UISchema(version, 'components/Card.json');

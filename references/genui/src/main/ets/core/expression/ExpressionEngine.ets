@@ -15,12 +15,12 @@
 
 import nativeEngine from 'liba2ui_native.so';
 
-export type ExpressionResultType = 'string' | 'number' | 'boolean' | 'undefined';
+export type ExpressionResultType = 'string' | 'number' | 'boolean' | 'object' | 'array' | 'null' | 'undefined';
 
 export interface ExpressionEvaluateResult {
   success: boolean;
   type: ExpressionResultType;
-  value?: string | number | boolean;
+  value?: string | number | boolean | null | Object | Object[];
 }
 
 interface NativeExpressionEngine {

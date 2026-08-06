@@ -1,5 +1,7 @@
 # ALT（A2UI Layout Tree）自动布局协议
 
+> 自动主题是视觉基线的一部分：编译器必须为每张卡片根容器生成主题定义的多停靠渐变，并为主操作生成配套渐变。ALT 只允许模型选择主题名；颜色、渐变、边框、字重、尺寸和间距均不得由模型指定。
+
 ## 1. 定位
 
 ALT 是 A2UI Form 卡片的紧凑结构意图协议。它面向“小模型输入 TaskSpec、输出布局树”的训练与推理场景，只表达：
@@ -29,6 +31,8 @@ ALT 的首要目标是降低布局自由度，避免文字溢出、组件重叠�
 ASC（A2UI Semantic Companion）不是补丁或残差。它只补充无法放进纯布局树的节点语义，不保存 DataModel、组件样式或完整事件/素材对象。
 
 所有文本文件使用 UTF-8。ALT 与 ASC 规范化输出使用 LF；解析器同时接受 LF 和 CRLF。
+
+模型请求中的上下文分为四类：`TASK_CONTEXT` 只表达卡片尺寸和任务元数据，用户消息只表达业务意图，`POLICY_CONTEXT` 由 profile 和转换器能力生成硬约束、文本角色和能力边界，`REFERENCE_CONTEXT` 只提供递归展开后的可绑定标量字段、素材索引和事件索引。完整 TaskSpec 仅供脚本内部使用，不作为模型上下文；模型不得从原始候选对象推导或复制路径、事件参数或样式。
 
 ## 3. 最小示例
 
@@ -73,7 +77,7 @@ theme     ::= "neutral-light" | "ambient-light" | "focus-dark"
 - 文件直接从唯一根节点开始，不使用协议头、版本头或注释；
 - 每层固定缩进两个空格，禁止 Tab 和跨层跳级；
 - 节点 ID 全树唯一；
-- root 只能是 `Row` 或 `Column`，且必须同时声明 `card` 和 `theme`；
+- 自动训练输出的 root 必须是 `Column`，且必须同时声明 `card` 和 `theme`；根 `Row` 不再进入自动协议；
 - `card`、`theme` 只能出现在 root；
 - 叶子节点必须声明 `role`；容器可省略 `role`；
 - 自动 ALT 禁止 `Stack`。叠加属于编译器保留能力；
@@ -93,7 +97,7 @@ Column root card=2x2 theme=neutral-light pad=12 bg=#FFFFFFFF
 推荐角色：
 
 ```text
-shell group collection item title primary status metric support meta action asset selection separator
+shell group collection item title primary status warning error metric support meta action asset selection separator
 ```
 
 角色用于排版和主题映射，不写入 DSL：
@@ -102,11 +106,12 @@ shell group collection item title primary status metric support meta action asse
 | --- | --- | --- |
 | `title` | 卡片标题、对象名 | 中等字重，必要时最多两行 |
 | `primary` | 唯一主值或主状态 | 最大视觉层级；全卡最多一个 |
-| `status` / `metric` | 状态或次级指标 | 中等字号与字重 |
+| `status` / `metric` | 普通状态或次级指标 | 中等字号与字重，单行受保护 |
+| `warning` / `error` | 危险、警告或错误状态 | 主题 warning/error 色，单行受保护 |
 | `support` / `meta` | 支撑信息 | 较小字号，空间不足时优先收敛 |
 | `action` | CTA | 按按钮原生内边距和文案测量固有尺寸 |
 | `asset` | 语义 SVG | 按层级推断正方形尺寸和主题 `fillColor` |
-| `selection` | Checkbox | 使用固定内部控件预算 |
+| `selection` | 已选状态或逐项选择 | 2x4 选择模式使用 Checkbox；摘要模式使用 Text |
 | `separator` | Divider | 根据父布局方向推断轴向 |
 
 同一卡片只服务一个对象或主问题，同一事实只由一个节点主承载。
@@ -159,9 +164,11 @@ GenUI Image 新增的 `styles.fillColor` 只接受静态 `#RRGGBB` 或 `#AARRGGB
 
 root 固定裁切，背景由主题提供。Row 横向分配空间，Column 纵向分配空间；所有子项、gap 和 root padding 都进入预算。
 
+自动训练输出的 root 固定为 Column，但 root 只是卡片外壳，不代表所有内容都必须纵向堆叠。`2x2` 通常采用紧凑的纵向结构，Row 主要用于图标和标题；当存在标题/图标、两个事实和一个动作时，优先使用 `root Column -> Row header + Column status_group + Button`，`status_group` 最多放两个 Text。不要为两个相关事实增加嵌套 Row；第三个事实应合并为一个短 support 或删除。`2x4` 是横向画布；当卡片存在两个独立信息组时，应优先在 root 下使用一个 Row，再由 Row 放置左右两个 Column 分组。Row 可以包含语义分组容器，Column 负责组内纵向排列；只有一个信息组时不强行增加 Row。
+
 ### 8.2 文本
 
-编译器用 Unicode East Asian Width 和保守的英文、数字、空格权重计算“中文等价单位”，再结合角色选择字号、字重和最大行数。标题、主值、状态和 CTA 是受保护文本，不通过裁剪、省略或覆盖解决溢出。
+编译器用 Unicode East Asian Width 和保守的英文、数字、空格权重计算“中文等价单位”，再结合角色选择字号、字重和最大行数。标题、主值、状态、warning、error 和 CTA 是受保护文本，不通过裁剪、省略或覆盖解决溢出。`status`、`warning`、`error`、`primary`、`metric` 和 `action` 只能使用单行短文案；多个事实不能拼成一个受保护状态行。放不下时应缩短或删除低优先级事实，较长动态字段才可降级为 `support`。
 
 动态绑定优先使用 TaskSpec `sampleValue` 测量。复杂表达式无法静态求值时使用语义回退并在布局报告中给出 warning。
 
@@ -178,6 +185,8 @@ GenUI Button 核心默认参数保持不变：
 
 ### 8.4 Checkbox
 
+自动协议与 legacy Checkbox 使用不同的布局预算：2x2 不允许 Checkbox；2x4 在明确存在逐项选择事实时允许最多三个 compact Checkbox。自动 Checkbox 使用 22vp 外框、20vp 控件和 14fp 单行标签，legacy Checkbox 仍使用 48vp 固有高度。
+
 Checkbox 不能通过 DSL 可靠缩放内部控件。profile 按以下固定能力预算：
 
 - 外层固有高度 `48vp`；
@@ -188,9 +197,9 @@ Checkbox 不能通过 DSL 可靠缩放内部控件。profile 按以下固定能�
 
 因此：
 
-- `2x2` 禁止 Checkbox；
-- `2x4` 最多一个；
-- 只有明确的勾选、选择或布尔设置才使用；
+- 自动训练 2x4 输出可使用 Checkbox；`bind=/booleanPath` 绑定选中状态，动态 `label="{{ ${/labelPath} }}"` 绑定选项文案。没有对应布尔字段时不得伪造 Checkbox；没有切换事件时仍保留数据绑定状态，不凭空生成事件。
+- 2x4 逐项选择优先使用 `Column root -> Row main_row + Row footer`；`main_row` 放摘要和最多三个 Checkbox，`footer` 放 warning Text 和 Button。Button 可以是 Column 或 footer Row 的直接子节点。
+- 2x2 或无法表达逐项状态时，才使用一个包含 selectedCount/totalCount 的非交互选择摘要。
 - 只展示状态使用 Text，表达动作使用 Button；
 - 无法满足 `48vp` 高度和完整标签宽度时编译失败，不缩小内部控件。
 
@@ -199,8 +208,7 @@ Checkbox 不能通过 DSL 可靠缩放内部控件。profile 按以下固定能�
 - Image：按 `role` 推断 `18-56vp` 正方形尺寸；
 - Progress：主进度使用 ring，支撑进度使用 linear，并推断宽高；
 - Divider：Row 子项推断为竖线，其余推断为横线；
-- List：仅 `2x4` 可用，最多一个，最多规划三个可见项；
-- Repeat：只用于 List/Row/Column 的单一重复模板，集合路径进入 ASC/TaskSpec，不进入 ALT。
+- List/Repeat：自动训练输出暂不使用，集合模板能力仅用于既有 DSL 兼容。
 
 ## 9. 结构与内容容量
 
@@ -212,27 +220,33 @@ Checkbox 不能通过 DSL 可靠缩放内部控件。profile 按以下固定能�
 | Button | 1 | 2 |
 | Image | 2 | 3 |
 | Progress | 1 | 2 |
-| Checkbox | 0 | 1 |
-| List | 0 | 1 |
+| Checkbox（自动训练） | 0 | 3 |
+| List（自动训练） | 0 | 0 |
 | 可见文本预算 | 32 单位 | 72 单位 |
 
-普通 Row/Column 最多三个直接子节点，禁止空容器和未挂载节点。放不下时应在模型输出阶段依次删除 meta、次要 asset、弱 support、第二动作和重复事实，而不是输出更多样式参数。
+包括 root 在内的每个 Row/Column 最多三个直接子节点，禁止空容器和未挂载节点。Row 可以包含 Column 等语义分组容器；2x4 选择卡应优先使用 main/footer 两个 Row，避免把 warning 和 Button 塞进一个全高的控制 Column 造成空白。放不下时应在模型输出阶段依次删除 meta、次要 asset、弱 support、第二动作和重复事实，而不是输出更多样式参数。
 
 ## 10. ASC 语法
 
 ASC 每行使用 `Component node_id key=value`，只输出存在语义补充的节点，并严格遵循 ALT 前序顺序。
 
-| 组件 | 允许字段 |
+| 自动训练组件 | 允许字段 |
 | --- | --- |
 | Text | `text`、`bind`、`expr` |
 | Image | `asset` |
 | Progress | `value`、`total` |
-| Button | `label`、`event` |
-| Checkbox | `label`、`value`、`group`、`bind`、`select`、`event` |
+| Button | `label`、`bind`、`event` |
+
+| Checkbox | `label`、`bind`、`event` |
+
+List 和 Repeat 仍可由兼容路径读取，但不属于自动训练输出；Checkbox 在 2x4 自动训练输出中属于受限组件。
 
 约束：
 
-- `bind`、`value`、`total` 使用 JSON Pointer；复杂绑定才用完整 `expr`；
+- `bind`、`value`、`total` 使用 JSON Pointer；复杂绑定才用完整 `expr`；Button 使用短静态文案或标量 `bind`，并且必须有 `event`；Checkbox 的 `bind` 必须指向 boolean 标量；
+- Checkbox 的动态 `label` 使用完整 `{{ ... }}` 表达式，每个 `${/path}` 必须指向 REFERENCE_CONTEXT 中对应的标量标签字段；
+- Text 的 `bind` 以及 Progress 的 `value`/`total` 必须精确指向 TaskSpec 中有标量 `sampleValue` 的叶子字段；不得绑定对象、数组、父路径或猜测路径，否则编译失败；
+- Text 的自动 `expr` 支持标量 `${/path}`、字符串字面量和 `+` 拼接；编译器会用 sample DataModel 求值测量，但生成的 DSL 仍保留原始表达式。例如开始时间和结束时间应由一个 Text 同时引用两个字段，而不是拆成两个窄文本节点；
 - `asset=N` 和 `event=N` 只引用 TaskSpec 候选索引；
 - ASC 不复制素材路径、完整事件、DataModel、样式、尺寸或颜色；
 - ASC 节点必须与 ALT 中同 ID 节点的组件类型一致；
@@ -246,8 +260,8 @@ DataModel 始终由 TaskSpec `dataModelSchema.sampleValue` 递归生成。
 
 1. 校验 ALT 语法、主题、卡片规格、层级和组件数量；
 2. 校验 ASC 节点映射及 SVG/事件索引；
-3. 从 TaskSpec 生成 sample DataModel 并解析可测量文案；
-4. 按 profile 测量叶子组件固有尺寸；
+3. 从 TaskSpec 生成 sample DataModel，解析可测量文案和复合 Text 表达式；
+4. 按 profile 测量叶子组件固有尺寸，并在可用空间内选择最大的可读字号；
 5. 自顶向下分配 Row/Column 空间；
 6. 应用主题，生成具体样式与 SVG `fillColor`；
 7. 执行静态布局检查并写布局报告；

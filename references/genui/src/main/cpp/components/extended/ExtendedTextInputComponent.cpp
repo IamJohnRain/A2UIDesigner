@@ -60,6 +60,8 @@ constexpr uint32_t TEXT_INPUT_LIGHT_PLACEHOLDER_COLOR = 0x99182431u;
 constexpr uint32_t TEXT_INPUT_DARK_PLACEHOLDER_COLOR = 0x99FFFFFFu;
 constexpr uint32_t TEXT_INPUT_LIGHT_CARET_COLOR = 0xFF007DFFu;
 constexpr uint32_t TEXT_INPUT_DARK_CARET_COLOR = 0xFF5291FFu;
+constexpr uint32_t TEXT_INPUT_LIGHT_BACKGROUND_COLOR = 0x0C000000u;
+constexpr uint32_t TEXT_INPUT_DARK_BACKGROUND_COLOR = 0x19FFFFFFu;
 constexpr uint32_t TEXT_INPUT_LIGHT_SELECTED_BACKGROUND_COLOR = 0x33007DFFu;
 constexpr uint32_t TEXT_INPUT_DARK_SELECTED_BACKGROUND_COLOR = 0x33006CDEu;
 constexpr uint32_t TEXT_INPUT_LIGHT_UNDERLINE_COLOR = 0x33182431u;
@@ -91,6 +93,11 @@ uint32_t GetDefaultTextInputCaretColor(ThemeMode mode)
     return mode == ThemeMode::DARK ? TEXT_INPUT_DARK_CARET_COLOR : TEXT_INPUT_LIGHT_CARET_COLOR;
 }
 
+uint32_t GetDefaultTextInputBackgroundColor(ThemeMode mode)
+{
+    return mode == ThemeMode::DARK ? TEXT_INPUT_DARK_BACKGROUND_COLOR : TEXT_INPUT_LIGHT_BACKGROUND_COLOR;
+}
+
 uint32_t GetDefaultTextInputSelectedBackgroundColor(ThemeMode mode)
 {
     return mode == ThemeMode::DARK ? TEXT_INPUT_DARK_SELECTED_BACKGROUND_COLOR
@@ -112,25 +119,34 @@ bool IsSupportedUnderlineColorMember(const std::string& key)
     return key == "typing" || key == "normal" || key == "error" || key == "disable";
 }
 
+float GetFontDensityScale()
+{
+    float densityPixels = 0.0F;
+    if (ArkUIOHApiAdapter::GetDefaultDisplayDensityPixels(&densityPixels) != DISPLAY_MANAGER_OK) {
+        return 1.0F;
+    }
+    float scaledDensity = 0.0F;
+    if (ArkUIOHApiAdapter::GetDefaultDisplayScaledDensity(&scaledDensity) != DISPLAY_MANAGER_OK) {
+        return 1.0F;
+    }
+    if (!std::isfinite(densityPixels) || densityPixels <= 0.0F) {
+        return 1.0F;
+    }
+    if (!std::isfinite(scaledDensity) || scaledDensity <= 0.0F) {
+        return 1.0F;
+    }
+    return scaledDensity / densityPixels;
+}
+
 bool ConvertDimensionToFloat(const StyleDimension& dimension, float& value)
 {
     switch (dimension.unit) {
         case StyleDimensionUnit::VP:
             value = dimension.value;
             return true;
-        case StyleDimensionUnit::FP: {
-            float densityScale = 1.0F;
-            float densityPixels = 0.0F;
-            float scaledDensity = 0.0F;
-            if (ArkUIOHApiAdapter::GetDefaultDisplayDensityPixels(&densityPixels) == DISPLAY_MANAGER_OK &&
-                ArkUIOHApiAdapter::GetDefaultDisplayScaledDensity(&scaledDensity) == DISPLAY_MANAGER_OK &&
-                std::isfinite(densityPixels) && densityPixels > 0.0F && std::isfinite(scaledDensity) &&
-                scaledDensity > 0.0F) {
-                densityScale = scaledDensity / densityPixels;
-            }
-            value = dimension.value * densityScale;
+        case StyleDimensionUnit::FP:
+            value = dimension.value * GetFontDensityScale();
             return std::isfinite(value);
-        }
         default:
             return false;
     }
@@ -207,38 +223,21 @@ bool IsNestedDynamicDescriptor(const JsonValue& value)
 
 A2UITextInputType ParseTextInputTypeToken(const std::string& rawValue)
 {
+    static const std::map<std::string, A2UITextInputType> inputTypes = {
+        { "number", A2UITextInputType::NUMBER },
+        { "phonenumber", TEXT_INPUT_TYPE_PHONE_NUMBER },
+        { "email", TEXT_INPUT_TYPE_EMAIL },
+        { "password", A2UITextInputType::PASSWORD },
+        { "numberpassword", TEXT_INPUT_TYPE_NUMBER_PASSWORD },
+        { "screenlockpassword", TEXT_INPUT_TYPE_SCREEN_LOCK_PASSWORD },
+        { "username", TEXT_INPUT_TYPE_USER_NAME },
+        { "newpassword", TEXT_INPUT_TYPE_NEW_PASSWORD },
+        { "numberdecimal", TEXT_INPUT_TYPE_NUMBER_DECIMAL },
+        { "onetimecode", TEXT_INPUT_TYPE_ONE_TIME_CODE },
+    };
     std::string token = NormalizeToken(rawValue);
-    if (token == "number") {
-        return A2UITextInputType::NUMBER;
-    }
-    if (token == "phonenumber") {
-        return TEXT_INPUT_TYPE_PHONE_NUMBER;
-    }
-    if (token == "email") {
-        return TEXT_INPUT_TYPE_EMAIL;
-    }
-    if (token == "password") {
-        return A2UITextInputType::PASSWORD;
-    }
-    if (token == "numberpassword") {
-        return TEXT_INPUT_TYPE_NUMBER_PASSWORD;
-    }
-    if (token == "screenlockpassword") {
-        return TEXT_INPUT_TYPE_SCREEN_LOCK_PASSWORD;
-    }
-    if (token == "username") {
-        return TEXT_INPUT_TYPE_USER_NAME;
-    }
-    if (token == "newpassword") {
-        return TEXT_INPUT_TYPE_NEW_PASSWORD;
-    }
-    if (token == "numberdecimal") {
-        return TEXT_INPUT_TYPE_NUMBER_DECIMAL;
-    }
-    if (token == "onetimecode") {
-        return TEXT_INPUT_TYPE_ONE_TIME_CODE;
-    }
-    return A2UITextInputType::NORMAL;
+    auto it = inputTypes.find(token);
+    return it == inputTypes.end() ? A2UITextInputType::NORMAL : it->second;
 }
 
 bool ParseWordBreak(const JsonValue& value, A2UIWordBreak& wordBreak)
@@ -469,72 +468,82 @@ void ExtendedTextInputComponent::ApplyPrivateAttributes(const JsonValue& descrip
 
 PropertyDeclaration ExtendedTextInputComponent::GetPrivatePropertyDeclaration(const std::string& propertyName)
 {
-    static const std::map<std::string, std::function<PropertyDeclaration(ExtendedTextInputComponent&)>> declarations = {
-        { "text",
-            [](ExtendedTextInputComponent& component) {
-                return PropertyDeclaration { .name = "text",
-                    .type = PropertyValueType::STRING,
-                    .allowDynamic = true,
-                    .allowExpression = true,
-                    .fallbackString = "",
-                    .applyValue = [&component](
-                                      const JsonValue& value) { component.SetText(value.GetStringValue("")); } };
-            } },
-        { "placeholder",
-            [](ExtendedTextInputComponent& component) {
-                return PropertyDeclaration { .name = "placeholder",
-                    .type = PropertyValueType::STRING,
-                    .allowDynamic = true,
-                    .allowExpression = true,
-                    .fallbackString = "",
-                    .applyValue = [&component](
-                                      const JsonValue& value) { component.SetPlaceholder(value.GetStringValue("")); } };
-            } },
-        { "enabled",
-            [](ExtendedTextInputComponent& component) {
-                return PropertyDeclaration { .name = "enabled",
-                    .type = PropertyValueType::BOOLEAN,
-                    .allowDynamic = true,
-                    .allowExpression = true,
-                    .fallbackBool = true,
-                    .applyValue = [&component](
-                                      const JsonValue& value) { component.SetEnabled(value.GetBoolValue(true)); } };
-            } },
-        { "maxLength",
-            [](ExtendedTextInputComponent& component) {
-                return PropertyDeclaration { .name = "maxLength",
-                    .type = PropertyValueType::NUMBER,
-                    .allowDynamic = true,
-                    .allowExpression = true,
-                    .reportDynamicNumberRange = true,
-                    .dynamicNumberMin = 0.0,
-                    .dynamicNumberMinExclusive = false,
-                    .fallbackNumber = DEFAULT_MAX_LENGTH,
-                    .applyValue = [&component](const JsonValue& value) {
-                        component.SetMaxLength(NormalizeMaxLength(value.GetNumberValue(DEFAULT_MAX_LENGTH)));
-                    } };
-            } },
-        { "type",
-            [](ExtendedTextInputComponent& component) {
-                return PropertyDeclaration { .name = "type",
-                    .type = PropertyValueType::ENUM_STRING,
-                    .allowDynamic = true,
-                    .allowExpression = true,
-                    .fallbackString = "normal",
-                    .enumAllowed = { "normal", "number", "phoneNumber", "email", "password", "numberPassword",
-                        "screenLockPassword", "userName", "newPassword", "numberDecimal", "oneTimeCode" },
-                    .enumFallback = "normal",
-                    .applyValue = [&component](const JsonValue& value) {
-                        component.SetInputType(ParseTextInputTypeToken(value.GetStringValue("normal")));
-                    } };
-            } }
-    };
-
-    auto it = declarations.find(propertyName);
-    if (it != declarations.end()) {
-        return it->second(*this);
+    if (propertyName == "text") {
+        return CreateTextPropertyDeclaration();
+    }
+    if (propertyName == "placeholder") {
+        return CreatePlaceholderPropertyDeclaration();
+    }
+    if (propertyName == "enabled") {
+        return CreateEnabledPropertyDeclaration();
+    }
+    if (propertyName == "maxLength") {
+        return CreateMaxLengthPropertyDeclaration();
+    }
+    if (propertyName == "type") {
+        return CreateTypePropertyDeclaration();
     }
     return {};
+}
+
+PropertyDeclaration ExtendedTextInputComponent::CreateTextPropertyDeclaration()
+{
+    return PropertyDeclaration { .name = "text",
+        .type = PropertyValueType::STRING,
+        .allowDynamic = true,
+        .allowExpression = true,
+        .fallbackString = "",
+        .applyValue = [this](const JsonValue& value) { SetText(value.GetStringValue("")); } };
+}
+
+PropertyDeclaration ExtendedTextInputComponent::CreatePlaceholderPropertyDeclaration()
+{
+    return PropertyDeclaration { .name = "placeholder",
+        .type = PropertyValueType::STRING,
+        .allowDynamic = true,
+        .allowExpression = true,
+        .fallbackString = "",
+        .applyValue = [this](const JsonValue& value) { SetPlaceholder(value.GetStringValue("")); } };
+}
+
+PropertyDeclaration ExtendedTextInputComponent::CreateEnabledPropertyDeclaration()
+{
+    return PropertyDeclaration { .name = "enabled",
+        .type = PropertyValueType::BOOLEAN,
+        .allowDynamic = true,
+        .allowExpression = true,
+        .fallbackBool = true,
+        .applyValue = [this](const JsonValue& value) { SetEnabled(value.GetBoolValue(true)); } };
+}
+
+PropertyDeclaration ExtendedTextInputComponent::CreateMaxLengthPropertyDeclaration()
+{
+    return PropertyDeclaration { .name = "maxLength",
+        .type = PropertyValueType::NUMBER,
+        .allowDynamic = true,
+        .allowExpression = true,
+        .reportDynamicNumberRange = true,
+        .dynamicNumberMin = 0.0,
+        .dynamicNumberMinExclusive = false,
+        .fallbackNumber = DEFAULT_MAX_LENGTH,
+        .applyValue = [this](const JsonValue& value) {
+            SetMaxLength(NormalizeMaxLength(value.GetNumberValue(DEFAULT_MAX_LENGTH)));
+        } };
+}
+
+PropertyDeclaration ExtendedTextInputComponent::CreateTypePropertyDeclaration()
+{
+    return PropertyDeclaration { .name = "type",
+        .type = PropertyValueType::ENUM_STRING,
+        .allowDynamic = true,
+        .allowExpression = true,
+        .fallbackString = "normal",
+        .enumAllowed = { "normal", "number", "phoneNumber", "email", "password", "numberPassword", "screenLockPassword",
+            "userName", "newPassword", "numberDecimal", "oneTimeCode" },
+        .enumFallback = "normal",
+        .applyValue = [this](const JsonValue& value) {
+            SetInputType(ParseTextInputTypeToken(value.GetStringValue("normal")));
+        } };
 }
 
 void ExtendedTextInputComponent::ValidateStylesSchema(const JsonValue& styles)
@@ -543,291 +552,378 @@ void ExtendedTextInputComponent::ValidateStylesSchema(const JsonValue& styles)
         return;
     }
 
-    auto reportInvalidNumber = [this, &styles](const char* propertyName) {
-        if (propertyName == nullptr || !styles.Has(propertyName)) {
-            return;
-        }
-        JsonValue value = styles.GetItem(propertyName);
-        if (IsDynamicValueDescriptor(value)) {
-            return;
-        }
-        float parsed = 0.0F;
-        if (!StyleApplyUtils::ParseNumber(value, parsed)) {
-            ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
-                "Property styles." + std::string(propertyName) +
-                    " expects positive number, fallback/reset has been applied",
-                "styles." + std::string(propertyName));
-            return;
-        }
-        if (parsed <= 0.0F) {
-            ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
-                "Property styles." + std::string(propertyName) +
-                    " expects positive number, fallback/reset has been applied",
-                "styles." + std::string(propertyName));
-        }
-    };
+    ValidateColorStyle(styles, "fontColor");
+    ValidateColorStyle(styles, "placeholderColor");
+    ValidateColorStyle(styles, "caretColor");
+    ValidateColorStyle(styles, "selectedBackgroundColor");
+    ValidatePositiveNumberStyle(styles, "fontSize");
+    ValidatePositiveNumberStyle(styles, "minFontSize");
+    ValidatePositiveNumberStyle(styles, "maxFontSize");
+    ValidateMaxLinesStyle(styles);
+    ValidateFontWeightStyle(styles);
+    ValidateTextAlignStyle(styles);
+    ValidateFontScaleRangeStyle(styles, "minFontScale", 0.0, 1.0, true);
+    ValidateFontScaleRangeStyle(styles, "maxFontScale", 1.0, 0.0, false);
+    ValidateFontScaleModeStyle(styles);
+    ValidateShowUnderlineStyle(styles);
+    ValidateCancelButtonStyleProperty(styles);
+    ValidateUnderlineColorStyle(styles);
+    ValidateWordBreakStyle(styles);
+}
 
-    auto reportInvalidColor = [this, &styles](const char* propertyName) {
-        if (propertyName == nullptr || !styles.Has(propertyName)) {
-            return;
-        }
-        uint32_t color = 0;
-        JsonValue value = styles.GetItem(propertyName);
-        if (IsDynamicValueDescriptor(value)) {
-            return;
-        }
-        if (!value.IsString()) {
-            ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
-                "Property styles." + std::string(propertyName) +
-                    " expects string color, fallback/reset has been applied",
-                "styles." + std::string(propertyName));
-            return;
-        }
-        if (!ExtendedStyleResolver::ParseColor(value, color)) {
-            ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
-                "Property styles." + std::string(propertyName) +
-                    " expects color value, fallback/reset has been applied",
-                "styles." + std::string(propertyName));
-        }
-    };
-
-    reportInvalidColor("fontColor");
-    reportInvalidColor("placeholderColor");
-    reportInvalidColor("caretColor");
-    reportInvalidColor("selectedBackgroundColor");
-    reportInvalidNumber("fontSize");
-    reportInvalidNumber("minFontSize");
-    reportInvalidNumber("maxFontSize");
-
-    if (styles.Has("maxLines")) {
-        JsonValue maxLinesValue = styles.GetItem("maxLines");
-        if (IsDynamicValueDescriptor(maxLinesValue)) {
-            // Dynamic styles are handled by DFX fallback/reset after resolution.
-        } else if (!maxLinesValue.IsNumber()) {
-            ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
-                "Property styles.maxLines expects number, fallback/reset has been applied", "styles.maxLines");
-        } else {
-            double maxLines = maxLinesValue.GetNumberValue(0.0);
-            if (!std::isfinite(maxLines) || maxLines <= 0.0) {
-                ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
-                    "Property styles.maxLines expects positive integer, fallback/reset has been applied",
-                    "styles.maxLines");
-            }
-        }
+void ExtendedTextInputComponent::ValidatePositiveNumberStyle(const JsonValue& styles, const char* propertyName)
+{
+    if (propertyName == nullptr || !styles.Has(propertyName)) {
+        return;
     }
-    if (styles.Has("fontWeight")) {
-        JsonValue fontWeightValue = styles.GetItem("fontWeight");
-        if (IsDynamicValueDescriptor(fontWeightValue)) {
-            // Dynamic styles are handled by DFX fallback/reset after resolution.
-        } else if (!fontWeightValue.IsString() && !fontWeightValue.IsNumber()) {
-            ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
-                "Property styles.fontWeight expects string or number, fallback/reset has been applied",
-                "styles.fontWeight");
-        } else {
-            if (!IsValidTextInputFontWeight(fontWeightValue)) {
-                ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
-                    "Property styles.fontWeight expects valid font weight, fallback/reset has been applied",
-                    "styles.fontWeight");
-            }
-        }
+    JsonValue value = styles.GetItem(propertyName);
+    if (IsDynamicValueDescriptor(value)) {
+        return;
     }
-    if (styles.Has("textAlign")) {
-        JsonValue textAlignValue = styles.GetItem("textAlign");
-        if (IsDynamicValueDescriptor(textAlignValue)) {
-            // Dynamic styles are handled by DFX fallback/reset after resolution.
-        } else if (!textAlignValue.IsString()) {
-            ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
-                "Property styles.textAlign expects string enum, fallback/reset has been applied", "styles.textAlign");
-        } else {
-            int32_t textAlign = DEFAULT_TEXT_ALIGN;
-            if (!StyleApplyUtils::ParseTextAlign(textAlignValue, textAlign)) {
-                ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
-                    "Property styles.textAlign expects valid enum value, fallback/reset has been applied",
-                    "styles.textAlign");
-            }
-        }
-    }
-
-    auto reportScaleRange = [this, &styles](
-                                const char* propertyName, double minValue, double maxValue, bool hasMaxValue) {
-        if (propertyName == nullptr || !styles.Has(propertyName)) {
-            return;
-        }
-        JsonValue value = styles.GetItem(propertyName);
-        if (IsDynamicValueDescriptor(value)) {
-            return;
-        }
-        if (!value.IsNumber()) {
-            ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
-                "Property styles." + std::string(propertyName) + " expects number, fallback/reset has been applied",
-                "styles." + std::string(propertyName));
-            return;
-        }
-        double number = value.GetNumberValue(0.0);
-        if (!std::isfinite(number) || number < minValue || (hasMaxValue && number > maxValue)) {
-            ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
-                "Property styles." + std::string(propertyName) +
-                    " expects number in supported range, fallback/reset has been applied",
-                "styles." + std::string(propertyName));
-        }
-    };
-    reportScaleRange("minFontScale", 0.0, 1.0, true);
-    reportScaleRange("maxFontScale", 1.0, 0.0, false);
-
-    if (styles.Has("fontScaleMode")) {
-        JsonValue fontScaleModeValue = styles.GetItem("fontScaleMode");
-        if (IsDynamicValueDescriptor(fontScaleModeValue)) {
-            // Dynamic styles are handled by DFX fallback/reset after resolution.
-        } else if (!fontScaleModeValue.IsString()) {
-            ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
-                "Property styles.fontScaleMode expects string, fallback to followSystem", "styles.fontScaleMode");
-        } else {
-            std::string mode = StyleApplyUtils::TrimToken(fontScaleModeValue.GetStringValue(""));
-            if (mode != "custom" && mode != "followSystem") {
-                ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
-                    "Property styles.fontScaleMode expects custom/followSystem, fallback to followSystem",
-                    "styles.fontScaleMode");
-            }
-        }
-    }
-
-    if (styles.Has("showUnderline") && !IsDynamicValueDescriptor(styles.GetItem("showUnderline")) &&
-        !styles.GetItem("showUnderline").IsBool()) {
+    float parsed = 0.0F;
+    if (!StyleApplyUtils::ParseNumber(value, parsed)) {
         ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
-            "Property styles.showUnderline expects boolean, fallback/reset has been applied", "styles.showUnderline");
+            "Property styles." + std::string(propertyName) +
+                " expects positive number, fallback/reset has been applied",
+            "styles." + std::string(propertyName));
+        return;
     }
+    if (parsed <= 0.0F) {
+        ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
+            "Property styles." + std::string(propertyName) +
+                " expects positive number, fallback/reset has been applied",
+            "styles." + std::string(propertyName));
+    }
+}
 
-    if (styles.Has("cancelButton")) {
-        JsonValue cancelButtonValue = styles.GetItem("cancelButton");
-        if (IsDynamicValueDescriptor(cancelButtonValue)) {
-            // Dynamic styles are handled by DFX fallback/reset after resolution.
-        } else if (!cancelButtonValue.IsObject()) {
-            ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
-                "Property styles.cancelButton expects object, fallback/reset has been applied", "styles.cancelButton");
-        } else {
-            for (JsonValue child = cancelButtonValue.GetChild(); child.IsValid(); child = child.GetNext()) {
-                std::string key = child.GetKey();
-                if (!key.empty() && !IsSupportedCancelButtonMember(key)) {
-                    std::string path = "styles.cancelButton." + key;
-                    ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_UNDEFINED_FIELD,
-                        "Property " + path + " is undefined and has been ignored", path);
-                }
-            }
-            if (cancelButtonValue.Has("style")) {
-                JsonValue styleValue = cancelButtonValue.GetItem("style");
-                if (!IsDynamicValueDescriptor(styleValue) && !styleValue.IsString()) {
-                    ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
-                        "Property styles.cancelButton.style expects string enum, fallback/reset has been applied",
-                        "styles.cancelButton.style");
-                } else if (!IsDynamicValueDescriptor(styleValue) && !IsValidCancelButtonStyleToken(styleValue)) {
-                    ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
-                        "Property styles.cancelButton.style expects valid enum value, fallback/reset has been applied",
-                        "styles.cancelButton.style");
-                }
-            }
-            if (cancelButtonValue.Has("fontSize")) {
-                JsonValue fontSizeValue = cancelButtonValue.GetItem("fontSize");
-                float fontSize = 0.0F;
-                if (!IsDynamicValueDescriptor(fontSizeValue)) {
-                    if (fontSizeValue.IsNumber()) {
-                        double number = fontSizeValue.GetNumberValue(0.0);
-                        if (!std::isfinite(number) || number <= 0.0) {
-                            ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
-                                "Property styles.cancelButton.fontSize expects positive number, fallback/reset has "
-                                "been applied",
-                                "styles.cancelButton.fontSize");
-                        }
-                    } else if (!fontSizeValue.IsString()) {
-                        ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
-                            "Property styles.cancelButton.fontSize expects number or dimension, fallback/reset has "
-                            "been applied",
-                            "styles.cancelButton.fontSize");
-                    } else if (!TryParseCancelButtonFontSize(fontSizeValue, fontSize)) {
-                        ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
-                            "Property styles.cancelButton.fontSize expects valid positive dimension, fallback/reset "
-                            "has been applied",
-                            "styles.cancelButton.fontSize");
-                    } else if (!std::isfinite(fontSize) || fontSize <= 0.0F) {
-                        ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
-                            "Property styles.cancelButton.fontSize expects positive number, fallback/reset has been "
-                            "applied",
-                            "styles.cancelButton.fontSize");
-                    }
-                }
-            }
-            if (cancelButtonValue.Has("fontColor")) {
-                JsonValue fontColorValue = cancelButtonValue.GetItem("fontColor");
-                uint32_t color = 0;
-                if (!IsDynamicValueDescriptor(fontColorValue) && !fontColorValue.IsString()) {
-                    ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
-                        "Property styles.cancelButton.fontColor expects string color, fallback/reset has been applied",
-                        "styles.cancelButton.fontColor");
-                } else if (!IsDynamicValueDescriptor(fontColorValue) &&
-                           !ExtendedStyleResolver::ParseColor(fontColorValue, color)) {
-                    ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
-                        "Property styles.cancelButton.fontColor expects color value, fallback/reset has been applied",
-                        "styles.cancelButton.fontColor");
-                }
-            }
+void ExtendedTextInputComponent::ValidateColorStyle(const JsonValue& styles, const char* propertyName)
+{
+    if (propertyName == nullptr || !styles.Has(propertyName)) {
+        return;
+    }
+    JsonValue value = styles.GetItem(propertyName);
+    if (IsDynamicValueDescriptor(value)) {
+        return;
+    }
+    if (!value.IsString()) {
+        ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
+            "Property styles." + std::string(propertyName) + " expects string color, fallback/reset has been applied",
+            "styles." + std::string(propertyName));
+        return;
+    }
+    uint32_t color = 0;
+    if (!ExtendedStyleResolver::ParseColor(value, color)) {
+        ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
+            "Property styles." + std::string(propertyName) + " expects color value, fallback/reset has been applied",
+            "styles." + std::string(propertyName));
+    }
+}
+
+void ExtendedTextInputComponent::ValidateMaxLinesStyle(const JsonValue& styles)
+{
+    if (!styles.Has("maxLines")) {
+        return;
+    }
+    JsonValue value = styles.GetItem("maxLines");
+    if (IsDynamicValueDescriptor(value)) {
+        return;
+    }
+    if (!value.IsNumber()) {
+        ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
+            "Property styles.maxLines expects number, fallback/reset has been applied", "styles.maxLines");
+        return;
+    }
+    double maxLines = value.GetNumberValue(0.0);
+    if (!std::isfinite(maxLines) || maxLines <= 0.0) {
+        ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
+            "Property styles.maxLines expects positive integer, fallback/reset has been applied", "styles.maxLines");
+    }
+}
+
+void ExtendedTextInputComponent::ValidateFontWeightStyle(const JsonValue& styles)
+{
+    if (!styles.Has("fontWeight")) {
+        return;
+    }
+    JsonValue value = styles.GetItem("fontWeight");
+    if (IsDynamicValueDescriptor(value)) {
+        return;
+    }
+    if (!value.IsString() && !value.IsNumber()) {
+        ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
+            "Property styles.fontWeight expects string or number, fallback/reset has been applied",
+            "styles.fontWeight");
+        return;
+    }
+    if (!IsValidTextInputFontWeight(value)) {
+        ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
+            "Property styles.fontWeight expects valid font weight, fallback/reset has been applied",
+            "styles.fontWeight");
+    }
+}
+
+void ExtendedTextInputComponent::ValidateTextAlignStyle(const JsonValue& styles)
+{
+    if (!styles.Has("textAlign")) {
+        return;
+    }
+    JsonValue value = styles.GetItem("textAlign");
+    if (IsDynamicValueDescriptor(value)) {
+        return;
+    }
+    if (!value.IsString()) {
+        ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
+            "Property styles.textAlign expects string enum, fallback/reset has been applied", "styles.textAlign");
+        return;
+    }
+    int32_t textAlign = DEFAULT_TEXT_ALIGN;
+    if (!StyleApplyUtils::ParseTextAlign(value, textAlign)) {
+        ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
+            "Property styles.textAlign expects valid enum value, fallback/reset has been applied", "styles.textAlign");
+    }
+}
+
+void ExtendedTextInputComponent::ValidateFontScaleRangeStyle(
+    const JsonValue& styles, const char* propertyName, double minValue, double maxValue, bool hasMaxValue)
+{
+    if (propertyName == nullptr || !styles.Has(propertyName)) {
+        return;
+    }
+    JsonValue value = styles.GetItem(propertyName);
+    if (IsDynamicValueDescriptor(value)) {
+        return;
+    }
+    if (!value.IsNumber()) {
+        ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
+            "Property styles." + std::string(propertyName) + " expects number, fallback/reset has been applied",
+            "styles." + std::string(propertyName));
+        return;
+    }
+    double number = value.GetNumberValue(0.0);
+    if (!std::isfinite(number) || number < minValue || (hasMaxValue && number > maxValue)) {
+        ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
+            "Property styles." + std::string(propertyName) +
+                " expects number in supported range, fallback/reset has been applied",
+            "styles." + std::string(propertyName));
+    }
+}
+
+void ExtendedTextInputComponent::ValidateFontScaleModeStyle(const JsonValue& styles)
+{
+    if (!styles.Has("fontScaleMode")) {
+        return;
+    }
+    JsonValue value = styles.GetItem("fontScaleMode");
+    if (IsDynamicValueDescriptor(value)) {
+        return;
+    }
+    if (!value.IsString()) {
+        ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
+            "Property styles.fontScaleMode expects string, fallback to followSystem", "styles.fontScaleMode");
+        return;
+    }
+    std::string mode = StyleApplyUtils::TrimToken(value.GetStringValue(""));
+    if (mode != "custom" && mode != "followSystem") {
+        ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
+            "Property styles.fontScaleMode expects custom/followSystem, fallback to followSystem",
+            "styles.fontScaleMode");
+    }
+}
+
+void ExtendedTextInputComponent::ValidateShowUnderlineStyle(const JsonValue& styles)
+{
+    if (!styles.Has("showUnderline")) {
+        return;
+    }
+    JsonValue value = styles.GetItem("showUnderline");
+    if (IsDynamicValueDescriptor(value) || value.IsBool()) {
+        return;
+    }
+    ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
+        "Property styles.showUnderline expects boolean, fallback/reset has been applied", "styles.showUnderline");
+}
+
+void ExtendedTextInputComponent::ValidateCancelButtonStyleProperty(const JsonValue& styles)
+{
+    if (!styles.Has("cancelButton")) {
+        return;
+    }
+    JsonValue value = styles.GetItem("cancelButton");
+    if (IsDynamicValueDescriptor(value)) {
+        return;
+    }
+    if (!value.IsObject()) {
+        ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
+            "Property styles.cancelButton expects object, fallback/reset has been applied", "styles.cancelButton");
+        return;
+    }
+    ValidateCancelButtonSchema(value);
+}
+
+void ExtendedTextInputComponent::ValidateUnderlineColorStyle(const JsonValue& styles)
+{
+    if (!styles.Has("underlineColor")) {
+        return;
+    }
+    JsonValue value = styles.GetItem("underlineColor");
+    if (IsDynamicValueDescriptor(value)) {
+        return;
+    }
+    uint32_t color = 0;
+    if (value.IsString() && ExtendedStyleResolver::ParseColor(value, color)) {
+        return;
+    }
+    if (!value.IsObject()) {
+        ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
+            "Property styles.underlineColor expects color or object, fallback/reset has been applied",
+            "styles.underlineColor");
+        return;
+    }
+    ValidateUnderlineColorSchema(value);
+}
+
+void ExtendedTextInputComponent::ValidateWordBreakStyle(const JsonValue& styles)
+{
+    if (!styles.Has("wordBreak")) {
+        return;
+    }
+    JsonValue value = styles.GetItem("wordBreak");
+    if (IsDynamicValueDescriptor(value)) {
+        return;
+    }
+    if (!value.IsString()) {
+        ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
+            "Property styles.wordBreak expects string enum, fallback/reset has been applied", "styles.wordBreak");
+        return;
+    }
+    A2UIWordBreak wordBreak = DEFAULT_WORD_BREAK;
+    if (!ParseWordBreak(value, wordBreak)) {
+        ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
+            "Property styles.wordBreak expects valid enum value, fallback/reset has been applied", "styles.wordBreak");
+    }
+}
+
+void ExtendedTextInputComponent::ValidateCancelButtonSchema(const JsonValue& cancelButtonValue)
+{
+    for (JsonValue child = cancelButtonValue.GetChild(); child.IsValid(); child = child.GetNext()) {
+        std::string key = child.GetKey();
+        if (!key.empty() && !IsSupportedCancelButtonMember(key)) {
+            std::string path = "styles.cancelButton." + key;
+            ReportExtendedSchemaWarning(
+                SCHEMA_ERROR_CODE_UNDEFINED_FIELD, "Property " + path + " is undefined and has been ignored", path);
         }
     }
 
-    if (styles.Has("underlineColor")) {
-        JsonValue underlineColorValue = styles.GetItem("underlineColor");
-        uint32_t color = 0;
-        if (IsDynamicValueDescriptor(underlineColorValue)) {
-            // Dynamic styles are handled by DFX fallback/reset after resolution.
-        } else if (underlineColorValue.IsString() && ExtendedStyleResolver::ParseColor(underlineColorValue, color)) {
-            // A single color is valid for underlineColor.
-        } else if (!underlineColorValue.IsObject()) {
-            ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
-                "Property styles.underlineColor expects color or object, fallback/reset has been applied",
-                "styles.underlineColor");
-        } else {
-            const char* colorKeys[] = { "typing", "normal", "error", "disable" };
-            for (JsonValue child = underlineColorValue.GetChild(); child.IsValid(); child = child.GetNext()) {
-                std::string key = child.GetKey();
-                if (!key.empty() && !IsSupportedUnderlineColorMember(key)) {
-                    std::string path = "styles.underlineColor." + key;
-                    ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_UNDEFINED_FIELD,
-                        "Property " + path + " is undefined and has been ignored", path);
-                }
-            }
-            for (const char* key : colorKeys) {
-                if (key == nullptr || !underlineColorValue.Has(key)) {
-                    continue;
-                }
-                JsonValue colorValue = underlineColorValue.GetItem(key);
-                if (IsDynamicValueDescriptor(colorValue)) {
-                    continue;
-                }
-                if (!colorValue.IsString()) {
-                    ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
-                        "Property styles.underlineColor." + std::string(key) +
-                            " expects string color, fallback/reset has been applied",
-                        "styles.underlineColor." + std::string(key));
-                } else if (!ExtendedStyleResolver::ParseColor(colorValue, color)) {
-                    ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
-                        "Property styles.underlineColor." + std::string(key) +
-                            " expects color value, fallback/reset has been applied",
-                        "styles.underlineColor." + std::string(key));
-                }
-            }
-        }
+    if (cancelButtonValue.Has("style")) {
+        ValidateCancelButtonStyleValue(cancelButtonValue.GetItem("style"), true);
     }
+    if (cancelButtonValue.Has("fontSize")) {
+        ValidateCancelButtonFontSizeValue(cancelButtonValue.GetItem("fontSize"), true);
+    }
+    if (cancelButtonValue.Has("fontColor")) {
+        ValidateCancelButtonFontColorValue(cancelButtonValue.GetItem("fontColor"), true);
+    }
+}
 
-    if (styles.Has("wordBreak")) {
-        JsonValue wordBreakValue = styles.GetItem("wordBreak");
-        A2UIWordBreak wordBreak = DEFAULT_WORD_BREAK;
-        if (IsDynamicValueDescriptor(wordBreakValue)) {
-            // Dynamic styles are handled by DFX fallback/reset after resolution.
-        } else if (!wordBreakValue.IsString()) {
-            ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
-                "Property styles.wordBreak expects string enum, fallback/reset has been applied", "styles.wordBreak");
-        } else if (!ParseWordBreak(wordBreakValue, wordBreak)) {
+void ExtendedTextInputComponent::ValidateCancelButtonStyleValue(const JsonValue& styleValue, bool allowDynamic)
+{
+    if (allowDynamic && IsDynamicValueDescriptor(styleValue)) {
+        return;
+    }
+    if (!styleValue.IsString()) {
+        ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
+            "Property styles.cancelButton.style expects string enum, fallback/reset has been applied",
+            "styles.cancelButton.style");
+    } else if (!IsValidCancelButtonStyleToken(styleValue)) {
+        ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
+            "Property styles.cancelButton.style expects valid enum value, fallback/reset has been applied",
+            "styles.cancelButton.style");
+    }
+}
+
+void ExtendedTextInputComponent::ValidateCancelButtonFontSizeValue(const JsonValue& fontSizeValue, bool allowDynamic)
+{
+    if (allowDynamic && IsDynamicValueDescriptor(fontSizeValue)) {
+        return;
+    }
+    if (fontSizeValue.IsNumber()) {
+        double number = fontSizeValue.GetNumberValue(0.0);
+        if (!std::isfinite(number) || number <= 0.0) {
             ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
-                "Property styles.wordBreak expects valid enum value, fallback/reset has been applied",
-                "styles.wordBreak");
+                "Property styles.cancelButton.fontSize expects positive number, fallback/reset has been applied",
+                "styles.cancelButton.fontSize");
+        }
+        return;
+    }
+    if (!fontSizeValue.IsString()) {
+        ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
+            "Property styles.cancelButton.fontSize expects number or dimension, fallback/reset has been applied",
+            "styles.cancelButton.fontSize");
+        return;
+    }
+
+    float fontSize = 0.0F;
+    if (!TryParseCancelButtonFontSize(fontSizeValue, fontSize)) {
+        ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
+            "Property styles.cancelButton.fontSize expects valid positive dimension, fallback/reset has been applied",
+            "styles.cancelButton.fontSize");
+    } else if (!std::isfinite(fontSize) || fontSize <= 0.0F) {
+        ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
+            "Property styles.cancelButton.fontSize expects positive number, fallback/reset has been applied",
+            "styles.cancelButton.fontSize");
+    }
+}
+
+void ExtendedTextInputComponent::ValidateCancelButtonFontColorValue(const JsonValue& fontColorValue, bool allowDynamic)
+{
+    if (allowDynamic && IsDynamicValueDescriptor(fontColorValue)) {
+        return;
+    }
+    if (!fontColorValue.IsString()) {
+        ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
+            "Property styles.cancelButton.fontColor expects string color, fallback/reset has been applied",
+            "styles.cancelButton.fontColor");
+        return;
+    }
+
+    uint32_t color = 0;
+    if (!ExtendedStyleResolver::ParseColor(fontColorValue, color)) {
+        ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
+            "Property styles.cancelButton.fontColor expects color value, fallback/reset has been applied",
+            "styles.cancelButton.fontColor");
+    }
+}
+
+void ExtendedTextInputComponent::ValidateUnderlineColorSchema(const JsonValue& underlineColorValue)
+{
+    uint32_t color = 0;
+    const char* colorKeys[] = { "typing", "normal", "error", "disable" };
+    for (JsonValue child = underlineColorValue.GetChild(); child.IsValid(); child = child.GetNext()) {
+        std::string key = child.GetKey();
+        if (!key.empty() && !IsSupportedUnderlineColorMember(key)) {
+            std::string path = "styles.underlineColor." + key;
+            ReportExtendedSchemaWarning(
+                SCHEMA_ERROR_CODE_UNDEFINED_FIELD, "Property " + path + " is undefined and has been ignored", path);
+        }
+    }
+    for (const char* key : colorKeys) {
+        if (key == nullptr || !underlineColorValue.Has(key)) {
+            continue;
+        }
+        JsonValue colorValue = underlineColorValue.GetItem(key);
+        if (IsDynamicValueDescriptor(colorValue)) {
+            continue;
+        }
+        if (!colorValue.IsString()) {
+            ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
+                "Property styles.underlineColor." + std::string(key) +
+                    " expects string color, fallback/reset has been applied",
+                "styles.underlineColor." + std::string(key));
+        } else if (!ExtendedStyleResolver::ParseColor(colorValue, color)) {
+            ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
+                "Property styles.underlineColor." + std::string(key) +
+                    " expects color value, fallback/reset has been applied",
+                "styles.underlineColor." + std::string(key));
         }
     }
 }
@@ -836,6 +932,32 @@ void ExtendedTextInputComponent::ValidateComponentSpecificStylesSchema(const Jso
 {
     ValidateStylesSchema(styles);
 }
+
+namespace {
+bool TryPutResolvedStyleMember(JsonValue& resolvedRoot, const std::string& key, const JsonValue& child,
+    const RenderContext& renderContext, const DynamicResolveContext& context)
+{
+    if (child.Has("path") && renderContext.bindingEngine != nullptr) {
+        std::string path = child.GetString("path", "");
+        std::shared_ptr<DataModel> dataModel =
+            renderContext.bindingEngine->GetOrCreateDataModel(renderContext.surfaceId);
+        if (dataModel != nullptr) {
+            std::optional<JsonValue> value = dataModel->GetNode(path);
+            if (value.has_value()) {
+                resolvedRoot.Put(key.c_str(), value.value());
+                return true;
+            }
+        }
+    }
+
+    ResolvedValue resolvedValue = DynamicValueResolver::Resolve(child, context);
+    if (!resolvedValue.success || !resolvedValue.value.IsValid()) {
+        return false;
+    }
+    resolvedRoot.Put(key.c_str(), resolvedValue.value);
+    return true;
+}
+} // namespace
 
 std::unique_ptr<JsonAdapter> ExtendedTextInputComponent::ResolveStyleObjectDynamicMembers(
     const JsonValue& styleObjectValue) const
@@ -855,7 +977,8 @@ std::unique_ptr<JsonAdapter> ExtendedTextInputComponent::ResolveStyleObjectDynam
         .surfaceId = renderContext.surfaceId,
         .componentId = GetComponentId(),
         .dataModel = renderContext.dataModel,
-        .allowExpression = true };
+        .allowExpression = true,
+        .missingPathPolicy = MissingPathPolicy::DEFER_UNTIL_DATA_UPDATE };
     for (JsonValue child = styleObjectValue.GetChild(); child.IsValid(); child = child.GetNext()) {
         std::string key = child.GetKey();
         if (key.empty()) {
@@ -863,21 +986,7 @@ std::unique_ptr<JsonAdapter> ExtendedTextInputComponent::ResolveStyleObjectDynam
         }
         if (IsNestedDynamicDescriptor(child)) {
             hasDynamicMember = true;
-            if (child.Has("path") && renderContext.bindingEngine != nullptr) {
-                std::string path = child.GetString("path", "");
-                std::shared_ptr<DataModel> dataModel =
-                    renderContext.bindingEngine->GetOrCreateDataModel(renderContext.surfaceId);
-                if (dataModel != nullptr) {
-                    std::optional<JsonValue> value = dataModel->GetNode(path);
-                    if (value.has_value()) {
-                        resolvedRoot.Put(key.c_str(), value.value());
-                        continue;
-                    }
-                }
-            }
-            ResolvedValue resolvedValue = DynamicValueResolver::Resolve(child, context);
-            if (resolvedValue.success && resolvedValue.value.IsValid()) {
-                resolvedRoot.Put(key.c_str(), resolvedValue.value);
+            if (TryPutResolvedStyleMember(resolvedRoot, key, child, renderContext, context)) {
                 continue;
             }
         }
@@ -907,54 +1016,13 @@ void ExtendedTextInputComponent::ValidateResolvedCancelButtonDfx(const JsonValue
         return;
     }
     if (cancelButtonValue.Has("style")) {
-        JsonValue styleValue = cancelButtonValue.GetItem("style");
-        if (!styleValue.IsString()) {
-            ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
-                "Property styles.cancelButton.style expects string enum, fallback/reset has been applied",
-                "styles.cancelButton.style");
-        } else if (!IsValidCancelButtonStyleToken(styleValue)) {
-            ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
-                "Property styles.cancelButton.style expects valid enum value, fallback/reset has been applied",
-                "styles.cancelButton.style");
-        }
+        ValidateCancelButtonStyleValue(cancelButtonValue.GetItem("style"), false);
     }
     if (cancelButtonValue.Has("fontSize")) {
-        JsonValue fontSizeValue = cancelButtonValue.GetItem("fontSize");
-        float fontSize = 0.0F;
-        if (fontSizeValue.IsNumber()) {
-            double number = fontSizeValue.GetNumberValue(0.0);
-            if (!std::isfinite(number) || number <= 0.0) {
-                ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
-                    "Property styles.cancelButton.fontSize expects positive number, fallback/reset has been applied",
-                    "styles.cancelButton.fontSize");
-            }
-        } else if (!fontSizeValue.IsString()) {
-            ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
-                "Property styles.cancelButton.fontSize expects number or dimension, fallback/reset has been applied",
-                "styles.cancelButton.fontSize");
-        } else if (!TryParseCancelButtonFontSize(fontSizeValue, fontSize)) {
-            ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
-                "Property styles.cancelButton.fontSize expects valid positive dimension, fallback/reset has been "
-                "applied",
-                "styles.cancelButton.fontSize");
-        } else if (!std::isfinite(fontSize) || fontSize <= 0.0F) {
-            ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
-                "Property styles.cancelButton.fontSize expects positive number, fallback/reset has been applied",
-                "styles.cancelButton.fontSize");
-        }
+        ValidateCancelButtonFontSizeValue(cancelButtonValue.GetItem("fontSize"), false);
     }
     if (cancelButtonValue.Has("fontColor")) {
-        JsonValue fontColorValue = cancelButtonValue.GetItem("fontColor");
-        uint32_t color = 0;
-        if (!fontColorValue.IsString()) {
-            ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
-                "Property styles.cancelButton.fontColor expects string color, fallback/reset has been applied",
-                "styles.cancelButton.fontColor");
-        } else if (!ExtendedStyleResolver::ParseColor(fontColorValue, color)) {
-            ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
-                "Property styles.cancelButton.fontColor expects color value, fallback/reset has been applied",
-                "styles.cancelButton.fontColor");
-        }
+        ValidateCancelButtonFontColorValue(cancelButtonValue.GetItem("fontColor"), false);
     }
 }
 
@@ -987,7 +1055,6 @@ void ExtendedTextInputComponent::ValidateResolvedUnderlineColorDfx(const JsonVal
 
 void ExtendedTextInputComponent::ApplyComponentSpecificStyles(const JsonValue& styles, ArkUINodeApiAdapter& applier)
 {
-    bool isDeltaUpdate = IsApplyingStyleDeltaUpdate();
     ThemeMode themeMode = ResolveThemeMode();
     uint32_t defaultFontColor = GetDefaultTextInputFontColor(themeMode);
     uint32_t defaultPlaceholderColor = GetDefaultTextInputPlaceholderColor(themeMode);
@@ -996,224 +1063,316 @@ void ExtendedTextInputComponent::ApplyComponentSpecificStyles(const JsonValue& s
     uint32_t defaultUnderlineColor = GetDefaultTextInputUnderlineColor(themeMode);
 
     if (!styles.IsObject()) {
-        if (isDeltaUpdate) {
+        if (IsApplyingStyleDeltaUpdate()) {
             return;
         }
-        SetFontColor(defaultFontColor, false);
-        SetPlaceholderColor(defaultPlaceholderColor, false);
-        SetCaretColor(defaultCaretColor, false);
-        SetSelectedBackgroundColor(defaultSelectedBackgroundColor, false);
-        ResetCancelButton();
-        ResetNodeFontSize();
-        ResetNodeTextInputNumberOfLines();
-        ResetNodeFontWeight();
-        ResetNodeTextAlign();
-        ResetNodeTextInputShowUnderline();
-        ResetUnderlineColor();
-        ResetNodeTextInputWordBreak();
-        SetMinFontSize(0.0F);
-        SetMaxFontSize(0.0F);
-        fontWeight_ = A2UIFontWeight::NORMAL;
-        textAlign_ = DEFAULT_TEXT_ALIGN;
-        showUnderline_ = false;
-        wordBreak_ = DEFAULT_WORD_BREAK;
-        SetUnderlineColor(
-            defaultUnderlineColor, defaultUnderlineColor, defaultUnderlineColor, defaultUnderlineColor, false);
-        SetFontScaleMode(DEFAULT_FONT_SCALE_MODE);
+        ResetStylesToDefaults(defaultFontColor, defaultPlaceholderColor, defaultCaretColor,
+            defaultSelectedBackgroundColor, defaultUnderlineColor);
         return;
     }
 
-    auto shouldApplyStyle = [&styles, isDeltaUpdate](const char* styleName) {
-        return !isDeltaUpdate || (styleName != nullptr && styles.Has(styleName));
-    };
+    ApplyBackgroundColorStyle(styles, themeMode);
+    ApplyColorStyles(
+        styles, defaultFontColor, defaultPlaceholderColor, defaultCaretColor, defaultSelectedBackgroundColor);
+    ApplyCancelButtonStyle(styles);
+    ApplyFontSizeStyle(styles, applier);
+    ApplyTextInputStyle(styles, applier);
+    ApplyMaxLinesStyle(styles, applier);
+    ApplyFontWeightStyle(styles);
+    ApplyTextAlignStyle(styles);
+    ApplyMinFontSizeStyle(styles);
+    ApplyMaxFontSizeStyle(styles);
+    ApplyFontScaleLimits(styles);
+    ApplyFontScaleModeStyle(styles);
+    ApplyShowUnderlineStyle(styles);
+    ApplyUnderlineColorStyle(styles, defaultUnderlineColor);
+    ApplyWordBreakStyle(styles);
+}
 
+void ExtendedTextInputComponent::ApplyBackgroundColorStyle(const JsonValue& styles, ThemeMode themeMode)
+{
+    if (!ShouldApplyStyle(styles, "backgroundColor")) {
+        return;
+    }
     uint32_t color = 0;
-    if (shouldApplyStyle("fontColor")) {
-        if (ExtendedStyleResolver::ParseColor(styles.GetItem("fontColor"), color)) {
-            SetFontColor(color, true);
-        } else {
-            SetFontColor(defaultFontColor, false);
-        }
-    }
+    bool parsed = ExtendedStyleResolver::ParseColor(styles.GetItem("backgroundColor"), color);
+    SetBackgroundColor(parsed ? color : GetDefaultTextInputBackgroundColor(themeMode), parsed);
+}
 
-    if (shouldApplyStyle("placeholderColor")) {
-        if (ExtendedStyleResolver::ParseColor(styles.GetItem("placeholderColor"), color)) {
-            SetPlaceholderColor(color, true);
-        } else {
-            SetPlaceholderColor(defaultPlaceholderColor, false);
-        }
-    }
+bool ExtendedTextInputComponent::ShouldApplyStyle(const JsonValue& styles, const char* styleName) const
+{
+    return !IsApplyingStyleDeltaUpdate() || (styleName != nullptr && styles.Has(styleName));
+}
 
-    if (shouldApplyStyle("caretColor")) {
-        if (ExtendedStyleResolver::ParseColor(styles.GetItem("caretColor"), color)) {
-            SetCaretColor(color, true);
-        } else {
-            SetCaretColor(defaultCaretColor, false);
-        }
-    }
+void ExtendedTextInputComponent::ResetStylesToDefaults(uint32_t defaultFontColor, uint32_t defaultPlaceholderColor,
+    uint32_t defaultCaretColor, uint32_t defaultSelectedBackgroundColor, uint32_t defaultUnderlineColor)
+{
+    SetFontColor(defaultFontColor, false);
+    SetPlaceholderColor(defaultPlaceholderColor, false);
+    SetCaretColor(defaultCaretColor, false);
+    SetSelectedBackgroundColor(defaultSelectedBackgroundColor, false);
+    ResetCancelButton();
+    ResetNodeFontSize();
+    ArkUINodeApiAdapter::SetNodeTextInputStyle(nativeView_, false);
+    ResetNodeTextInputNumberOfLines();
+    ResetNodeFontWeight();
+    ResetNodeTextAlign();
+    ResetNodeTextInputShowUnderline();
+    ResetUnderlineColor();
+    ResetNodeTextInputWordBreak();
+    SetMinFontSize(0.0F);
+    SetMaxFontSize(0.0F);
+    fontWeight_ = A2UIFontWeight::NORMAL;
+    textAlign_ = DEFAULT_TEXT_ALIGN;
+    showUnderline_ = false;
+    wordBreak_ = DEFAULT_WORD_BREAK;
+    SetUnderlineColor(
+        defaultUnderlineColor, defaultUnderlineColor, defaultUnderlineColor, defaultUnderlineColor, false);
+    SetFontScaleMode(DEFAULT_FONT_SCALE_MODE);
+}
 
-    if (shouldApplyStyle("selectedBackgroundColor")) {
-        if (ExtendedStyleResolver::ParseColor(styles.GetItem("selectedBackgroundColor"), color)) {
-            SetSelectedBackgroundColor(color, true);
-        } else {
-            SetSelectedBackgroundColor(defaultSelectedBackgroundColor, false);
-        }
+void ExtendedTextInputComponent::ApplyColorStyles(const JsonValue& styles, uint32_t defaultFontColor,
+    uint32_t defaultPlaceholderColor, uint32_t defaultCaretColor, uint32_t defaultSelectedBackgroundColor)
+{
+    uint32_t color = 0;
+    if (ShouldApplyStyle(styles, "fontColor")) {
+        bool parsed = ExtendedStyleResolver::ParseColor(styles.GetItem("fontColor"), color);
+        SetFontColor(parsed ? color : defaultFontColor, parsed);
     }
-
-    A2UICancelButtonStyle cancelButtonStyle = A2UICancelButtonStyle::INPUT;
-    bool hasCancelButtonIconSize = false;
-    float cancelButtonIconSize = 0.0F;
-    bool hasCancelButtonIconColor = false;
-    uint32_t cancelButtonIconColor = 0;
-    bool hasCancelButtonIconSrc = false;
-    std::string cancelButtonIconSrc;
-    if (shouldApplyStyle("cancelButton")) {
-        JsonValue cancelButtonValue = styles.GetItem("cancelButton");
-        std::unique_ptr<JsonAdapter> resolvedCancelButtonAdapter = ResolveCancelButtonDynamicMembers(cancelButtonValue);
-        if (resolvedCancelButtonAdapter != nullptr) {
-            cancelButtonValue = resolvedCancelButtonAdapter->GetRoot();
-            ValidateResolvedCancelButtonDfx(cancelButtonValue);
-        }
-        if (ParseCancelButton(cancelButtonValue, cancelButtonStyle, hasCancelButtonIconSize, cancelButtonIconSize,
-                hasCancelButtonIconColor, cancelButtonIconColor, hasCancelButtonIconSrc, cancelButtonIconSrc)) {
-            SetCancelButton(cancelButtonStyle, hasCancelButtonIconSize, cancelButtonIconSize, hasCancelButtonIconColor,
-                cancelButtonIconColor, hasCancelButtonIconSrc, cancelButtonIconSrc);
-        } else {
-            ResetCancelButton();
-        }
+    if (ShouldApplyStyle(styles, "placeholderColor")) {
+        bool parsed = ExtendedStyleResolver::ParseColor(styles.GetItem("placeholderColor"), color);
+        SetPlaceholderColor(parsed ? color : defaultPlaceholderColor, parsed);
     }
+    if (ShouldApplyStyle(styles, "caretColor")) {
+        bool parsed = ExtendedStyleResolver::ParseColor(styles.GetItem("caretColor"), color);
+        SetCaretColor(parsed ? color : defaultCaretColor, parsed);
+    }
+    if (ShouldApplyStyle(styles, "selectedBackgroundColor")) {
+        bool parsed = ExtendedStyleResolver::ParseColor(styles.GetItem("selectedBackgroundColor"), color);
+        SetSelectedBackgroundColor(parsed ? color : defaultSelectedBackgroundColor, parsed);
+    }
+}
 
+void ExtendedTextInputComponent::ApplyCancelButtonStyle(const JsonValue& styles)
+{
+    if (!ShouldApplyStyle(styles, "cancelButton")) {
+        return;
+    }
+    JsonValue value = styles.GetItem("cancelButton");
+    std::unique_ptr<JsonAdapter> resolvedAdapter = ResolveCancelButtonDynamicMembers(value);
+    if (resolvedAdapter != nullptr) {
+        value = resolvedAdapter->GetRoot();
+        ValidateResolvedCancelButtonDfx(value);
+    }
+    A2UICancelButtonStyle style = A2UICancelButtonStyle::INPUT;
+    bool hasIconSize = false;
+    float iconSize = 0.0F;
+    bool hasIconColor = false;
+    uint32_t iconColor = 0;
+    bool hasIconSrc = false;
+    std::string iconSrc;
+    if (ParseCancelButton(value, style, hasIconSize, iconSize, hasIconColor, iconColor, hasIconSrc, iconSrc)) {
+        SetCancelButton(style, hasIconSize, iconSize, hasIconColor, iconColor, hasIconSrc, iconSrc);
+        return;
+    }
+    ResetCancelButton();
+}
+
+void ExtendedTextInputComponent::ApplyFontSizeStyle(const JsonValue& styles, ArkUINodeApiAdapter& applier)
+{
+    if (!ShouldApplyStyle(styles, "fontSize")) {
+        return;
+    }
     float fontSize = 0.0F;
-    if (shouldApplyStyle("fontSize")) {
-        if (StyleApplyUtils::ParseNumber(styles.GetItem("fontSize"), fontSize) && fontSize > 0.0F) {
-            fontSize_ = fontSize;
-            applier.SetNodeFontSize(nativeView_, ComputeEffectiveFontSize(fontSize));
-        } else {
-            fontSize_ = 0.0F;
-            ResetNodeFontSize();
-        }
+    if (StyleApplyUtils::ParseNumber(styles.GetItem("fontSize"), fontSize) && fontSize > 0.0F) {
+        fontSize_ = fontSize;
+        applier.SetNodeFontSize(nativeView_, ComputeEffectiveFontSize(fontSize));
+        return;
+    }
+    fontSize_ = 0.0F;
+    ResetNodeFontSize();
+}
+
+void ExtendedTextInputComponent::ApplyTextInputStyle(const JsonValue& styles, ArkUINodeApiAdapter& applier)
+{
+    bool hasMaxLines = styles.IsObject() && styles.Has("maxLines");
+    bool hasWordBreak = styles.IsObject() && styles.Has("wordBreak");
+    if (IsApplyingStyleDeltaUpdate() && !hasMaxLines && !hasWordBreak) {
+        return;
     }
 
     int32_t maxLines = 0;
-    if (shouldApplyStyle("maxLines")) {
-        if (StyleApplyUtils::ParseMaxLines(styles.GetItem("maxLines"), maxLines)) {
-            applier.SetNodeTextInputNumberOfLines(nativeView_, maxLines);
-        } else {
-            ResetNodeTextInputNumberOfLines();
-        }
+    A2UIWordBreak wordBreak = DEFAULT_WORD_BREAK;
+    bool hasValidMaxLines = false;
+    if (hasMaxLines) {
+        JsonValue maxLinesValue = styles.GetItem("maxLines");
+        double maxLinesNumber = maxLinesValue.GetNumberValue(0.0);
+        hasValidMaxLines = maxLinesValue.IsNumber() && std::isfinite(maxLinesNumber) && maxLinesNumber > 0.0 &&
+                           maxLinesNumber <= static_cast<double>(std::numeric_limits<int32_t>::max()) &&
+                           std::floor(maxLinesNumber) == maxLinesNumber &&
+                           StyleApplyUtils::ParseMaxLines(maxLinesValue, maxLines) && maxLines > 0;
     }
+    bool requiresInlineStyle =
+        hasValidMaxLines ||
+        (hasWordBreak && ParseWordBreak(styles.GetItem("wordBreak"), wordBreak) && wordBreak != A2UIWordBreak::NORMAL);
+    applier.SetNodeTextInputStyle(nativeView_, requiresInlineStyle);
+}
 
+void ExtendedTextInputComponent::ApplyMaxLinesStyle(const JsonValue& styles, ArkUINodeApiAdapter& applier)
+{
+    if (!ShouldApplyStyle(styles, "maxLines")) {
+        return;
+    }
+    int32_t maxLines = 0;
+    if (StyleApplyUtils::ParseMaxLines(styles.GetItem("maxLines"), maxLines)) {
+        applier.SetNodeTextInputNumberOfLines(nativeView_, maxLines);
+        return;
+    }
+    ResetNodeTextInputNumberOfLines();
+}
+
+void ExtendedTextInputComponent::ApplyFontWeightStyle(const JsonValue& styles)
+{
+    if (!ShouldApplyStyle(styles, "fontWeight")) {
+        return;
+    }
     int32_t fontWeight = static_cast<int32_t>(A2UIFontWeight::NORMAL);
-    if (shouldApplyStyle("fontWeight")) {
-        if (StyleApplyUtils::ParseFontWeight(styles.GetItem("fontWeight"), fontWeight)) {
-            SetFontWeight(static_cast<A2UIFontWeight>(fontWeight));
-        } else {
-            fontWeight_ = A2UIFontWeight::NORMAL;
-            ResetNodeFontWeight();
-        }
+    if (StyleApplyUtils::ParseFontWeight(styles.GetItem("fontWeight"), fontWeight)) {
+        SetFontWeight(static_cast<A2UIFontWeight>(fontWeight));
+        return;
     }
+    fontWeight_ = A2UIFontWeight::NORMAL;
+    ResetNodeFontWeight();
+}
 
+void ExtendedTextInputComponent::ApplyTextAlignStyle(const JsonValue& styles)
+{
+    if (!ShouldApplyStyle(styles, "textAlign")) {
+        return;
+    }
     int32_t textAlign = DEFAULT_TEXT_ALIGN;
-    if (shouldApplyStyle("textAlign")) {
-        if (StyleApplyUtils::ParseTextAlign(styles.GetItem("textAlign"), textAlign)) {
-            SetTextAlign(textAlign);
-        } else {
-            textAlign_ = DEFAULT_TEXT_ALIGN;
-            ResetNodeTextAlign();
-        }
+    if (StyleApplyUtils::ParseTextAlign(styles.GetItem("textAlign"), textAlign)) {
+        SetTextAlign(textAlign);
+        return;
     }
+    textAlign_ = DEFAULT_TEXT_ALIGN;
+    ResetNodeTextAlign();
+}
 
+void ExtendedTextInputComponent::ApplyMinFontSizeStyle(const JsonValue& styles)
+{
+    if (!ShouldApplyStyle(styles, "minFontSize")) {
+        return;
+    }
     float minFontSize = 0.0F;
-    if (shouldApplyStyle("minFontSize")) {
-        if (StyleApplyUtils::ParseNumber(styles.GetItem("minFontSize"), minFontSize) && minFontSize > 0.0F) {
-            SetMinFontSize(minFontSize);
-        } else {
-            SetMinFontSize(0.0F);
-        }
+    if (StyleApplyUtils::ParseNumber(styles.GetItem("minFontSize"), minFontSize) && minFontSize > 0.0F) {
+        SetMinFontSize(minFontSize);
+        return;
     }
+    SetMinFontSize(0.0F);
+}
 
+void ExtendedTextInputComponent::ApplyMaxFontSizeStyle(const JsonValue& styles)
+{
+    if (!ShouldApplyStyle(styles, "maxFontSize")) {
+        return;
+    }
     float maxFontSize = 0.0F;
-    if (shouldApplyStyle("maxFontSize")) {
-        if (StyleApplyUtils::ParseNumber(styles.GetItem("maxFontSize"), maxFontSize) && maxFontSize > 0.0F) {
-            SetMaxFontSize(maxFontSize);
-        } else {
-            SetMaxFontSize(0.0F);
-        }
+    if (StyleApplyUtils::ParseNumber(styles.GetItem("maxFontSize"), maxFontSize) && maxFontSize > 0.0F) {
+        SetMaxFontSize(maxFontSize);
+        return;
     }
+    SetMaxFontSize(0.0F);
+}
 
-    if (shouldApplyStyle("minFontScale")) {
-        JsonValue minFontScaleValue = styles.GetItem("minFontScale");
-        if (minFontScaleValue.IsNumber()) {
-            SetMinFontScale(ClampMinFontScale(minFontScaleValue.GetNumberValue(0.0)));
-        } else {
+void ExtendedTextInputComponent::ApplyFontScaleLimits(const JsonValue& styles)
+{
+    if (ShouldApplyStyle(styles, "minFontScale")) {
+        JsonValue value = styles.GetItem("minFontScale");
+        if (value.IsNumber()) {
+            SetMinFontScale(ClampMinFontScale(value.GetNumberValue(0.0)));
+        } else if (value.IsValid()) {
             SetMinFontScale(0.0F);
         }
     }
-
-    if (shouldApplyStyle("maxFontScale")) {
-        JsonValue maxFontScaleValue = styles.GetItem("maxFontScale");
-        if (maxFontScaleValue.IsNumber()) {
-            SetMaxFontScale(ClampMaxFontScale(maxFontScaleValue.GetNumberValue(1.0)));
-        } else {
+    if (ShouldApplyStyle(styles, "maxFontScale")) {
+        JsonValue value = styles.GetItem("maxFontScale");
+        if (value.IsNumber()) {
+            SetMaxFontScale(ClampMaxFontScale(value.GetNumberValue(1.0)));
+        } else if (value.IsValid()) {
             SetMaxFontScale(0.0F);
         }
     }
+}
 
-    if (shouldApplyStyle("fontScaleMode")) {
-        JsonValue fontScaleModeValue = styles.GetItem("fontScaleMode");
-        if (fontScaleModeValue.IsString()) {
-            std::string mode = StyleApplyUtils::TrimToken(fontScaleModeValue.GetStringValue(""));
-            if (mode == "custom" || mode == "followSystem") {
-                SetFontScaleMode(mode);
-            } else {
-                SetFontScaleMode(DEFAULT_FONT_SCALE_MODE);
-            }
-        } else {
-            SetFontScaleMode(DEFAULT_FONT_SCALE_MODE);
-        }
+void ExtendedTextInputComponent::ApplyFontScaleModeStyle(const JsonValue& styles)
+{
+    if (!ShouldApplyStyle(styles, "fontScaleMode")) {
+        return;
     }
-
-    if (shouldApplyStyle("showUnderline")) {
-        JsonValue showUnderline = styles.GetItem("showUnderline");
-        if (showUnderline.IsBool()) {
-            SetShowUnderline(showUnderline.GetBoolValue(false));
-        } else {
-            showUnderline_ = false;
-            ResetNodeTextInputShowUnderline();
-        }
+    JsonValue value = styles.GetItem("fontScaleMode");
+    if (!value.IsString()) {
+        SetFontScaleMode(DEFAULT_FONT_SCALE_MODE);
+        return;
     }
-
-    uint32_t typingUnderlineColor = defaultUnderlineColor;
-    uint32_t normalUnderlineColor = defaultUnderlineColor;
-    uint32_t errorUnderlineColor = defaultUnderlineColor;
-    uint32_t disableUnderlineColor = defaultUnderlineColor;
-    if (shouldApplyStyle("underlineColor")) {
-        JsonValue underlineColorValue = styles.GetItem("underlineColor");
-        std::unique_ptr<JsonAdapter> resolvedUnderlineColorAdapter =
-            ResolveUnderlineColorDynamicMembers(underlineColorValue);
-        if (resolvedUnderlineColorAdapter != nullptr) {
-            underlineColorValue = resolvedUnderlineColorAdapter->GetRoot();
-            ValidateResolvedUnderlineColorDfx(underlineColorValue);
-        }
-        if (ParseUnderlineColorGroup(underlineColorValue, typingUnderlineColor, normalUnderlineColor,
-                errorUnderlineColor, disableUnderlineColor, defaultUnderlineColor)) {
-            SetUnderlineColor(
-                typingUnderlineColor, normalUnderlineColor, errorUnderlineColor, disableUnderlineColor, true);
-        } else {
-            SetUnderlineColor(
-                defaultUnderlineColor, defaultUnderlineColor, defaultUnderlineColor, defaultUnderlineColor, false);
-        }
+    std::string mode = StyleApplyUtils::TrimToken(value.GetStringValue(""));
+    if (mode != "custom" && mode != "followSystem") {
+        mode = DEFAULT_FONT_SCALE_MODE;
     }
+    SetFontScaleMode(mode);
+}
 
+void ExtendedTextInputComponent::ApplyShowUnderlineStyle(const JsonValue& styles)
+{
+    if (!ShouldApplyStyle(styles, "showUnderline")) {
+        return;
+    }
+    JsonValue value = styles.GetItem("showUnderline");
+    if (value.IsBool()) {
+        SetShowUnderline(value.GetBoolValue(false));
+        return;
+    }
+    showUnderline_ = false;
+    ResetNodeTextInputShowUnderline();
+}
+
+void ExtendedTextInputComponent::ApplyUnderlineColorStyle(const JsonValue& styles, uint32_t defaultUnderlineColor)
+{
+    if (!ShouldApplyStyle(styles, "underlineColor")) {
+        return;
+    }
+    JsonValue value = styles.GetItem("underlineColor");
+    std::unique_ptr<JsonAdapter> resolvedAdapter = ResolveUnderlineColorDynamicMembers(value);
+    if (resolvedAdapter != nullptr) {
+        value = resolvedAdapter->GetRoot();
+        ValidateResolvedUnderlineColorDfx(value);
+    }
+    uint32_t typingColor = defaultUnderlineColor;
+    uint32_t normalColor = defaultUnderlineColor;
+    uint32_t errorColor = defaultUnderlineColor;
+    uint32_t disableColor = defaultUnderlineColor;
+    bool parsed =
+        ParseUnderlineColorGroup(value, typingColor, normalColor, errorColor, disableColor, defaultUnderlineColor);
+    if (parsed) {
+        SetUnderlineColor(typingColor, normalColor, errorColor, disableColor, true);
+        return;
+    }
+    SetUnderlineColor(
+        defaultUnderlineColor, defaultUnderlineColor, defaultUnderlineColor, defaultUnderlineColor, false);
+}
+
+void ExtendedTextInputComponent::ApplyWordBreakStyle(const JsonValue& styles)
+{
+    if (!ShouldApplyStyle(styles, "wordBreak")) {
+        return;
+    }
     A2UIWordBreak wordBreak = DEFAULT_WORD_BREAK;
-    if (shouldApplyStyle("wordBreak")) {
-        if (ParseWordBreak(styles.GetItem("wordBreak"), wordBreak)) {
-            SetWordBreak(wordBreak);
-        } else {
-            wordBreak_ = DEFAULT_WORD_BREAK;
-            ResetNodeTextInputWordBreak();
-        }
+    if (ParseWordBreak(styles.GetItem("wordBreak"), wordBreak)) {
+        SetWordBreak(wordBreak);
+        return;
     }
+    wordBreak_ = DEFAULT_WORD_BREAK;
+    ResetNodeTextInputWordBreak();
 }
 
 void ExtendedTextInputComponent::OnConfigChange(const ThemeContext& context)
@@ -1223,6 +1382,9 @@ void ExtendedTextInputComponent::OnConfigChange(const ThemeContext& context)
     }
     if (!hasPlaceholderColorOverride_) {
         SetPlaceholderColor(GetDefaultTextInputPlaceholderColor(context.colorMode), false);
+    }
+    if (!hasBackgroundColorOverride_) {
+        SetBackgroundColor(GetDefaultTextInputBackgroundColor(context.colorMode), false);
     }
     if (!hasCaretColorOverride_) {
         SetCaretColor(GetDefaultTextInputCaretColor(context.colorMode), false);
@@ -1313,7 +1475,10 @@ void ExtendedTextInputComponent::HandleInputValueChange(const std::string& nextV
 
 void ExtendedTextInputComponent::UpdateChangeEventRegistration()
 {
-    bool shouldRegister = HasEventHandler("onChange") || !ResolveTextBindingPath().empty();
+    bool shouldRegister = HasEventHandler("onChange");
+    if (!shouldRegister) {
+        shouldRegister = !ResolveTextBindingPath().empty();
+    }
     if (nativeView_ == nullptr) {
         changeEventRegistered_ = false;
         LOG_A2UI(LOG_WARN,
@@ -1327,24 +1492,32 @@ void ExtendedTextInputComponent::UpdateChangeEventRegistration()
         "shouldRegister=%{public}s, "
         "currentlyRegistered=%{public}s",
         GetComponentId().c_str(), shouldRegister ? "true" : "false", changeEventRegistered_ ? "true" : "false");
-    if (shouldRegister && !changeEventRegistered_) {
-        ArkUINodeApiAdapter::RegisterNodeEvent(nativeView_, A2UINodeEventType::TEXT_INPUT_ON_CHANGE, 0, this);
-        changeEventRegistered_ = true;
-        LOG_A2UI(LOG_DEBUG,
-            "ExtendedTextInputComponent::UpdateChangeEventRegistration - registered change event, "
-            "componentId=%{public}s",
-            GetComponentId().c_str());
+    if (shouldRegister == changeEventRegistered_) {
         return;
     }
-
-    if (!shouldRegister && changeEventRegistered_) {
-        ArkUINodeApiAdapter::UnregisterNodeEvent(nativeView_, A2UINodeEventType::TEXT_INPUT_ON_CHANGE);
-        changeEventRegistered_ = false;
-        LOG_A2UI(LOG_DEBUG,
-            "ExtendedTextInputComponent::UpdateChangeEventRegistration - unregistered change event, "
-            "componentId=%{public}s",
-            GetComponentId().c_str());
+    if (shouldRegister) {
+        RegisterChangeEvent();
+        return;
     }
+    UnregisterChangeEvent();
+}
+
+void ExtendedTextInputComponent::RegisterChangeEvent()
+{
+    ArkUINodeApiAdapter::RegisterNodeEvent(nativeView_, A2UINodeEventType::TEXT_INPUT_ON_CHANGE, 0, this);
+    changeEventRegistered_ = true;
+    LOG_A2UI(LOG_DEBUG,
+        "ExtendedTextInputComponent::UpdateChangeEventRegistration - registered change event, componentId=%{public}s",
+        GetComponentId().c_str());
+}
+
+void ExtendedTextInputComponent::UnregisterChangeEvent()
+{
+    ArkUINodeApiAdapter::UnregisterNodeEvent(nativeView_, A2UINodeEventType::TEXT_INPUT_ON_CHANGE);
+    changeEventRegistered_ = false;
+    LOG_A2UI(LOG_DEBUG,
+        "ExtendedTextInputComponent::UpdateChangeEventRegistration - unregistered change event, componentId=%{public}s",
+        GetComponentId().c_str());
 }
 
 void ExtendedTextInputComponent::ResetTextPropertyIfMissing()
@@ -1476,6 +1649,13 @@ void ExtendedTextInputComponent::SetCaretColor(uint32_t color, bool userOverride
     hasCaretColorOverride_ = userOverride;
     caretColor_ = color;
     ArkUINodeApiAdapter::SetNodeTextInputCaretColor(nativeView_, caretColor_);
+}
+
+void ExtendedTextInputComponent::SetBackgroundColor(uint32_t color, bool userOverride)
+{
+    hasBackgroundColorOverride_ = userOverride;
+    backgroundColor_ = color;
+    ArkUINodeApiAdapter::SetNodeBackgroundColor(nativeView_, backgroundColor_);
 }
 
 void ExtendedTextInputComponent::SetSelectedBackgroundColor(uint32_t color, bool userOverride)

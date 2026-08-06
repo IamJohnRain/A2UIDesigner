@@ -28,6 +28,8 @@ export interface CommonStyleProps {
   margin?: string;
   accessibilityLabel?: string;
   accessibilityDescription?: string;
+  flexShrinkParentDefault?: number;
+  resetFlexShrinkToParentDefault?: boolean;
 }
 
 export interface ComponentTheme extends PublicComponentTheme {

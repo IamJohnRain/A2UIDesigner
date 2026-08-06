@@ -17,6 +17,7 @@
 
 #include "composition/TemplateAdapterNode.h"
 #include "data/DataModel.h"
+#include "data/DynamicValueResolver.h"
 #include "utils/LogA2UI.h"
 
 namespace NativeModule {
@@ -155,19 +156,44 @@ void A2UIComponent::RemoveAuxiliaryOnClick(const std::string& key)
 
 void A2UIComponent::OnAddChild(const std::shared_ptr<Component>& child, size_t index)
 {
-    if (nativeView_ == nullptr || child == nullptr || child->GetNativeView() == nullptr) {
+    if (nativeView_ == nullptr || child == nullptr) {
         return;
     }
-    ArkUINodeApiAdapter::InsertChildAt(nativeView_, child->GetNativeView(), static_cast<int32_t>(index));
+
+    std::vector<ArkUI_NodeHandle> nativeViews;
+    CollectNativeDescendantViews(child, nativeViews);
+    if (nativeViews.empty()) {
+        return;
+    }
+
+    size_t nativeIndex = ResolveNativeChildIndex(child.get(), index);
+    for (size_t offset = 0; offset < nativeViews.size(); ++offset) {
+        ArkUINodeApiAdapter::InsertChildAt(
+            nativeView_, nativeViews[offset], static_cast<int32_t>(nativeIndex + offset));
+    }
 }
 
 void A2UIComponent::OnMoveChild(const std::shared_ptr<Component>& child, size_t currentIndex, size_t targetIndex)
 {
-    if (nativeView_ == nullptr || child == nullptr || child->GetNativeView() == nullptr) {
+    if (nativeView_ == nullptr || child == nullptr) {
         return;
     }
+
+    std::vector<ArkUI_NodeHandle> nativeViews;
+    CollectNativeDescendantViews(child, nativeViews);
+    if (nativeViews.empty()) {
+        return;
+    }
+
+    size_t nativeIndex = ResolveNativeChildIndex(child.get(), targetIndex);
+    for (ArkUI_NodeHandle nativeView : nativeViews) {
+        ArkUINodeApiAdapter::RemoveChild(nativeView_, nativeView);
+    }
+    for (size_t offset = 0; offset < nativeViews.size(); ++offset) {
+        ArkUINodeApiAdapter::InsertChildAt(
+            nativeView_, nativeViews[offset], static_cast<int32_t>(nativeIndex + offset));
+    }
     static_cast<void>(currentIndex);
-    ArkUINodeApiAdapter::InsertChildAt(nativeView_, child->GetNativeView(), static_cast<int32_t>(targetIndex));
 }
 
 void A2UIComponent::ApplyCommonAttributes(const JsonValue& descriptor)
@@ -216,6 +242,10 @@ bool A2UIComponent::IsKnownAdditionalDescriptorKey(const std::string& propertyNa
 
 void A2UIComponent::NodeEventReceiver(A2UINodeEvent* event)
 {
+    if (event == nullptr) {
+        LOG_A2UI(LOG_WARN, "A2UIComponent::NodeEventReceiver: event is null");
+        return;
+    }
     auto nodeHandle = ArkUIOHApiAdapter::NodeEventGetNodeHandle(event);
     auto* node = reinterpret_cast<A2UIComponent*>(ArkUINodeApiAdapter::GetUserData(nodeHandle));
     if (node != nullptr) {
@@ -225,27 +255,36 @@ void A2UIComponent::NodeEventReceiver(A2UINodeEvent* event)
 
 void A2UIComponent::HandleNodeEvent(A2UINodeEvent* event)
 {
+    if (event == nullptr) {
+        LOG_A2UI(LOG_WARN, "A2UIComponent::HandleNodeEvent: event is null, componentId=%{public}s",
+            GetComponentId().c_str());
+        return;
+    }
     auto eventType = ArkUIOHApiAdapter::NodeEventGetEventType(event);
     switch (eventType) {
         case A2UINodeEventType::ON_CLICK:
-        case A2UINodeEventType::ON_CLICK_EVENT: {
-            JsonValue clickContext = BuildClickContext(event);
-            if (onClick_ != nullptr) {
-                onClick_(clickContext);
-            }
-            for (const auto& [_, onClick] : auxiliaryOnClick_) {
-                if (onClick != nullptr) {
-                    onClick(clickContext);
-                }
-            }
+        case A2UINodeEventType::ON_CLICK_EVENT:
+            DispatchClickEvent(event);
             return;
-        }
         default: {
             auto handlerIt = nodeEventHandlers_.find(eventType);
             if (handlerIt != nodeEventHandlers_.end() && handlerIt->second != nullptr) {
-                handlerIt->second();
+                handlerIt->second(event);
             }
             return;
+        }
+    }
+}
+
+void A2UIComponent::DispatchClickEvent(A2UINodeEvent* event)
+{
+    JsonValue clickContext = BuildClickContext(event);
+    if (onClick_ != nullptr) {
+        onClick_(clickContext);
+    }
+    for (const auto& [_, onClick] : auxiliaryOnClick_) {
+        if (onClick != nullptr) {
+            onClick(clickContext);
         }
     }
 }
@@ -297,8 +336,22 @@ void A2UIComponent::UpdateClickEventRegistration()
 
 void A2UIComponent::RegisterNodeEventHandler(A2UINodeEventType eventType, const std::function<void()>& handler)
 {
-    if (nativeView_ == nullptr) {
+    if (handler == nullptr) {
+        static_cast<void>(RegisterNodeEventHandlerWithEvent(eventType, nullptr));
         return;
+    }
+    static_cast<void>(RegisterNodeEventHandlerWithEvent(eventType, [handler](A2UINodeEvent*) { handler(); }));
+}
+
+bool A2UIComponent::RegisterNodeEventHandlerWithEvent(A2UINodeEventType eventType, const NodeEventHandler& handler)
+{
+    if (nativeView_ == nullptr) {
+        if (handler != nullptr) {
+            LOG_A2UI(LOG_WARN,
+                "A2UIComponent::RegisterNodeEventHandlerWithEvent: native view is null, componentId=%{public}s",
+                GetComponentId().c_str());
+        }
+        return false;
     }
 
     auto handlerIt = nodeEventHandlers_.find(eventType);
@@ -308,13 +361,21 @@ void A2UIComponent::RegisterNodeEventHandler(A2UINodeEventType eventType, const 
             ArkUINodeApiAdapter::UnregisterNodeEvent(nativeView_, eventType);
             nodeEventHandlers_.erase(handlerIt);
         }
-        return;
+        return true;
     }
 
     if (!hasRegistered) {
-        ArkUINodeApiAdapter::RegisterNodeEvent(nativeView_, eventType, 0, this);
+        int32_t result = ArkUINodeApiAdapter::RegisterNodeEvent(nativeView_, eventType, 0, this);
+        if (result != A2UI_ERROR_CODE_NO_ERROR) {
+            LOG_A2UI(LOG_WARN,
+                "A2UIComponent::RegisterNodeEventHandlerWithEvent: register failed, componentId=%{public}s, "
+                "eventType=%{public}d, result=%{public}d",
+                GetComponentId().c_str(), static_cast<int32_t>(eventType), result);
+            return false;
+        }
     }
     nodeEventHandlers_[eventType] = handler;
+    return true;
 }
 
 bool A2UIComponent::RefreshLazyAdapterFromDataModel()
@@ -340,6 +401,12 @@ bool A2UIComponent::RefreshLazyAdapterFromDataModel()
         } else {
             LOG_A2UI(LOG_WARN, "RefreshLazyAdapterFromDataModel: data path is not array: %{public}s", dataPath.c_str());
         }
+    } else {
+        DynamicResolveContext context = { .renderId = GetRenderId(),
+            .surfaceId = GetSurfaceId(),
+            .componentId = GetComponentId(),
+            .missingPathPolicy = MissingPathPolicy::DEFER_UNTIL_DATA_UPDATE };
+        DynamicValueResolver::ReportMissingPath(context, dataPath);
     }
 
     adapter->UpdateItemCount(itemCount);

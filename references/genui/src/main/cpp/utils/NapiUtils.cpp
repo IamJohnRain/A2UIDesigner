@@ -34,10 +34,47 @@ napi_value GetUndefinedValue(napi_env env)
     return undefinedValue;
 }
 
+napi_value CreateNullNapiValue(napi_env env)
+{
+    napi_value result = nullptr;
+    if (NapiBridge::GetInstance().Provider().GetNull(env, &result) != napi_ok) {
+        return GetUndefinedValue(env);
+    }
+    return result;
+}
+
+napi_value CreateStringNapiValue(napi_env env, const JsonValue& value)
+{
+    napi_value result = nullptr;
+    if (NapiBridge::GetInstance().Provider().CreateStringUtf8(
+            env, value.GetStringValue("").c_str(), NAPI_AUTO_LENGTH, &result) != napi_ok) {
+        return GetUndefinedValue(env);
+    }
+    return result;
+}
+
+napi_value CreateNumberNapiValue(napi_env env, const JsonValue& value)
+{
+    napi_value result = nullptr;
+    if (NapiBridge::GetInstance().Provider().CreateDouble(env, value.GetNumberValue(0.0), &result) != napi_ok) {
+        return GetUndefinedValue(env);
+    }
+    return result;
+}
+
+napi_value CreateBoolNapiValue(napi_env env, const JsonValue& value)
+{
+    napi_value result = nullptr;
+    if (NapiBridge::GetInstance().Provider().GetBoolean(env, value.GetBoolValue(false), &result) != napi_ok) {
+        return GetUndefinedValue(env);
+    }
+    return result;
+}
+
+napi_value JsonContainerToNapiValue(napi_env env, const JsonValue& value, int32_t depth);
+
 napi_value JsonValueToNapiValueInternal(napi_env env, const JsonValue& value, int32_t depth)
 {
-    auto& napi = NapiBridge::GetInstance().Provider();
-
     if (env == nullptr) {
         return nullptr;
     }
@@ -48,36 +85,34 @@ napi_value JsonValueToNapiValueInternal(napi_env env, const JsonValue& value, in
         return GetUndefinedValue(env);
     }
 
-    napi_value result = nullptr;
     if (value.IsNull()) {
-        if (napi.GetNull(env, &result) != napi_ok) {
-            return GetUndefinedValue(env);
-        }
-        return result;
+        return CreateNullNapiValue(env);
     }
     if (value.IsString()) {
-        if (napi.CreateStringUtf8(env, value.GetStringValue("").c_str(), NAPI_AUTO_LENGTH, &result) != napi_ok) {
-            return GetUndefinedValue(env);
-        }
-        return result;
+        return CreateStringNapiValue(env, value);
     }
     if (value.IsNumber()) {
-        if (napi.CreateDouble(env, value.GetNumberValue(0.0), &result) != napi_ok) {
-            return GetUndefinedValue(env);
-        }
-        return result;
+        return CreateNumberNapiValue(env, value);
     }
     if (value.IsBool()) {
-        if (napi.GetBoolean(env, value.GetBoolValue(false), &result) != napi_ok) {
-            return GetUndefinedValue(env);
-        }
-        return result;
+        return CreateBoolNapiValue(env, value);
     }
+    if (value.IsArray() || value.IsObject()) {
+        return JsonContainerToNapiValue(env, value, depth);
+    }
+
+    return GetUndefinedValue(env);
+}
+
+napi_value JsonContainerToNapiValue(napi_env env, const JsonValue& value, int32_t depth)
+{
+    auto& napi = NapiBridge::GetInstance().Provider();
     if (value.IsArray()) {
         int itemCount = value.GetArraySize();
         if (itemCount < 0) {
             return GetUndefinedValue(env);
         }
+        napi_value result = nullptr;
         if (napi.CreateArrayWithLength(env, static_cast<size_t>(itemCount), &result) != napi_ok || result == nullptr) {
             return GetUndefinedValue(env);
         }
@@ -90,6 +125,7 @@ napi_value JsonValueToNapiValueInternal(napi_env env, const JsonValue& value, in
         return result;
     }
     if (value.IsObject()) {
+        napi_value result = nullptr;
         if (napi.CreateObject(env, &result) != napi_ok || result == nullptr) {
             return GetUndefinedValue(env);
         }
@@ -105,7 +141,6 @@ napi_value JsonValueToNapiValueInternal(napi_env env, const JsonValue& value, in
         }
         return result;
     }
-
     return GetUndefinedValue(env);
 }
 

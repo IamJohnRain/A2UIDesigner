@@ -17,6 +17,7 @@
 #define A2UI_EXTENDED_LIST_COMPONENT_H
 
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include "components/extended/ExtendedComponent.h"
@@ -71,6 +72,7 @@ private:
     };
 
     void SetupLazyAdapter(const ChildListDescriptor& childList, SurfaceSlot& surfaceSlot);
+    void HandleSizeChange(A2UINodeEvent* event, bool isAreaChange = false);
     void ApplyNestedScrollValueOrDefault(const JsonValue& value);
     void ApplyDefaultLanes(const ThemeContext& context);
     ThemeContext ResolveThemeContext() const;
@@ -84,6 +86,7 @@ private:
     Mode mode_ = Mode::EAGER;
     std::shared_ptr<ListAdapterNode> adapterNode_;
     std::vector<ListItemSlot> listItems_;
+    std::optional<Breakpoint> componentBreakpoint_;
 };
 
 } // namespace NativeModule

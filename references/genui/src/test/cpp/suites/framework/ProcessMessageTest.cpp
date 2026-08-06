@@ -13,16 +13,21 @@
  * limitations under the License.
  */
 
+#include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
+#include "catalog/CatalogItem.h"
 #include "functions/RuntimeErrorDispatchBridge.h"
 #include "functions/WarningDispatchBridge.h"
 #include "utils/NapiUtils.h"
 
 #include "NativeEntry.h"
 #include "RenderManager.h"
+#include "RenderSlot.h"
 #include "SurfaceErrorCodes.h"
+#include "SurfaceManager.h"
 #include "TestFixture.h"
 
 using namespace NativeModule;
@@ -44,6 +49,13 @@ protected:
     {
         napi_value result = nullptr;
         mockNapiPtr_->CreateInt32(env_, value, &result);
+        return result;
+    }
+
+    napi_value CreateBoolArg(bool value)
+    {
+        napi_value result = nullptr;
+        mockNapiPtr_->CreateBoolean(env_, value, &result);
         return result;
     }
 
@@ -75,6 +87,25 @@ protected:
         return result;
     }
 
+    napi_value CreateCatalogWithSingleComponentArg(
+        const std::string& catalogId, const std::string& componentName, CatalogCategory category, bool isInnerNative)
+    {
+        napi_value catalog = CreateCatalogArg(catalogId);
+        napi_value components = nullptr;
+        mockNapiPtr_->CreateArrayWithLength(env_, 1, &components);
+
+        napi_value item = nullptr;
+        mockNapiPtr_->CreateObject(env_, &item);
+        mockNapiPtr_->SetNamedProperty(env_, item, "name", CreateStringArg(componentName));
+        mockNapiPtr_->SetNamedProperty(env_, item, "category", CreateInt32Arg(static_cast<int32_t>(category)));
+        mockNapiPtr_->SetNamedProperty(
+            env_, item, "type", CreateInt32Arg(static_cast<int32_t>(CatalogItemType::COMPONENT)));
+        mockNapiPtr_->SetNamedProperty(env_, item, "isInnerNative", CreateBoolArg(isInnerNative));
+        mockNapiPtr_->SetElement(env_, components, 0, item);
+        mockNapiPtr_->SetNamedProperty(env_, catalog, "components", components);
+        return catalog;
+    }
+
     void TrackAndCreateSlot(int32_t renderId)
     {
         RenderManager::GetInstance().CreateRenderSlot(renderId);
@@ -91,6 +122,22 @@ protected:
     {
         mockNapiPtr_->SetCallbackArgs({ CreateInt32Arg(renderId), CreateStringArg(dsl), catalogArg });
         return ProcessMessage(env_, cbInfo_);
+    }
+
+    napi_value SyncBoundDataModel(int32_t renderId, const std::string& surfaceId)
+    {
+        mockNapiPtr_->SetCallbackArgs({ CreateInt32Arg(renderId), CreateStringArg(surfaceId), CreateStringArg("text-1"),
+            CreateStringArg("text"), CreateStringArg(R"("new")") });
+        return SyncComponentBoundDataModel(env_, cbInfo_);
+    }
+
+    void ExpectNoSurfaceMatched(napi_value result, const std::string& surfaceId)
+    {
+        ASSERT_NE(result, nullptr);
+        EXPECT_FALSE(GetBoolProperty(result, "success", true));
+        EXPECT_EQ(NapiGetString(env_, result, "errorCode", ""), "SURFACE_NOT_FOUND");
+        EXPECT_EQ(NapiGetString(env_, result, "errorMessage", ""), "Surface not found: " + surfaceId);
+        EXPECT_EQ(NapiGetInt32(env_, result, "surfaceResultCode", 0), SURFACE_ERROR_NO_SURFACE_MATCHED);
     }
 
     bool GetBoolProperty(napi_value object, const char* name, bool fallback)
@@ -283,7 +330,166 @@ TEST_F(ProcessMessageTest, L0_should_return_surface_already_exists_when_create_s
     EXPECT_EQ(NapiGetInt32(env_, secondResult, "surfaceResultCode", 0), SURFACE_RESULT_SURFACE_ALREADY_EXISTS);
 }
 
-TEST_F(ProcessMessageTest, L1_should_keep_processing_and_dispatch_runtime_error_when_dsl_length_exceeds_10kb)
+TEST_F(ProcessMessageTest, L0_should_return_no_surface_matched_when_update_components_surface_id_is_missing)
+{
+    const int32_t renderId = 20260715;
+    TrackAndCreateSlot(renderId);
+
+    napi_value result = ProcessDsl(renderId,
+        R"({"version":"v0.9","updateComponents":{"surfaceId":"missing-update-components","components":[{"id":"root","component":"Text"}]}})");
+
+    ExpectNoSurfaceMatched(result, "missing-update-components");
+}
+
+TEST_F(ProcessMessageTest, L0_should_return_no_surface_matched_when_sync_bound_data_model_surface_id_is_missing)
+{
+    const int32_t renderId = 20260717;
+    TrackAndCreateSlot(renderId);
+
+    napi_value result = SyncBoundDataModel(renderId, "missing-sync-bound-data-model");
+
+    ExpectNoSurfaceMatched(result, "missing-sync-bound-data-model");
+}
+
+TEST_F(ProcessMessageTest, L0_should_return_no_surface_matched_when_update_data_model_surface_id_is_missing)
+{
+    const int32_t renderId = 20260718;
+    TrackAndCreateSlot(renderId);
+
+    napi_value result = ProcessDsl(renderId,
+        R"({"version":"v0.9","updateDataModel":{"surfaceId":"missing-update-data-model","data":{"title":"missing"}}})");
+
+    ExpectNoSurfaceMatched(result, "missing-update-data-model");
+}
+
+TEST_F(ProcessMessageTest, L0_should_return_no_surface_matched_when_delete_surface_id_is_missing)
+{
+    const int32_t renderId = 20260719;
+    TrackAndCreateSlot(renderId);
+
+    napi_value result =
+        ProcessDsl(renderId, R"({"version":"v0.9","deleteSurface":{"surfaceId":"missing-delete-surface"}})");
+
+    ExpectNoSurfaceMatched(result, "missing-delete-surface");
+}
+
+/**
+ * @tc.name: L0_should_process_existing_surface_messages_when_surface_id_matches
+ * @tc.desc: Branch coverage
+ *
+ * @tc.type: FUNC
+ */
+TEST_F(ProcessMessageTest, L0_should_process_existing_surface_messages_when_surface_id_matches)
+{
+    const int32_t renderId = 20260716;
+    const std::string surfaceId = "existing";
+    napi_value catalog = CreateCatalogWithSingleComponentArg("catalog", "Text", CatalogCategory::A2UI_STANDARD, true);
+    TrackAndCreateSlot(renderId);
+
+    napi_value createResult = ProcessDsl(
+        renderId, R"({"version":"v0.9","createSurface":{"surfaceId":"existing","catalogId":"catalog"}})", catalog);
+    ASSERT_NE(createResult, nullptr);
+    EXPECT_TRUE(GetBoolProperty(createResult, "success", false));
+
+    napi_value updateComponentsResult = ProcessDsl(renderId,
+        R"({"version":"v0.9","updateComponents":{"surfaceId":"existing","components":[{"id":"root","component":"Text","text":"hello"}]}})",
+        catalog);
+    ASSERT_NE(updateComponentsResult, nullptr);
+    EXPECT_TRUE(GetBoolProperty(updateComponentsResult, "success", false));
+
+    napi_value updateDataModelResult = ProcessDsl(renderId,
+        R"({"version":"v0.9","updateDataModel":{"surfaceId":"existing","path":"/title","value":"updated"}})", catalog);
+    ASSERT_NE(updateDataModelResult, nullptr);
+    EXPECT_TRUE(GetBoolProperty(updateDataModelResult, "success", false));
+
+    napi_value deleteResult =
+        ProcessDsl(renderId, R"({"version":"v0.9","deleteSurface":{"surfaceId":"existing"}})", catalog);
+    ASSERT_NE(deleteResult, nullptr);
+    EXPECT_TRUE(GetBoolProperty(deleteResult, "success", false));
+
+    RenderSlot* renderSlot = RenderManager::GetInstance().FindRenderSlot(renderId);
+    ASSERT_NE(renderSlot, nullptr);
+    std::shared_ptr<SurfaceManager> surfaceManager = renderSlot->GetSurfaceManager();
+    ASSERT_NE(surfaceManager, nullptr);
+    EXPECT_EQ(surfaceManager->FindSurface(surfaceId), nullptr);
+}
+
+TEST_F(ProcessMessageTest, should_defer_missing_binding_error_until_successful_data_model_update)
+{
+    const int32_t renderId = 20260721;
+    const std::string surfaceId = "deferred-path";
+    napi_value catalog = CreateCatalogWithSingleComponentArg("catalog", "Text", CatalogCategory::A2UI_STANDARD, true);
+    TrackAndCreateSlot(renderId);
+
+    ASSERT_TRUE(GetBoolProperty(
+        ProcessDsl(renderId,
+            R"({"version":"v0.9","createSurface":{"surfaceId":"deferred-path","catalogId":"catalog"}})", catalog),
+        "success", false));
+
+    const std::string missingBindingDsl =
+        R"({"version":"v0.9","updateComponents":{"surfaceId":"deferred-path","components":[{"id":"root","component":"Text","text":{"path":"/missing"}}]}})";
+    size_t beforeBinding = RuntimeErrorDispatchCount();
+    ASSERT_TRUE(GetBoolProperty(ProcessDsl(renderId, missingBindingDsl, catalog), "success", false));
+    EXPECT_EQ(RuntimeErrorDispatchCount(), beforeBinding);
+
+    napi_value invalidUpdate = ProcessDsl(renderId,
+        R"({"version":"v0.9","updateDataModel":{"surfaceId":"deferred-path","path":"/invalid//path","value":1}})",
+        catalog);
+    ASSERT_NE(invalidUpdate, nullptr);
+    EXPECT_FALSE(GetBoolProperty(invalidUpdate, "success", true));
+    ASSERT_TRUE(GetBoolProperty(ProcessDsl(renderId, missingBindingDsl, catalog), "success", false));
+    EXPECT_EQ(RuntimeErrorDispatchCount(), beforeBinding);
+
+    ASSERT_TRUE(GetBoolProperty(
+        ProcessDsl(renderId,
+            R"({"version":"v0.9","updateDataModel":{"surfaceId":"deferred-path","value":{"other":1}}})", catalog),
+        "success", false));
+    EXPECT_EQ(RuntimeErrorDispatchCount(), beforeBinding + 1);
+    ASSERT_TRUE(GetBoolProperty(ProcessDsl(renderId, missingBindingDsl, catalog), "success", false));
+    EXPECT_EQ(RuntimeErrorDispatchCount(), beforeBinding + 3);
+
+    int32_t errorCode = 0;
+    std::string errorMessage;
+    ASSERT_TRUE(FindLatestRuntimeError(nullptr, &errorCode, &errorMessage, nullptr));
+    EXPECT_EQ(errorCode, SURFACE_ERROR_DYNAMIC_VALUE_RESOLVE_FAILED);
+    EXPECT_NE(errorMessage.find("path not found: /missing"), std::string::npos);
+}
+
+TEST_F(ProcessMessageTest, should_track_only_successful_data_model_updates_on_surface)
+{
+    const int32_t renderId = 20260722;
+    const std::string surfaceId = "data-update-state";
+    TrackAndCreateSlot(renderId);
+    ASSERT_TRUE(GetBoolProperty(
+        ProcessDsl(renderId,
+            R"({"version":"v0.9","createSurface":{"surfaceId":"data-update-state","catalogId":"catalog"}})",
+            CreateCatalogArg("catalog")),
+        "success", false));
+
+    RenderSlot* renderSlot = RenderManager::GetInstance().FindRenderSlot(renderId);
+    ASSERT_NE(renderSlot, nullptr);
+    std::shared_ptr<SurfaceManager> manager = renderSlot->GetSurfaceManager();
+    ASSERT_NE(manager, nullptr);
+    SurfaceSlot* surface = manager->FindSurface(surfaceId);
+    ASSERT_NE(surface, nullptr);
+    EXPECT_FALSE(surface->HasReceivedDataModelUpdate());
+
+    napi_value invalidUpdate = ProcessDsl(renderId,
+        R"({"version":"v0.9","updateDataModel":{"surfaceId":"data-update-state","path":"/bad//path","value":1}})",
+        CreateCatalogArg("catalog"));
+    ASSERT_NE(invalidUpdate, nullptr);
+    EXPECT_FALSE(GetBoolProperty(invalidUpdate, "success", true));
+    EXPECT_FALSE(surface->HasReceivedDataModelUpdate());
+
+    ASSERT_TRUE(GetBoolProperty(
+        ProcessDsl(renderId,
+            R"({"version":"v0.9","updateDataModel":{"surfaceId":"data-update-state","value":{"ready":true}}})",
+            CreateCatalogArg("catalog")),
+        "success", false));
+    EXPECT_TRUE(surface->HasReceivedDataModelUpdate());
+}
+
+TEST_F(ProcessMessageTest, L1_should_reject_without_dispatching_runtime_error_when_dsl_length_exceeds_10kb)
 {
     const int32_t renderId = 20260501;
     TrackAndCreateSlot(renderId);
@@ -295,18 +501,18 @@ TEST_F(ProcessMessageTest, L1_should_keep_processing_and_dispatch_runtime_error_
 
     napi_value result = ProcessDsl(renderId, oversizedDsl);
     ASSERT_NE(result, nullptr);
-    EXPECT_TRUE(GetBoolProperty(result, "success", false));
-    EXPECT_EQ(RuntimeErrorDispatchCount(), beforeRuntimeErrorCount + 1);
+    EXPECT_FALSE(GetBoolProperty(result, "success", true));
+    EXPECT_EQ(NapiGetString(env_, result, "errorCode", ""), "NATIVE_PROCESS_FAILED");
+    EXPECT_EQ(NapiGetString(env_, result, "errorMessage", ""),
+        "DSL string length " + std::to_string(oversizedDsl.size()) + " exceeds maximum allowed 10240");
+    EXPECT_EQ(NapiGetInt32(env_, result, "surfaceResultCode", 0), SURFACE_ERROR_NATIVE_PROCESS_FAILED);
+    EXPECT_EQ(RuntimeErrorDispatchCount(), beforeRuntimeErrorCount);
 
-    int32_t dispatchedRenderId = 0;
-    int32_t dispatchedCode = 0;
-    std::string dispatchedMessage;
-    std::string dispatchedSource;
-    ASSERT_TRUE(FindLatestRuntimeError(&dispatchedRenderId, &dispatchedCode, &dispatchedMessage, &dispatchedSource));
-    EXPECT_EQ(dispatchedRenderId, renderId);
-    EXPECT_EQ(dispatchedCode, SURFACE_ERROR_NATIVE_PROCESS_FAILED);
-    EXPECT_NE(dispatchedMessage.find("exceeds maximum allowed"), std::string::npos);
-    EXPECT_EQ(dispatchedSource, "NativeEntry::ProcessMessage");
+    RenderSlot* renderSlot = RenderManager::GetInstance().FindRenderSlot(renderId);
+    ASSERT_NE(renderSlot, nullptr);
+    std::shared_ptr<SurfaceManager> surfaceManager = renderSlot->GetSurfaceManager();
+    ASSERT_NE(surfaceManager, nullptr);
+    EXPECT_EQ(surfaceManager->FindSurface("s"), nullptr);
 }
 
 TEST_F(ProcessMessageTest, L2_should_accept_dsl_when_length_exactly_10kb)
@@ -615,4 +821,38 @@ TEST_F(ProcessMessageTest, L0_should_dispatch_schema_warnings_for_message_operat
         &warningRenderId, &warningCode, &warningMessage, &warningPath, &warningItemType, &warningItemName));
     EXPECT_EQ(warningCode, "ERROR_CODE_UNDEFINED_FIELD");
     EXPECT_EQ(warningPath, "extra");
+}
+
+TEST_F(ProcessMessageTest, L0_should_warn_when_component_id_or_type_uses_expression)
+{
+    const int32_t renderId = 20260721;
+    TrackAndCreateSlot(renderId);
+
+    const std::vector<std::pair<std::string, std::string>> cases = {
+        { R"({"version":"v0.9","updateComponents":{"surfaceId":"structural-expression","components":[{"id":"{{ 'node' }}","component":"Grid"}]}})",
+            "updateComponents.components[0].id" },
+        { R"({"version":"v0.9","updateComponents":{"surfaceId":"structural-expression","components":[{"id":"node","component":"{{ 'Grid' }}"}]}})",
+            "updateComponents.components[0].component" },
+    };
+
+    for (const auto& [dsl, expectedPath] : cases) {
+        size_t beforeWarningCount = WarningDispatchCount();
+        ASSERT_NE(ProcessDsl(renderId, dsl, CreateCatalogArg("catalog")), nullptr);
+        EXPECT_EQ(WarningDispatchCount(), beforeWarningCount + 1);
+
+        int32_t warningRenderId = 0;
+        std::string warningCode;
+        std::string warningMessage;
+        std::string warningPath;
+        std::string warningItemType;
+        std::string warningItemName;
+        ASSERT_TRUE(FindLatestWarning(
+            &warningRenderId, &warningCode, &warningMessage, &warningPath, &warningItemType, &warningItemName));
+        EXPECT_EQ(warningRenderId, renderId);
+        EXPECT_EQ(warningCode, "ERROR_CODE_INVALID_VALUE");
+        EXPECT_NE(warningMessage.find("does not support expression values"), std::string::npos);
+        EXPECT_EQ(warningPath, expectedPath);
+        EXPECT_EQ(warningItemType, "message");
+        EXPECT_EQ(warningItemName, "updateComponents");
+    }
 }

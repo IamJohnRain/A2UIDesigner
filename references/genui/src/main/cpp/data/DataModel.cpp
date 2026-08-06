@@ -37,6 +37,30 @@ static std::shared_ptr<JsonValue> CreateEmptyJsonObject()
 
 namespace {
 
+std::string DecodeJsonPointerToken(const std::string& token)
+{
+    std::string result;
+    result.reserve(token.size());
+    size_t i = 0;
+    while (i < token.size()) {
+        if (token[i] == '~' && i + 1 < token.size()) {
+            if (token[i + 1] == '1') {
+                result.push_back('/');
+                i += 2;
+                continue;
+            }
+            if (token[i + 1] == '0') {
+                result.push_back('~');
+                i += 2;
+                continue;
+            }
+        }
+        result.push_back(token[i]);
+        ++i;
+    }
+    return result;
+}
+
 int32_t MeasureJsonDepthInternal(const JsonValue& value, int32_t currentDepth)
 {
     if (!value.IsValid()) {
@@ -79,7 +103,7 @@ int32_t DataModel::MeasureJsonDepth(const JsonValue& value)
 
 // ========== 路径解析相关 ==========
 
-std::vector<std::string> DataModel::ParsePath(const std::string& path) const
+std::vector<std::string> DataModel::ParsePath(const std::string& path, bool decodePointer) const
 {
     std::vector<std::string> parts;
     if (path.empty() || path == "/") {
@@ -97,7 +121,7 @@ std::vector<std::string> DataModel::ParsePath(const std::string& path) const
     std::string part;
     while (std::getline(ss, part, '/')) {
         if (!part.empty()) {
-            parts.push_back(part);
+            parts.push_back(decodePointer ? DecodeJsonPointerToken(part) : part);
         }
     }
 
@@ -319,7 +343,7 @@ bool BuildNodeWithoutPath(const JsonValue& current, const std::vector<std::strin
 
 } // namespace
 
-void DataModel::UpdateByPath(const std::string& path, const JsonValue& value)
+bool DataModel::UpdateByPath(const std::string& path, const JsonValue& value)
 {
     LOG_A2UI(LOG_INFO, "UpdateByPath: path=%{public}s", path.c_str());
 
@@ -328,7 +352,7 @@ void DataModel::UpdateByPath(const std::string& path, const JsonValue& value)
         root_ = CreateEmptyJsonObject();
         if (!root_ || !root_->IsValid()) {
             LOG_A2UI(LOG_ERROR, "Failed to create root JSON object");
-            return;
+            return false;
         }
     }
 
@@ -336,14 +360,13 @@ void DataModel::UpdateByPath(const std::string& path, const JsonValue& value)
     auto pathParts = ParsePath(path);
     if (pathParts.empty()) {
         // 如果路径为空或只是 "/"，替换整个根节点
-        ReplaceAll(value);
-        return;
+        return ReplaceAll(value);
     }
 
     JsonValue updatedRoot;
     if (!BuildUpdatedNode(*root_, pathParts, 0, value, updatedRoot)) {
         LOG_A2UI(LOG_ERROR, "UpdateByPath: build updated root failed");
-        return;
+        return false;
     }
 
     root_ = std::make_shared<JsonValue>(updatedRoot);
@@ -355,15 +378,16 @@ void DataModel::UpdateByPath(const std::string& path, const JsonValue& value)
             NotifyPathUpdate(regPath);
         }
     }
+    return true;
 }
 
-void DataModel::DeleteByPath(const std::string& path)
+bool DataModel::DeleteByPath(const std::string& path)
 {
     LOG_A2UI(LOG_INFO, "DeleteByPath: path=%{public}s", path.c_str());
 
     if (!root_ || !root_->IsValid()) {
         LOG_A2UI(LOG_WARN, "Cannot delete: root is null or invalid");
-        return;
+        return false;
     }
 
     // 解析路径
@@ -377,13 +401,14 @@ void DataModel::DeleteByPath(const std::string& path)
         bool removed = false;
         if (!BuildNodeWithoutPath(*root_, pathParts, 0, updatedRoot, removed)) {
             LOG_A2UI(LOG_ERROR, "DeleteByPath: build updated root failed");
-            return;
+            return false;
         }
         if (removed) {
             root_ = std::make_shared<JsonValue>(updatedRoot);
             LOG_A2UI(LOG_INFO, "Successfully deleted path: %{public}s", path.c_str());
         } else {
             LOG_A2UI(LOG_WARN, "DeleteByPath: key not found, path=%{public}s", path.c_str());
+            return false;
         }
     }
 
@@ -393,16 +418,17 @@ void DataModel::DeleteByPath(const std::string& path)
             NotifyPathUpdate(regPath);
         }
     }
+    return true;
 }
 
-void DataModel::ReplaceAll(const JsonValue& value)
+bool DataModel::ReplaceAll(const JsonValue& value)
 {
     LOG_A2UI(LOG_INFO, "ReplaceAll: pathToComponents size: %{public}zu", pathToComponents_.size());
 
     std::unique_ptr<JsonAdapter> adapter = JsonAdapter::Clone(value);
     if (adapter == nullptr || !adapter->GetRoot().IsValid()) {
         LOG_A2UI(LOG_ERROR, "ReplaceAll: failed to clone root value");
-        return;
+        return false;
     }
 
     root_ = std::make_shared<JsonValue>(adapter->GetRoot());
@@ -411,6 +437,7 @@ void DataModel::ReplaceAll(const JsonValue& value)
     for (const auto& [path, _] : pathToComponents_) {
         NotifyPathUpdate(path);
     }
+    return true;
 }
 
 void DataModel::ProcessUpdate(const DataModelUpdate& updateRequest)
@@ -441,7 +468,7 @@ void DataModel::ProcessUpdate(const DataModelUpdate& updateRequest)
 
 // ========== 数据获取相关 ==========
 
-std::optional<JsonValue> DataModel::GetNode(const std::string& path) const
+std::optional<JsonValue> DataModel::GetNode(const std::string& path, bool decodePointer) const
 {
     if (!root_ || !root_->IsValid()) {
         return std::nullopt;
@@ -453,7 +480,7 @@ std::optional<JsonValue> DataModel::GetNode(const std::string& path) const
     }
 
     // 解析路径
-    auto pathParts = ParsePath(path);
+    auto pathParts = ParsePath(path, decodePointer);
     if (pathParts.empty()) {
         return *root_;
     }
@@ -529,34 +556,23 @@ void DataModel::UnregisterInterest(const std::string& path, const std::string& c
     it->second = std::move(validRefs);
 }
 
-void DataModel::NotifyPathUpdate(const std::string& path)
+JsonValue DataModel::BuildNotificationValue(const std::string& path) const
 {
-    LOG_A2UI(LOG_INFO, "NotifyPathUpdate: %{public}s", path.c_str());
-
     std::optional<JsonValue> valueOpt = GetNode(path);
-    JsonValue valueToUpdate;
-    if (valueOpt.has_value()) {
-        std::unique_ptr<JsonAdapter> valueAdapter = JsonAdapter::Clone(valueOpt.value());
-        if (valueAdapter != nullptr) {
-            valueToUpdate = valueAdapter->GetRoot();
-        }
+    if (!valueOpt.has_value()) {
+        return JsonValue();
     }
 
-    if (!valueToUpdate.IsValid()) {
-        std::unique_ptr<JsonAdapter> emptyStringAdapter = JsonAdapter::CreateString("");
-        if (emptyStringAdapter != nullptr) {
-            valueToUpdate = emptyStringAdapter->GetRoot();
-        }
+    std::unique_ptr<JsonAdapter> valueAdapter = JsonAdapter::Clone(valueOpt.value());
+    if (valueAdapter == nullptr) {
+        return JsonValue();
     }
+    return valueAdapter->GetRoot();
+}
 
-    auto it = pathToComponents_.find(path);
-    if (it == pathToComponents_.end()) {
-        return;
-    }
-
-    // Use a snapshot to avoid iterator invalidation when callbacks trigger
-    // binding re-registration on the same DataModel.
-    std::vector<std::weak_ptr<Component>> subscribers = it->second;
+std::vector<std::shared_ptr<Component>> DataModel::CollectLiveSubscribers(
+    const std::vector<std::weak_ptr<Component>>& subscribers) const
+{
     std::vector<std::shared_ptr<Component>> liveSubscribers;
     liveSubscribers.reserve(subscribers.size());
     for (auto& weakComp : subscribers) {
@@ -565,7 +581,12 @@ void DataModel::NotifyPathUpdate(const std::string& path)
             liveSubscribers.push_back(comp);
         }
     }
+    return liveSubscribers;
+}
 
+void DataModel::NotifySubscribersForPath(const std::string& path, const JsonValue& valueToUpdate,
+    const std::vector<std::shared_ptr<Component>>& liveSubscribers) const
+{
     for (const auto& comp : liveSubscribers) {
         if (comp == nullptr) {
             continue;
@@ -578,9 +599,10 @@ void DataModel::NotifyPathUpdate(const std::string& path)
             }
         }
     }
+}
 
-    // Cleanup expired refs on latest bucket content without dropping newly
-    // registered subscribers.
+void DataModel::CleanupExpiredSubscribers(const std::string& path)
+{
     auto latestIt = pathToComponents_.find(path);
     if (latestIt == pathToComponents_.end()) {
         return;
@@ -597,6 +619,20 @@ void DataModel::NotifyPathUpdate(const std::string& path)
     } else {
         latestIt->second = std::move(cleanedRefs);
     }
+}
+
+void DataModel::NotifyPathUpdate(const std::string& path)
+{
+    LOG_A2UI(LOG_INFO, "NotifyPathUpdate: %{public}s", path.c_str());
+    JsonValue valueToUpdate = BuildNotificationValue(path);
+    auto it = pathToComponents_.find(path);
+    if (it == pathToComponents_.end()) {
+        return;
+    }
+
+    std::vector<std::shared_ptr<Component>> liveSubscribers = CollectLiveSubscribers(it->second);
+    NotifySubscribersForPath(path, valueToUpdate, liveSubscribers);
+    CleanupExpiredSubscribers(path);
 }
 
 std::vector<std::string> DataModel::GetRegisteredPaths() const

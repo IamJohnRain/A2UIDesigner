@@ -21,6 +21,7 @@
 #include "theme/ThemeManager.h"
 #include "utils/LogA2UI.h"
 #include "utils/NapiUtils.h"
+#include "utils/SystemProperties.h"
 
 namespace NativeModule {
 
@@ -71,7 +72,6 @@ SurfaceSlot& SurfaceManager::CreateSurface(const std::string& surfaceId, A2UINod
     slot.SetRenderId(renderId_); // Set renderId to SurfaceSlot
     slot.SetForceRootFill(forceRootFill_);
     slot.SetFontSizeScale(fontSizeScale_);
-    slot.SetApiVersion(apiVersion_);
     slot.InitializeThemeManager(themeContext_);
 
     // Add to creation order list
@@ -151,10 +151,12 @@ void SurfaceManager::SetFontSizeScale(float scale)
 
 void SurfaceManager::SetApiVersion(int32_t apiVersion)
 {
-    apiVersion_ = apiVersion;
-    for (auto& pair : surfaces_) {
-        pair.second.SetApiVersion(apiVersion_);
-    }
+    SystemProperties::GetInstance().SetApiVersion(apiVersion);
+}
+
+int32_t SurfaceManager::GetApiVersion() const
+{
+    return SystemProperties::GetInstance().GetApiVersion();
 }
 
 bool SurfaceManager::HasSurface(const std::string& surfaceId) const

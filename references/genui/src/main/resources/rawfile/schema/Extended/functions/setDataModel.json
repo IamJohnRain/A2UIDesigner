@@ -1,0 +1,34 @@
+{
+  "type": "object",
+  "description": "Updates a value in the current surface data model.",
+  "properties": {
+    "call": {
+      "const": "setDataModel"
+    },
+    "args": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "$ref": "../common_types.json#/$defs/DynamicString",
+          "description": "The JSON pointer path to update."
+        },
+        "value": {
+          "description": "The value written to the data model."
+        }
+      },
+      "required": [
+        "path",
+        "value"
+      ],
+      "additionalProperties": false
+    },
+    "returnType": {
+      "const": "void"
+    }
+  },
+  "required": [
+    "call",
+    "args"
+  ],
+  "unevaluatedProperties": false
+}

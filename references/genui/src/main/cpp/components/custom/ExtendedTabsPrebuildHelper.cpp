@@ -24,6 +24,7 @@
 #include "composition/ChildListParser.h"
 #include "composition/TemplateAdapterNode.h"
 #include "data/DataModel.h"
+#include "data/DynamicValueResolver.h"
 
 #include "SurfaceSlot.h"
 
@@ -42,10 +43,7 @@ std::string GetShortComponentType(const std::string& componentType)
 
 bool IsExtendedTabsDescriptorType(const SurfaceSlot& surfaceSlot, const std::string& componentType)
 {
-    if (IsExtendedTabsComponentType(componentType)) {
-        return true;
-    }
-    return GetShortComponentType(componentType) == "Tabs" && surfaceSlot.IsExtendedProtocolSurface();
+    return componentType == "Tabs" && surfaceSlot.IsExtendedProtocolSurface();
 }
 
 std::map<std::string, JsonValue> BuildTemplateLocalVariables(
@@ -67,11 +65,74 @@ std::map<std::string, JsonValue> BuildTemplateLocalVariables(
     return localVariables;
 }
 
+void PrebuildStaticChildren(SurfaceSlot& surfaceSlot, const ChildListDescriptor& childList,
+    const std::map<std::string, JsonValue>& descriptorStore)
+{
+    std::set<std::string> prebuiltChildIds;
+    for (const std::string& childId : childList.staticChildIds) {
+        if (childId.empty() || prebuiltChildIds.count(childId) > 0) {
+            continue;
+        }
+        prebuiltChildIds.insert(childId);
+        bool hasProcessedNode = false;
+        bool sawRootDescriptor = false;
+        surfaceSlot.BuildRootFromComponents(childId, descriptorStore, hasProcessedNode, sawRootDescriptor, false);
+    }
+}
+
+void PrebuildTemplateChildren(SurfaceSlot& surfaceSlot, const JsonValue& nodeValue,
+    const ChildListDescriptor& childList, const std::map<std::string, JsonValue>& descriptorStore)
+{
+    std::shared_ptr<DataModel> dataModel = surfaceSlot.GetOrCreateDataModel();
+    if (dataModel == nullptr) {
+        return;
+    }
+    std::optional<JsonValue> arrayValueOpt = dataModel->GetNode(childList.templatePath);
+    if (!arrayValueOpt.has_value()) {
+        DynamicResolveContext context = { .renderId = surfaceSlot.GetRenderId(),
+            .surfaceId = surfaceSlot.GetSurfaceId(),
+            .componentId = nodeValue.GetString("id", ""),
+            .missingPathPolicy = MissingPathPolicy::DEFER_UNTIL_DATA_UPDATE };
+        DynamicValueResolver::ReportMissingPath(context, childList.templatePath);
+        return;
+    }
+    if (!arrayValueOpt->IsArray()) {
+        return;
+    }
+
+    JsonValue arrayValue = arrayValueOpt.value();
+    for (int32_t itemIndex = 0; itemIndex < arrayValue.GetArraySize(); ++itemIndex) {
+        std::map<std::string, JsonValue> generatedDescriptors;
+        std::string templateRootId = childList.templateComponentId;
+        TemplateAdapterNode::TemplateInstanceBuildContext buildContext = {
+            .templateComponentId = childList.templateComponentId,
+            .arrayPath = childList.templatePath,
+            .itemIndex = itemIndex,
+            .allDescriptors = &descriptorStore,
+            .generatedDescriptors = &generatedDescriptors,
+        };
+        std::string generatedInstanceId =
+            TemplateAdapterNode::BuildTemplateInstanceTreeDescriptors(templateRootId, buildContext);
+        if (generatedInstanceId.empty()) {
+            continue;
+        }
+
+        std::map<std::string, JsonValue> localVariables =
+            BuildTemplateLocalVariables(childList, arrayValue.GetArrayItem(itemIndex), itemIndex);
+        Component::RegisterPendingLocalVariablesForComponents(generatedDescriptors, localVariables);
+        bool hasProcessedNode = false;
+        bool sawRootDescriptor = false;
+        surfaceSlot.BuildRootFromComponents(
+            generatedInstanceId, generatedDescriptors, hasProcessedNode, sawRootDescriptor, false);
+        Component::ClearPendingLocalVariablesForComponents(generatedDescriptors);
+    }
+}
+
 } // namespace
 
 bool IsExtendedTabsChildComponentType(const std::string& componentType)
 {
-    return IsExtendedTabsComponentType(componentType) || GetShortComponentType(componentType) == "TabContent";
+    return GetShortComponentType(componentType) == "TabContent";
 }
 
 ChildListDescriptor ParseExtendedTabsChildList(const JsonValue& descriptor)
@@ -119,51 +180,12 @@ void PrebuildExtendedTabsChildren(SurfaceSlot& surfaceSlot, const JsonValue& nod
     ChildListDescriptor childList = ParseExtendedTabsChildList(nodeValue);
     const std::map<std::string, JsonValue>& descriptorStore = surfaceSlot.GetAllComponentDescriptorStore();
     if (childList.type == ChildListType::STATIC_IDS) {
-        std::set<std::string> prebuiltChildIds;
-        for (const std::string& childId : childList.staticChildIds) {
-            if (childId.empty() || prebuiltChildIds.count(childId) > 0) {
-                continue;
-            }
-            prebuiltChildIds.insert(childId);
-            bool hasProcessedNode = false;
-            bool sawRootDescriptor = false;
-            surfaceSlot.BuildRootFromComponents(childId, descriptorStore, hasProcessedNode, sawRootDescriptor, false);
-        }
+        PrebuildStaticChildren(surfaceSlot, childList, descriptorStore);
         return;
     }
 
-    if (childList.type != ChildListType::TEMPLATE_PATH) {
-        return;
-    }
-
-    std::shared_ptr<DataModel> dataModel = surfaceSlot.GetOrCreateDataModel();
-    if (dataModel == nullptr) {
-        return;
-    }
-
-    std::optional<JsonValue> arrayValueOpt = dataModel->GetNode(childList.templatePath);
-    if (!arrayValueOpt.has_value() || !arrayValueOpt->IsArray()) {
-        return;
-    }
-
-    JsonValue arrayValue = arrayValueOpt.value();
-    for (int32_t itemIndex = 0; itemIndex < arrayValue.GetArraySize(); ++itemIndex) {
-        std::map<std::string, JsonValue> generatedDescriptors;
-        std::string templateRootId = childList.templateComponentId;
-        std::string generatedInstanceId = TemplateAdapterNode::BuildTemplateInstanceTreeDescriptors(templateRootId,
-            childList.templateComponentId, childList.templatePath, itemIndex, &descriptorStore, &generatedDescriptors);
-        if (generatedInstanceId.empty()) {
-            continue;
-        }
-
-        std::map<std::string, JsonValue> localVariables =
-            BuildTemplateLocalVariables(childList, arrayValue.GetArrayItem(itemIndex), itemIndex);
-        Component::RegisterPendingLocalVariablesForComponents(generatedDescriptors, localVariables);
-        bool hasProcessedNode = false;
-        bool sawRootDescriptor = false;
-        surfaceSlot.BuildRootFromComponents(
-            generatedInstanceId, generatedDescriptors, hasProcessedNode, sawRootDescriptor, false);
-        Component::ClearPendingLocalVariablesForComponents(generatedDescriptors);
+    if (childList.type == ChildListType::TEMPLATE_PATH) {
+        PrebuildTemplateChildren(surfaceSlot, nodeValue, childList, descriptorStore);
     }
 }
 

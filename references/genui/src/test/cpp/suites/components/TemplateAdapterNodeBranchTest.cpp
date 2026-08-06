@@ -43,9 +43,25 @@ using namespace NativeModule;
 
 namespace {
 
+const std::string TEST_TEMPLATE_COMPONENT_ID = "tmpl";
+const std::string TEST_ARRAY_PATH = "/items";
+
 std::unique_ptr<JsonAdapter> ParseJson(const std::string& json)
 {
     return JsonAdapter::Parse(json);
+}
+
+TemplateAdapterNode::TemplateInstanceBuildContext BuildTemplateContext(const std::string& templateComponentId,
+    const std::string& arrayPath, int32_t itemIndex, const std::map<std::string, JsonValue>* allDescriptors,
+    std::map<std::string, JsonValue>* generatedDescriptors)
+{
+    return {
+        .templateComponentId = templateComponentId,
+        .arrayPath = arrayPath,
+        .itemIndex = itemIndex,
+        .allDescriptors = allDescriptors,
+        .generatedDescriptors = generatedDescriptors,
+    };
 }
 
 class ExposedTemplateAdapterNode : public TemplateAdapterNode {
@@ -329,11 +345,12 @@ TEST_F(TemplateAdapterNodeBranchTest, should_return_empty_when_build_tree_descri
     std::map<std::string, JsonValue> generated;
     std::map<std::string, JsonValue> allDescriptors;
 
-    EXPECT_TRUE(TemplateAdapterNode::BuildTemplateInstanceTreeDescriptors(id, "tmpl", "/items", 1, nullptr, &generated)
-                    .empty());
-    EXPECT_TRUE(
-        TemplateAdapterNode::BuildTemplateInstanceTreeDescriptors(id, "tmpl", "/items", 1, &allDescriptors, nullptr)
-            .empty());
+    auto nullDescriptorsContext =
+        BuildTemplateContext(TEST_TEMPLATE_COMPONENT_ID, TEST_ARRAY_PATH, 1, nullptr, &generated);
+    auto nullGeneratedContext =
+        BuildTemplateContext(TEST_TEMPLATE_COMPONENT_ID, TEST_ARRAY_PATH, 1, &allDescriptors, nullptr);
+    EXPECT_TRUE(TemplateAdapterNode::BuildTemplateInstanceTreeDescriptors(id, nullDescriptorsContext).empty());
+    EXPECT_TRUE(TemplateAdapterNode::BuildTemplateInstanceTreeDescriptors(id, nullGeneratedContext).empty());
 }
 
 TEST_F(TemplateAdapterNodeBranchTest, should_return_null_when_build_descriptor_input_is_invalid)
@@ -342,13 +359,12 @@ TEST_F(TemplateAdapterNodeBranchTest, should_return_null_when_build_descriptor_i
     std::map<std::string, JsonValue> generated;
     std::map<std::string, JsonValue> allDescriptors;
 
-    std::unique_ptr<JsonAdapter> adapter1 =
-        TemplateAdapterNode::BuildTemplateInstanceDescriptorById(id, "tmpl", "/items", 0, nullptr, &generated);
-    std::unique_ptr<JsonAdapter> adapter2 =
-        TemplateAdapterNode::BuildTemplateInstanceDescriptorById(id, "tmpl", "/items", 0, &allDescriptors, nullptr);
-
-    EXPECT_EQ(adapter1, nullptr);
-    EXPECT_EQ(adapter2, nullptr);
+    auto nullDescriptorsContext =
+        BuildTemplateContext(TEST_TEMPLATE_COMPONENT_ID, TEST_ARRAY_PATH, 0, nullptr, &generated);
+    auto nullGeneratedContext =
+        BuildTemplateContext(TEST_TEMPLATE_COMPONENT_ID, TEST_ARRAY_PATH, 0, &allDescriptors, nullptr);
+    EXPECT_TRUE(TemplateAdapterNode::BuildTemplateInstanceTreeDescriptors(id, nullDescriptorsContext).empty());
+    EXPECT_TRUE(TemplateAdapterNode::BuildTemplateInstanceTreeDescriptors(id, nullGeneratedContext).empty());
 }
 
 TEST_F(TemplateAdapterNodeBranchTest, should_return_empty_when_descriptor_id_is_missing)
@@ -357,9 +373,8 @@ TEST_F(TemplateAdapterNodeBranchTest, should_return_empty_when_descriptor_id_is_
     std::map<std::string, JsonValue> generated;
     std::map<std::string, JsonValue> allDescriptors;
 
-    EXPECT_TRUE(
-        TemplateAdapterNode::BuildTemplateInstanceTreeDescriptors(id, "tmpl", "/items", 1, &allDescriptors, &generated)
-            .empty());
+    auto context = BuildTemplateContext(TEST_TEMPLATE_COMPONENT_ID, TEST_ARRAY_PATH, 1, &allDescriptors, &generated);
+    EXPECT_TRUE(TemplateAdapterNode::BuildTemplateInstanceTreeDescriptors(id, context).empty());
     EXPECT_TRUE(generated.empty());
 }
 
@@ -373,11 +388,11 @@ TEST_F(TemplateAdapterNodeBranchTest, should_build_template_descriptor_and_gener
     allDescriptors[id] = rootDescriptor->GetRoot();
     std::map<std::string, JsonValue> generated;
 
-    std::unique_ptr<JsonAdapter> instanceDescriptor =
-        TemplateAdapterNode::BuildTemplateInstanceDescriptorById(id, "tmpl", "/items", 3, &allDescriptors, &generated);
+    auto context = BuildTemplateContext(TEST_TEMPLATE_COMPONENT_ID, TEST_ARRAY_PATH, 3, &allDescriptors, &generated);
+    std::string generatedId = TemplateAdapterNode::BuildTemplateInstanceTreeDescriptors(id, context);
+    ASSERT_FALSE(generatedId.empty());
 
-    ASSERT_NE(instanceDescriptor, nullptr);
-    JsonValue instanceRoot = instanceDescriptor->GetRoot();
+    JsonValue instanceRoot = generated[generatedId];
     EXPECT_EQ(instanceRoot.GetString("id", ""), "/itemstmpl:3:rootTemplate");
     EXPECT_EQ(instanceRoot.GetString("path", ""), "/items/3/itemName");
     EXPECT_EQ(generated.count("/itemstmpl:3:rootTemplate"), 1U);
@@ -393,11 +408,11 @@ TEST_F(TemplateAdapterNodeBranchTest, should_replace_existing_id_when_building_t
     allDescriptors[id] = rootDescriptor->GetRoot();
     std::map<std::string, JsonValue> generated;
 
-    std::unique_ptr<JsonAdapter> instanceDescriptor =
-        TemplateAdapterNode::BuildTemplateInstanceDescriptorById(id, "tmpl", "/items", 2, &allDescriptors, &generated);
-    ASSERT_NE(instanceDescriptor, nullptr);
+    auto context = BuildTemplateContext(TEST_TEMPLATE_COMPONENT_ID, TEST_ARRAY_PATH, 2, &allDescriptors, &generated);
+    std::string generatedId = TemplateAdapterNode::BuildTemplateInstanceTreeDescriptors(id, context);
+    ASSERT_FALSE(generatedId.empty());
 
-    JsonValue instanceRoot = instanceDescriptor->GetRoot();
+    JsonValue instanceRoot = generated[generatedId];
     EXPECT_EQ(instanceRoot.GetString("id", ""), "/itemstmpl:2:rootTemplate");
     EXPECT_EQ(instanceRoot.GetString("path", ""), "/items/2/name");
 }
@@ -419,8 +434,8 @@ TEST_F(TemplateAdapterNodeBranchTest, should_build_children_and_child_references
 
     std::string id = "root";
     std::map<std::string, JsonValue> generated;
-    std::string generatedRootId =
-        TemplateAdapterNode::BuildTemplateInstanceTreeDescriptors(id, "tmpl", "/items", 0, &allDescriptors, &generated);
+    auto context = BuildTemplateContext(TEST_TEMPLATE_COMPONENT_ID, TEST_ARRAY_PATH, 0, &allDescriptors, &generated);
+    std::string generatedRootId = TemplateAdapterNode::BuildTemplateInstanceTreeDescriptors(id, context);
 
     ASSERT_FALSE(generatedRootId.empty());
     EXPECT_EQ(generatedRootId, "/itemstmpl:0:root");
@@ -430,6 +445,48 @@ TEST_F(TemplateAdapterNodeBranchTest, should_build_children_and_child_references
     ASSERT_TRUE(generatedRoot.GetItem("children").IsArray());
     EXPECT_EQ(generatedRoot.GetItem("children").GetArraySize(), 1);
     EXPECT_EQ(generatedRoot.GetString("child", ""), "/itemstmpl:0:childB");
+}
+
+TEST_F(TemplateAdapterNodeBranchTest, should_build_if_branch_references_for_generated_template_tree)
+{
+    auto rootDescriptor =
+        ParseJson(R"({"component":"If","childrenIf":["ifChild",1,"missing"],"childrenElse":["elseChild",""]})");
+    auto ifChildDescriptor = ParseJson(R"({"component":"Text","content":{"path":"content"}})");
+    auto elseChildDescriptor = ParseJson(R"({"component":"Text","content":{"path":"fallback"}})");
+    ASSERT_NE(rootDescriptor, nullptr);
+    ASSERT_NE(ifChildDescriptor, nullptr);
+    ASSERT_NE(elseChildDescriptor, nullptr);
+
+    std::map<std::string, JsonValue> allDescriptors;
+    allDescriptors["root"] = rootDescriptor->GetRoot();
+    allDescriptors["ifChild"] = ifChildDescriptor->GetRoot();
+    allDescriptors["elseChild"] = elseChildDescriptor->GetRoot();
+
+    std::set<std::string> referencedIds = TemplateAdapterNode::CollectReferencedDescriptorIds("root", allDescriptors);
+    EXPECT_EQ(referencedIds, (std::set<std::string> { "root", "ifChild", "elseChild", "missing" }));
+
+    std::string id = "root";
+    std::map<std::string, JsonValue> generated;
+    auto context = BuildTemplateContext("msgItem", "/messages", 1, &allDescriptors, &generated);
+    std::string generatedRootId = TemplateAdapterNode::BuildTemplateInstanceTreeDescriptors(id, context);
+
+    ASSERT_FALSE(generatedRootId.empty());
+    JsonValue generatedRoot = generated[generatedRootId];
+    JsonValue generatedIf = generatedRoot.GetItem("childrenIf");
+    JsonValue generatedElse = generatedRoot.GetItem("childrenElse");
+    ASSERT_TRUE(generatedIf.IsArray());
+    ASSERT_TRUE(generatedElse.IsArray());
+    ASSERT_EQ(generatedIf.GetArraySize(), 1);
+    ASSERT_EQ(generatedElse.GetArraySize(), 1);
+
+    std::string generatedIfId = generatedIf.GetArrayItem(0).GetStringValue("");
+    std::string generatedElseId = generatedElse.GetArrayItem(0).GetStringValue("");
+    EXPECT_EQ(generatedIfId, "/messagesmsgItem:1:ifChild");
+    EXPECT_EQ(generatedElseId, "/messagesmsgItem:1:elseChild");
+    ASSERT_EQ(generated.count(generatedIfId), 1U);
+    ASSERT_EQ(generated.count(generatedElseId), 1U);
+    EXPECT_EQ(generated[generatedIfId].GetItem("content").GetString("path", ""), "/messages/1/content");
+    EXPECT_EQ(generated[generatedElseId].GetItem("content").GetString("path", ""), "/messages/1/fallback");
 }
 
 TEST_F(TemplateAdapterNodeBranchTest, should_keep_generated_id_when_children_or_child_are_not_strings)
@@ -442,8 +499,8 @@ TEST_F(TemplateAdapterNodeBranchTest, should_keep_generated_id_when_children_or_
     std::string id = "root";
     std::map<std::string, JsonValue> generated;
 
-    std::string generatedRootId =
-        TemplateAdapterNode::BuildTemplateInstanceTreeDescriptors(id, "tmpl", "/items", 1, &allDescriptors, &generated);
+    auto context = BuildTemplateContext(TEST_TEMPLATE_COMPONENT_ID, TEST_ARRAY_PATH, 1, &allDescriptors, &generated);
+    std::string generatedRootId = TemplateAdapterNode::BuildTemplateInstanceTreeDescriptors(id, context);
 
     ASSERT_FALSE(generatedRootId.empty());
     EXPECT_EQ(generatedRootId, "/itemstmpl:1:root");
@@ -463,10 +520,12 @@ TEST_F(TemplateAdapterNodeBranchTest, should_return_generated_id_when_child_is_n
 
     std::string idObj = "rootObj";
     std::string idEmpty = "rootEmpty";
-    std::string generatedObj = TemplateAdapterNode::BuildTemplateInstanceTreeDescriptors(
-        idObj, "tmpl", "/items", 4, &allDescriptors, &generated);
-    std::string generatedEmpty = TemplateAdapterNode::BuildTemplateInstanceTreeDescriptors(
-        idEmpty, "tmpl", "/items", 5, &allDescriptors, &generated);
+    auto objectContext =
+        BuildTemplateContext(TEST_TEMPLATE_COMPONENT_ID, TEST_ARRAY_PATH, 4, &allDescriptors, &generated);
+    auto emptyContext =
+        BuildTemplateContext(TEST_TEMPLATE_COMPONENT_ID, TEST_ARRAY_PATH, 5, &allDescriptors, &generated);
+    std::string generatedObj = TemplateAdapterNode::BuildTemplateInstanceTreeDescriptors(idObj, objectContext);
+    std::string generatedEmpty = TemplateAdapterNode::BuildTemplateInstanceTreeDescriptors(idEmpty, emptyContext);
 
     EXPECT_EQ(generatedObj, "/itemstmpl:4:rootObj");
     EXPECT_EQ(generatedEmpty, "/itemstmpl:5:rootEmpty");

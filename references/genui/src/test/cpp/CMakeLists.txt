@@ -44,6 +44,7 @@ add_library(a2ui_lib STATIC
     ${MOCK_DIR}/mock_arkui_node_api_adapter.cpp
     ${STUBS_DIR}/trace.cpp
     ${NATIVERENDER_ROOT_PATH}/adapter/A2UIArkUITypeConverter.cpp
+    ${NATIVERENDER_ROOT_PATH}/adapter/ArkUIConstraintSizeAdapter.cpp
     ${NATIVERENDER_ROOT_PATH}/adapter/ArkUINativeAPI.cpp
     ${NATIVERENDER_ROOT_PATH}/adapter/NapiBridge.cpp
     ${NATIVERENDER_ROOT_PATH}/NativeEntry.cpp
@@ -61,7 +62,9 @@ add_library(a2ui_lib STATIC
     ${NATIVERENDER_ROOT_PATH}/utils/NapiUtils.cpp
     ${NATIVERENDER_ROOT_PATH}/utils/ThemeColorUtils.cpp
     ${NATIVERENDER_ROOT_PATH}/utils/DisplayDensityUtils.cpp
+    ${NATIVERENDER_ROOT_PATH}/utils/SystemProperties.cpp
     ${NATIVERENDER_ROOT_PATH}/utils/RequiredStringPropertyUtils.cpp
+    ${NATIVERENDER_ROOT_PATH}/utils/LocalVariableNameUtils.cpp
     ${NATIVERENDER_ROOT_PATH}/components/ChildListSchemaValidationUtils.cpp
     ${NATIVERENDER_ROOT_PATH}/data/DataModel.cpp
     ${NATIVERENDER_ROOT_PATH}/data/BindingEngine.cpp
@@ -72,19 +75,19 @@ add_library(a2ui_lib STATIC
     ${NATIVERENDER_ROOT_PATH}/functions/FunctionCallInfo.cpp
     ${NATIVERENDER_ROOT_PATH}/functions/NativeFunctionBase.cpp
     ${NATIVERENDER_ROOT_PATH}/functions/NativeFunctionRegistry.cpp
-    ${NATIVERENDER_ROOT_PATH}/functions/NativeRequiredFunction.cpp
-    ${NATIVERENDER_ROOT_PATH}/functions/NativeRegexFunction.cpp
-    ${NATIVERENDER_ROOT_PATH}/functions/NativeLengthFunction.cpp
-    ${NATIVERENDER_ROOT_PATH}/functions/NativeNumericFunction.cpp
-    ${NATIVERENDER_ROOT_PATH}/functions/NativeEmailFunction.cpp
-    ${NATIVERENDER_ROOT_PATH}/functions/NativeFormatStringFunction.cpp
-    ${NATIVERENDER_ROOT_PATH}/functions/NativeFormatNumberFunction.cpp
-    ${NATIVERENDER_ROOT_PATH}/functions/NativeFormatCurrencyFunction.cpp
-    ${NATIVERENDER_ROOT_PATH}/functions/NativeFormatDateFunction.cpp
-    ${NATIVERENDER_ROOT_PATH}/functions/NativePluralizeFunction.cpp
-    ${NATIVERENDER_ROOT_PATH}/functions/NativeAndFunction.cpp
-    ${NATIVERENDER_ROOT_PATH}/functions/NativeOrFunction.cpp
-    ${NATIVERENDER_ROOT_PATH}/functions/NativeNotFunction.cpp
+    ${NATIVERENDER_ROOT_PATH}/functions/impl/NativeRequiredFunction.cpp
+    ${NATIVERENDER_ROOT_PATH}/functions/impl/NativeRegexFunction.cpp
+    ${NATIVERENDER_ROOT_PATH}/functions/impl/NativeLengthFunction.cpp
+    ${NATIVERENDER_ROOT_PATH}/functions/impl/NativeNumericFunction.cpp
+    ${NATIVERENDER_ROOT_PATH}/functions/impl/NativeEmailFunction.cpp
+    ${NATIVERENDER_ROOT_PATH}/functions/impl/NativeFormatStringFunction.cpp
+    ${NATIVERENDER_ROOT_PATH}/functions/impl/NativeFormatNumberFunction.cpp
+    ${NATIVERENDER_ROOT_PATH}/functions/impl/NativeFormatCurrencyFunction.cpp
+    ${NATIVERENDER_ROOT_PATH}/functions/impl/NativeFormatDateFunction.cpp
+    ${NATIVERENDER_ROOT_PATH}/functions/impl/NativePluralizeFunction.cpp
+    ${NATIVERENDER_ROOT_PATH}/functions/impl/NativeAndFunction.cpp
+    ${NATIVERENDER_ROOT_PATH}/functions/impl/NativeOrFunction.cpp
+    ${NATIVERENDER_ROOT_PATH}/functions/impl/NativeNotFunction.cpp
     ${NATIVERENDER_ROOT_PATH}/functions/NativeGetToggleValueFunction.cpp
     ${NATIVERENDER_ROOT_PATH}/functions/NativeGetRadioValueFunction.cpp
     ${NATIVERENDER_ROOT_PATH}/functions/NativeGetCheckboxGroupValuesFunction.cpp
@@ -130,8 +133,12 @@ add_library(a2ui_lib STATIC
     ${NATIVERENDER_ROOT_PATH}/components/CustomComponentFactory.cpp
     ${NATIVERENDER_ROOT_PATH}/components/custom/ExtendedTabsPrebuildHelper.cpp
     ${NATIVERENDER_ROOT_PATH}/components/custom/CustomComponent.cpp
+    ${NATIVERENDER_ROOT_PATH}/components/custom/CustomComponentAttributeValue.cpp
     ${NATIVERENDER_ROOT_PATH}/components/custom/CustomComponentBindingLifecycle.cpp
+    ${NATIVERENDER_ROOT_PATH}/components/custom/CustomComponentCommonStyleValidation.cpp
     ${NATIVERENDER_ROOT_PATH}/components/custom/CustomComponentExpressionBinding.cpp
+    ${NATIVERENDER_ROOT_PATH}/components/custom/CustomComponentPropsBuilder.cpp
+    ${NATIVERENDER_ROOT_PATH}/components/custom/CustomComponentRuntimeProperties.cpp
     ${NATIVERENDER_ROOT_PATH}/components/custom/CustomComponentTabsValidation.cpp
     ${NATIVERENDER_ROOT_PATH}/components/custom/CustomComponentTabContentValidation.cpp
     ${NATIVERENDER_ROOT_PATH}/components/NativeComponentFactory.cpp
@@ -201,6 +208,7 @@ target_include_directories(a2ui_lib PUBLIC
     ${NATIVERENDER_ROOT_PATH}
     ${NATIVERENDER_ROOT_PATH}/include
     ${NATIVERENDER_ROOT_PATH}/adapter
+    ${NATIVERENDER_ROOT_PATH}/functions
     ${MOCK_DIR}
     ${INFRA_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}
@@ -268,7 +276,9 @@ add_executable(UtilsTest
     ${TEST_DIR}/utils/A2UIArkUITypeConverterTest.cpp
     ${TEST_DIR}/utils/JsonAdapterTest.cpp
     ${TEST_DIR}/utils/StyleApplyUtilsExtendedTest.cpp
+    ${TEST_DIR}/utils/StyleParserPropertyNameTddTest.cpp
     ${TEST_DIR}/utils/ChildListParserBranchTest.cpp
+    ${TEST_DIR}/utils/LocalVariableSchemaValidationTddTest.cpp
     ${TEST_DIR}/utils/ArkUINativeAPITest.cpp
     ${TEST_DIR}/utils/MockNapiProviderTest.cpp
     ${TEST_DIR}/utils/ThemeColorUtilsTest.cpp
@@ -282,6 +292,7 @@ target_include_directories(
 gtest_discover_tests(UtilsTest)
 
 add_executable(FrameWorkTest
+    ${TEST_DIR}/framework/ChecksEngineTest.cpp
     ${TEST_DIR}/framework/DataModelTest.cpp
     ${TEST_DIR}/framework/DisplayDensityNativeEntryTest.cpp
     ${TEST_DIR}/framework/InitRenderSlotTest.cpp
@@ -361,6 +372,7 @@ add_executable(ComponentsTest
     ${TEST_DIR}/components/TemplateAdapterNodeBranchTest.cpp
     ${TEST_DIR}/components/TextFieldComponentTddTest.cpp
     ${TEST_DIR}/components/TextFieldComponentTest.cpp
+    ${TEST_DIR}/components/TypeValidationTddTest.cpp
     ${INFRA_DIR}/msvc_private_access_aliases.cpp
     ${INFRA_DIR}/mock/stub_impl.cpp
 )
@@ -368,6 +380,35 @@ target_link_libraries(ComponentsTest PRIVATE ${A2UI_TEST_LIBS})
 target_include_directories(
     ComponentsTest PRIVATE ${TEST_INCLUDE_DIR} ${INFRA_DIR} ${MOCK_DIR} ${CMAKE_CURRENT_SOURCE_DIR} ${CPP_INCLUDE_DIR})
 gtest_discover_tests(ComponentsTest)
+
+add_executable(ConstraintSizePercentTddTest
+    ${TEST_DIR}/components/ConstraintSizePercentTddTest.cpp
+    ${INFRA_DIR}/mock/stub_impl.cpp
+)
+target_link_libraries(ConstraintSizePercentTddTest PRIVATE ${A2UI_TEST_LIBS})
+target_include_directories(ConstraintSizePercentTddTest PRIVATE
+    ${TEST_INCLUDE_DIR} ${INFRA_DIR} ${MOCK_DIR} ${CMAKE_CURRENT_SOURCE_DIR} ${CPP_INCLUDE_DIR})
+gtest_discover_tests(ConstraintSizePercentTddTest)
+
+add_executable(CustomComponentDescriptorTest
+    ${TEST_DIR}/components/CustomComponentDescriptorPreservationTest.cpp
+    ${INFRA_DIR}/msvc_private_access_aliases.cpp
+    ${INFRA_DIR}/mock/stub_impl.cpp
+)
+target_link_libraries(CustomComponentDescriptorTest PRIVATE ${A2UI_TEST_LIBS})
+target_include_directories(CustomComponentDescriptorTest PRIVATE
+    ${TEST_INCLUDE_DIR} ${INFRA_DIR} ${MOCK_DIR} ${CMAKE_CURRENT_SOURCE_DIR} ${CPP_INCLUDE_DIR})
+gtest_discover_tests(CustomComponentDescriptorTest)
+
+add_executable(ExtendedTextAliasTest
+    ${TEST_DIR}/components/ExtendedTextAliasTest.cpp
+    ${INFRA_DIR}/msvc_private_access_aliases.cpp
+    ${INFRA_DIR}/mock/stub_impl.cpp
+)
+target_link_libraries(ExtendedTextAliasTest PRIVATE ${A2UI_TEST_LIBS})
+target_include_directories(ExtendedTextAliasTest PRIVATE
+    ${TEST_INCLUDE_DIR} ${INFRA_DIR} ${MOCK_DIR} ${CMAKE_CURRENT_SOURCE_DIR} ${CPP_INCLUDE_DIR})
+gtest_discover_tests(ExtendedTextAliasTest)
 
 add_executable(ActionsTest
     ${TEST_DIR}/actions/EventHandlerParserTest.cpp
@@ -393,11 +434,17 @@ gtest_discover_tests(ActionsTest)
 add_executable(NodeApiAdapterBranchCoverageTest
     ${TEST_DIR}/adapters/ArkUINodeApiAdapterBranchCoverageTest.cpp
     ${NATIVERENDER_ROOT_PATH}/adapter/ArkUINodeApiAdapter.cpp
+    ${NATIVERENDER_ROOT_PATH}/adapter/ArkUIConstraintSizeAdapter.cpp
+    ${MOCK_DIR}/mock_arkui_oh_api_adapter.cpp
     ${NATIVERENDER_ROOT_PATH}/adapter/ArkUINativeAPI.cpp
     ${NATIVERENDER_ROOT_PATH}/adapter/A2UIArkUITypeConverter.cpp
     ${NATIVERENDER_ROOT_PATH}/adapter/NapiBridge.cpp
+    ${NATIVERENDER_ROOT_PATH}/utils/SystemProperties.cpp
     ${MOCK_DIR}/mock_arkui_native_provider.cpp
+    ${MOCK_DIR}/mock_arkui_oh_api_adapter.cpp
     ${MOCK_DIR}/mock_napi_provider.cpp
+    ${INFRA_DIR}/mock/stub_impl.cpp
+    ${MOCK_DIR}/stub_impl.cpp
     ${INFRA_DIR}/msvc_private_access_aliases.cpp
 )
 target_include_directories(NodeApiAdapterBranchCoverageTest PRIVATE

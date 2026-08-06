@@ -235,6 +235,24 @@ void* operator new[](std::size_t size)
     return AllocateWithStdFailHook(size);
 }
 
+void* operator new(std::size_t size, const std::nothrow_t&) noexcept
+{
+    try {
+        return AllocateWithStdFailHook(size);
+    } catch (...) {
+        return nullptr;
+    }
+}
+
+void* operator new[](std::size_t size, const std::nothrow_t&) noexcept
+{
+    try {
+        return AllocateWithStdFailHook(size);
+    } catch (...) {
+        return nullptr;
+    }
+}
+
 void operator delete(void* ptr) noexcept
 {
     FreeWithStdFailHook(ptr);
@@ -251,6 +269,16 @@ void operator delete(void* ptr, std::size_t) noexcept
 }
 
 void operator delete[](void* ptr, std::size_t) noexcept
+{
+    FreeWithStdFailHook(ptr);
+}
+
+void operator delete(void* ptr, const std::nothrow_t&) noexcept
+{
+    FreeWithStdFailHook(ptr);
+}
+
+void operator delete[](void* ptr, const std::nothrow_t&) noexcept
 {
     FreeWithStdFailHook(ptr);
 }
@@ -1598,24 +1626,71 @@ TEST_F(FunctionBridgeActionCoverageTest, dynamic_value_resolver_should_resolve_o
     EXPECT_EQ(args.GetString("fallback", ""), "{{ 'raw' }}");
 }
 
-TEST_F(FunctionBridgeActionCoverageTest, dynamic_value_resolver_should_keep_custom_and_descriptor_shaped_args_literal)
+TEST_F(FunctionBridgeActionCoverageTest, dynamic_value_resolver_should_keep_custom_expression_args_literal)
 {
     std::shared_ptr<FunctionCallInfo> customCall = ResolveFunctionCallDescriptorForCoverage(
         "customAction", R"({"value":"{{ 'raw' }}","nested":{"enabled":"{{ true }}"}})", "void");
     ASSERT_NE(customCall, nullptr);
     EXPECT_EQ(customCall->GetArgs().GetString("value", ""), "{{ 'raw' }}");
     EXPECT_EQ(customCall->GetArgs().GetItem("nested").GetString("enabled", ""), "{{ true }}");
+}
 
-    std::shared_ptr<FunctionCallInfo> nestedCallArgs = ResolveFunctionCallDescriptorForCoverage(
-        "setAttributes", R"({"call":"formatString","args":{"value":"{{ 'raw nested' }}"}})", "void");
-    ASSERT_NE(nestedCallArgs, nullptr);
-    EXPECT_EQ(nestedCallArgs->GetArgs().GetString("call", ""), "formatString");
-    EXPECT_EQ(nestedCallArgs->GetArgs().GetItem("args").GetString("value", ""), "{{ 'raw nested' }}");
+TEST_F(FunctionBridgeActionCoverageTest, dynamic_value_resolver_should_resolve_nested_function_call_args)
+{
+    FunctionBridge::GetInstance().RegisterInvokeLocalFunction(env_, CreateCallback());
+    CreateSurface(37, "surface_nested_function_args", { "customAction", "nestedLocal" });
 
-    std::shared_ptr<FunctionCallInfo> pathOnlyArgs =
-        ResolveFunctionCallDescriptorForCoverage("setAttributes", R"({"path":"{{ '/raw' }}"})", "void");
-    ASSERT_NE(pathOnlyArgs, nullptr);
-    EXPECT_EQ(pathOnlyArgs->GetArgs().GetString("path", ""), "{{ '/raw' }}");
+    mockNapiPtr_->nextValueId_ = 5800;
+    napi_value invokeResult = PredictInvokeResultObject();
+    SetInvokeResponse(invokeResult, true, true, true, NewManualString("nested result"));
+
+    auto resolverInput = ParseJson(R"({
+        "call":"customAction",
+        "args":{"value":{"call":"nestedLocal","returnType":"string"}},
+        "returnType":"void"
+    })");
+    ASSERT_NE(resolverInput, nullptr);
+    DynamicResolveContext context = {
+        .renderId = 37, .surfaceId = "surface_nested_function_args", .componentId = "probe_nested_function_args"
+    };
+
+    std::shared_ptr<FunctionCallInfo> functionCall =
+        DynamicValueResolver::ResolveFunctionCallDescriptor(resolverInput->GetRoot(), context);
+    ASSERT_NE(functionCall, nullptr);
+    EXPECT_EQ(functionCall->GetArgs().GetString("value", ""), "nested result");
+}
+
+TEST_F(FunctionBridgeActionCoverageTest, dynamic_value_resolver_should_resolve_path_args_for_client_function)
+{
+    SurfaceSlot& surfaceSlot = CreateSurface(35, "surface_client_path_args", { "formatName" });
+    auto dataModel = surfaceSlot.GetOrCreateDataModel();
+    ASSERT_NE(dataModel, nullptr);
+    auto initialData = ParseJson(R"({"user":{"name":"Alice"}})");
+    ASSERT_NE(initialData, nullptr);
+    dataModel->ReplaceAll(initialData->GetRoot());
+
+    auto resolverInput = ParseJson(R"({
+        "call":"formatName",
+        "args":{"name":{"path":"/user/name"}},
+        "returnType":"string"
+    })");
+    ASSERT_NE(resolverInput, nullptr);
+    DynamicResolveContext context = {
+        .renderId = 35, .surfaceId = "surface_client_path_args", .componentId = "probe_client_path_args"
+    };
+
+    std::shared_ptr<FunctionCallInfo> firstCall =
+        DynamicValueResolver::ResolveFunctionCallDescriptor(resolverInput->GetRoot(), context);
+    ASSERT_NE(firstCall, nullptr);
+    EXPECT_EQ(firstCall->GetArgs().GetString("name", ""), "Alice");
+
+    auto updatedName = ParseJson(R"("Bob")");
+    ASSERT_NE(updatedName, nullptr);
+    dataModel->UpdateByPath("/user/name", updatedName->GetRoot());
+    std::shared_ptr<FunctionCallInfo> secondCall =
+        DynamicValueResolver::ResolveFunctionCallDescriptor(resolverInput->GetRoot(), context);
+    ASSERT_NE(secondCall, nullptr);
+    EXPECT_EQ(secondCall->GetArgs().GetString("name", ""), "Bob");
 }
 
 TEST_F(FunctionBridgeActionCoverageTest, dynamic_value_resolver_should_reject_invalid_function_call_descriptors)
@@ -1871,7 +1946,7 @@ TEST_F(FunctionBridgeActionCoverageTest,
     std::string source;
     EXPECT_TRUE(FindRuntimeErrorRequest(&renderId, &errorCode, &errorMessage, &source));
     EXPECT_EQ(renderId, 63);
-    EXPECT_EQ(errorCode, 3203);
+    EXPECT_EQ(errorCode, 3204);
     EXPECT_NE(errorMessage.find("no global variables"), std::string::npos);
     EXPECT_NE(errorMessage.find("__unknownMode"), std::string::npos);
     EXPECT_EQ(source, "DynamicValueResolver");
@@ -1909,7 +1984,7 @@ TEST_F(FunctionBridgeActionCoverageTest,
 }
 
 TEST_F(FunctionBridgeActionCoverageTest,
-    extended_text_component_should_dispatch_runtime_error_when_expression_uses_missing_data_model_path)
+    extended_text_component_should_defer_missing_expression_path_error_until_data_model_update)
 {
     RuntimeErrorDispatchBridge::GetInstance().RegisterDispatchRuntimeError(env_, CreateCallback());
     SurfaceSlot& surfaceSlot = CreateSurface(64, "surface_missing_expression_path", { "noop" });
@@ -1933,6 +2008,12 @@ TEST_F(FunctionBridgeActionCoverageTest,
     text.ApplyDescriptor(descriptor->GetRoot());
 
     EXPECT_EQ(text.GetTextValueForTest(), "User name = ");
+    EXPECT_EQ(CountRuntimeErrorRequests(), 0u);
+
+    auto update = ParseJson(R"({"value":{"user":{"name":"alice"}}})");
+    ASSERT_NE(update, nullptr);
+    ASSERT_TRUE(surfaceSlot.UpdateDataModel(update->GetRoot()));
+    text.ApplyDescriptor(descriptor->GetRoot());
 
     int32_t renderId = 0;
     int32_t errorCode = 0;
@@ -1940,7 +2021,42 @@ TEST_F(FunctionBridgeActionCoverageTest,
     std::string source;
     EXPECT_TRUE(FindRuntimeErrorRequest(&renderId, &errorCode, &errorMessage, &source));
     EXPECT_EQ(renderId, 64);
-    EXPECT_EQ(errorCode, SURFACE_ERROR_DYNAMIC_VALUE_RESOLVE_FAILED);
+    EXPECT_EQ(errorCode, SURFACE_ERROR_ILLEGAL_EXPRESSION);
+    EXPECT_NE(errorMessage.find("path not found"), std::string::npos);
+    EXPECT_NE(errorMessage.find("/user/missing"), std::string::npos);
+    EXPECT_EQ(source, "DynamicValueResolver");
+}
+
+TEST_F(FunctionBridgeActionCoverageTest,
+    dynamic_value_resolver_should_dispatch_illegal_expression_error_when_json_pointer_template_path_missing)
+{
+    RuntimeErrorDispatchBridge::GetInstance().RegisterDispatchRuntimeError(env_, CreateCallback());
+    SurfaceSlot& surfaceSlot = CreateSurface(67, "surface_missing_json_pointer", { "noop" });
+    auto modelRoot = ParseJson(R"({"user":{"name":"alice"}})");
+    ASSERT_NE(modelRoot, nullptr);
+    std::shared_ptr<DataModel> dataModel = surfaceSlot.GetOrCreateDataModel();
+    ASSERT_NE(dataModel, nullptr);
+    dataModel->ReplaceAll(modelRoot->GetRoot());
+
+    auto resolverInput = ParseJson(R"("User name = ${/user/missing}")");
+    ASSERT_NE(resolverInput, nullptr);
+    DynamicResolveContext context = { .renderId = 67,
+        .surfaceId = "surface_missing_json_pointer",
+        .componentId = "text_missing_json_pointer",
+        .allowExpression = true };
+
+    mockNapiPtr_->objectProperties_.clear();
+    ResolvedValue resolved = DynamicValueResolver::Resolve(resolverInput->GetRoot(), context);
+    EXPECT_TRUE(resolved.success);
+    EXPECT_EQ(resolved.value.GetStringValue(""), "User name = ");
+
+    int32_t renderId = 0;
+    int32_t errorCode = 0;
+    std::string errorMessage;
+    std::string source;
+    EXPECT_TRUE(FindRuntimeErrorRequest(&renderId, &errorCode, &errorMessage, &source));
+    EXPECT_EQ(renderId, 67);
+    EXPECT_EQ(errorCode, SURFACE_ERROR_ILLEGAL_EXPRESSION);
     EXPECT_NE(errorMessage.find("path not found"), std::string::npos);
     EXPECT_NE(errorMessage.find("/user/missing"), std::string::npos);
     EXPECT_EQ(source, "DynamicValueResolver");
@@ -1978,6 +2094,66 @@ TEST_F(FunctionBridgeActionCoverageTest,
 }
 
 TEST_F(FunctionBridgeActionCoverageTest,
+    dynamic_value_resolver_should_dispatch_size_non_array_runtime_error_without_illegal_prefix)
+{
+    RuntimeErrorDispatchBridge::GetInstance().RegisterDispatchRuntimeError(env_, CreateCallback());
+    CreateSurface(74, "surface_size_non_array", { "noop" });
+
+    auto resolverInput = ParseJson(R"("{{ 'Size = ' + size(42) }}")");
+    ASSERT_NE(resolverInput, nullptr);
+    DynamicResolveContext context = { .renderId = 74,
+        .surfaceId = "surface_size_non_array",
+        .componentId = "text_size_non_array",
+        .allowExpression = true };
+
+    mockNapiPtr_->objectProperties_.clear();
+    ResolvedValue resolved = DynamicValueResolver::Resolve(resolverInput->GetRoot(), context);
+    EXPECT_TRUE(resolved.success);
+    EXPECT_EQ(resolved.value.GetStringValue("fallback"), "Size = 0");
+
+    int32_t renderId = 0;
+    int32_t errorCode = 0;
+    std::string errorMessage;
+    std::string source;
+    EXPECT_TRUE(FindRuntimeErrorRequest(&renderId, &errorCode, &errorMessage, &source));
+    EXPECT_EQ(renderId, 74);
+    EXPECT_EQ(errorCode, SURFACE_ERROR_ILLEGAL_EXPRESSION);
+    EXPECT_EQ(errorMessage, "Built-in function size() expects an array argument");
+    EXPECT_EQ(source, "DynamicValueResolver");
+}
+
+TEST_F(FunctionBridgeActionCoverageTest,
+    dynamic_value_resolver_should_keep_inner_illegal_error_when_size_argument_falls_back)
+{
+    RuntimeErrorDispatchBridge::GetInstance().RegisterDispatchRuntimeError(env_, CreateCallback());
+    CreateSurface(75, "surface_size_inner_illegal", { "noop" });
+
+    auto resolverInput = ParseJson(R"("{{ 'Size = ' + size(a) }}")");
+    ASSERT_NE(resolverInput, nullptr);
+    DynamicResolveContext context = { .renderId = 75,
+        .surfaceId = "surface_size_inner_illegal",
+        .componentId = "text_size_inner_illegal",
+        .allowExpression = true };
+
+    mockNapiPtr_->objectProperties_.clear();
+    ResolvedValue resolved = DynamicValueResolver::Resolve(resolverInput->GetRoot(), context);
+    EXPECT_TRUE(resolved.success);
+    EXPECT_EQ(resolved.value.GetStringValue("fallback"), "Size = 0");
+
+    int32_t renderId = 0;
+    int32_t errorCode = 0;
+    std::string errorMessage;
+    std::string source;
+    EXPECT_TRUE(FindRuntimeErrorRequest(&renderId, &errorCode, &errorMessage, &source));
+    EXPECT_EQ(renderId, 75);
+    EXPECT_EQ(errorCode, SURFACE_ERROR_ILLEGAL_EXPRESSION);
+    EXPECT_NE(errorMessage.find("illegal expression"), std::string::npos);
+    EXPECT_NE(errorMessage.find("unquoted string: a"), std::string::npos);
+    EXPECT_EQ(errorMessage.find("Built-in function size() expects an array argument"), std::string::npos);
+    EXPECT_EQ(source, "DynamicValueResolver");
+}
+
+TEST_F(FunctionBridgeActionCoverageTest,
     extended_text_component_should_dispatch_runtime_error_when_expression_uses_invalid_global_member_access)
 {
     RuntimeErrorDispatchBridge::GetInstance().RegisterDispatchRuntimeError(env_, CreateCallback());
@@ -2004,7 +2180,7 @@ TEST_F(FunctionBridgeActionCoverageTest,
     std::string source;
     EXPECT_TRUE(FindRuntimeErrorRequest(&renderId, &errorCode, &errorMessage, &source));
     EXPECT_EQ(renderId, 71);
-    EXPECT_EQ(errorCode, SURFACE_ERROR_DYNAMIC_VALUE_RESOLVE_FAILED);
+    EXPECT_EQ(errorCode, SURFACE_ERROR_ILLEGAL_EXPRESSION);
     EXPECT_EQ(errorMessage, "member access not supported: .value");
     EXPECT_EQ(source, "DynamicValueResolver");
 }
@@ -2041,6 +2217,39 @@ TEST_F(FunctionBridgeActionCoverageTest,
 }
 
 TEST_F(FunctionBridgeActionCoverageTest,
+    extended_text_component_should_preserve_prefix_for_illegal_json_pointer_bracket_operand)
+{
+    RuntimeErrorDispatchBridge::GetInstance().RegisterDispatchRuntimeError(env_, CreateCallback());
+    CreateSurface(73, "surface_illegal_json_pointer_bracket", { "noop" });
+
+    auto descriptor = ParseJson(R"({
+        "id":"text_illegal_json_pointer_bracket",
+        "content":"{{ 'Wrong root = ' + $__dataModel.user[/user/name] }}"
+    })");
+    ASSERT_NE(descriptor, nullptr);
+
+    ExtendedTextComponent text;
+    text.SetRenderId(73);
+    text.SetSurfaceId("surface_illegal_json_pointer_bracket");
+
+    mockNapiPtr_->objectProperties_.clear();
+    text.ApplyDescriptor(descriptor->GetRoot());
+
+    EXPECT_EQ(text.GetTextValueForTest(), "Wrong root = ");
+
+    int32_t renderId = 0;
+    int32_t errorCode = 0;
+    std::string errorMessage;
+    std::string source;
+    EXPECT_TRUE(FindRuntimeErrorRequest(&renderId, &errorCode, &errorMessage, &source));
+    EXPECT_EQ(renderId, 73);
+    EXPECT_EQ(errorCode, SURFACE_ERROR_ILLEGAL_EXPRESSION);
+    EXPECT_NE(errorMessage.find("illegal expression"), std::string::npos);
+    EXPECT_NE(errorMessage.find("__dataModel"), std::string::npos);
+    EXPECT_EQ(source, "DynamicValueResolver");
+}
+
+TEST_F(FunctionBridgeActionCoverageTest,
     dynamic_value_resolver_should_dispatch_generic_runtime_error_when_expression_result_is_null)
 {
     RuntimeErrorDispatchBridge::GetInstance().RegisterDispatchRuntimeError(env_, CreateCallback());
@@ -2070,7 +2279,7 @@ TEST_F(FunctionBridgeActionCoverageTest,
     std::string source;
     EXPECT_TRUE(FindRuntimeErrorRequest(&renderId, &errorCode, &errorMessage, &source));
     EXPECT_EQ(renderId, 67);
-    EXPECT_EQ(errorCode, SURFACE_ERROR_DYNAMIC_VALUE_RESOLVE_FAILED);
+    EXPECT_EQ(errorCode, SURFACE_ERROR_ILLEGAL_EXPRESSION);
     EXPECT_EQ(errorMessage, "expression evaluation failed");
     EXPECT_EQ(source, "DynamicValueResolver");
 }
@@ -2132,7 +2341,7 @@ TEST_F(FunctionBridgeActionCoverageTest,
     std::string source;
     EXPECT_TRUE(FindRuntimeErrorRequest(&renderId, &errorCode, &errorMessage, &source));
     EXPECT_EQ(renderId, 69);
-    EXPECT_EQ(errorCode, SURFACE_ERROR_DYNAMIC_VALUE_RESOLVE_FAILED);
+    EXPECT_EQ(errorCode, SURFACE_ERROR_ILLEGAL_EXPRESSION);
     EXPECT_EQ(errorMessage, "division by zero");
     EXPECT_EQ(source, "DynamicValueResolver");
 }
@@ -2203,7 +2412,7 @@ TEST_F(FunctionBridgeActionCoverageTest,
     std::string source;
     EXPECT_TRUE(FindRuntimeErrorRequest(&renderId, &errorCode, &errorMessage, &source));
     EXPECT_EQ(renderId, 68);
-    EXPECT_EQ(errorCode, SURFACE_ERROR_DYNAMIC_VALUE_RESOLVE_FAILED);
+    EXPECT_EQ(errorCode, SURFACE_ERROR_ILLEGAL_EXPRESSION);
     EXPECT_NE(errorMessage.find("division by zero"), std::string::npos);
     EXPECT_EQ(source, "Component");
 }
@@ -2235,7 +2444,7 @@ TEST_F(FunctionBridgeActionCoverageTest,
     std::string source;
     EXPECT_TRUE(FindRuntimeErrorRequest(&renderId, &errorCode, &errorMessage, &source));
     EXPECT_EQ(renderId, 72);
-    EXPECT_EQ(errorCode, SURFACE_ERROR_DYNAMIC_VALUE_RESOLVE_FAILED);
+    EXPECT_EQ(errorCode, SURFACE_ERROR_ILLEGAL_EXPRESSION);
     EXPECT_EQ(errorMessage, "member access not supported: .value");
     EXPECT_EQ(source, "Component");
 }
@@ -2649,6 +2858,29 @@ TEST_F(FunctionBridgeActionCoverageTest, dynamic_value_resolver_should_fail_when
     EXPECT_EQ(resolved.source, ResolveSource::FUNCTION_CALL);
     EXPECT_EQ(resolved.functionName, "customLocalFail");
     EXPECT_EQ(resolved.errorMessage, "local function invoke failed");
+}
+
+TEST_F(FunctionBridgeActionCoverageTest, function_bridge_should_report_local_function_error_when_not_in_catalog)
+{
+    FunctionBridge::GetInstance().RegisterInvokeLocalFunction(env_, CreateCallback());
+    RuntimeErrorDispatchBridge::GetInstance().RegisterDispatchRuntimeError(env_, CreateCallback());
+    CreateSurface(36, "surface_unknown_local_function", {});
+    auto functionCall = CreateFunctionCall("unknownLocalFunction", "string");
+
+    mockNapiPtr_->objectProperties_.clear();
+    JsonValue returnValue;
+    EXPECT_FALSE(FunctionBridge::GetInstance().InvokeForValue(
+        36, "surface_unknown_local_function", "probe_unknown_local_function", functionCall, returnValue));
+
+    int32_t renderId = -1;
+    int32_t errorCode = 0;
+    std::string errorMessage;
+    std::string source;
+    EXPECT_TRUE(FindRuntimeErrorRequest(&renderId, &errorCode, &errorMessage, &source));
+    EXPECT_EQ(renderId, 36);
+    EXPECT_EQ(errorCode, SURFACE_ERROR_LOCAL_FUNCTION);
+    EXPECT_NE(errorMessage.find("unknownLocalFunction"), std::string::npos);
+    EXPECT_EQ(source, "FunctionBridge");
 }
 
 TEST_F(FunctionBridgeActionCoverageTest, button_component_should_not_dispatch_runtime_error_without_positive_render_id)

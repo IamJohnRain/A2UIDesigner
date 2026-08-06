@@ -15,7 +15,7 @@
 
 {
   "name": "@arkui-genius/genui",
-  "version": "0.7.0-alpha.7",
+  "version": "1.0.1",
   "description": "A2UI protocol rendering engine for HarmonyOS ArkUI",
   "main": "Index.ets",
   "author": "ArkUI",

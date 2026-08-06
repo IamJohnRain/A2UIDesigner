@@ -16,13 +16,13 @@
 import { Catalog } from '../../interface/Catalog';
 import { CatalogItem as PublicCatalogItem } from '../../interface/CatalogItem';
 import { InnerFunctionItem } from './FunctionItem';
-import { FunctionCall as InternalFunctionCall } from '../types/types';
+import { FunctionCall as InternalFunctionCall, SchemaProvider } from '../types/types';
 import { CatalogItem } from './CatalogItem';
 import { ClientFunction } from '../../interface/ClientFunction';
 
 export class CatalogImpl implements Catalog {
   private id: string;
-  components: CatalogItem[];
+  public components: CatalogItem[];
   private functionItems: Map<string, InnerFunctionItem> = new Map<string, InnerFunctionItem>();
 
   constructor(
@@ -142,7 +142,7 @@ export class CatalogImpl implements Catalog {
     const normalizedItems: CatalogItem[] = [];
     items.forEach((item: CatalogItem) => {
       if (item !== undefined && item !== null && item.name.length > 0) {
-        normalizedItems.push(item);
+        CatalogImpl.addOrReplaceItem(normalizedItems, item);
       }
     });
     return normalizedItems;
@@ -184,8 +184,64 @@ export class CatalogImpl implements Catalog {
     return {
       name: item.name,
       isInnerNative: false,
-      schemaProvider: item.schemaProvider,
+      schemaProvider: CatalogImpl.wrapClientFunctionSchemaProvider(item.name, item.schemaProvider),
       functionCall: item.functionCall
     };
+  }
+
+  private static wrapClientFunctionSchemaProvider(name: string, schemaProvider: SchemaProvider): SchemaProvider {
+    return (version: string): string => {
+      const schemaText: string = schemaProvider(version).trim();
+      if (schemaText.length === 0 || CatalogImpl.isFullFunctionSchema(schemaText)) {
+        return schemaText;
+      }
+
+      let argsSchema: Object;
+      try {
+        argsSchema = JSON.parse(schemaText) as Object;
+      } catch (_error) {
+        return schemaText;
+      }
+
+      const callSchema: Record<string, Object> = { 'const': name };
+      const returnTypeSchema: Record<string, Object> = {
+        'type': 'string',
+        'enum': ['string', 'number', 'boolean', 'array', 'object', 'null', 'any', 'void'],
+        'default': 'any'
+      };
+      const properties: Record<string, Object> = {
+        'call': callSchema,
+        'args': argsSchema,
+        'returnType': returnTypeSchema
+      };
+      const wrapper: Record<string, Object> = {
+        'type': 'object',
+        'properties': properties,
+        'required': ['call', 'args'],
+        'additionalProperties': false
+      };
+      const argsRecord: Record<string, Object> = argsSchema as Record<string, Object>;
+      if (argsRecord['$defs'] !== undefined) {
+        wrapper['$defs'] = argsRecord['$defs'];
+      }
+      if (argsRecord['definitions'] !== undefined) {
+        wrapper['definitions'] = argsRecord['definitions'];
+      }
+      return JSON.stringify(wrapper);
+    };
+  }
+
+  private static isFullFunctionSchema(schemaText: string): boolean {
+    try {
+      const schema: Record<string, Object> = JSON.parse(schemaText) as Record<string, Object>;
+      const propertiesValue: Object | undefined = schema['properties'];
+      if (propertiesValue === undefined || propertiesValue === null || Array.isArray(propertiesValue)) {
+        return false;
+      }
+      const properties: Record<string, Object> = propertiesValue as Record<string, Object>;
+      return properties['call'] !== undefined && properties['args'] !== undefined;
+    } catch (_error) {
+      return false;
+    }
   }
 }

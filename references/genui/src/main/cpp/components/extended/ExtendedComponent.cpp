@@ -15,6 +15,7 @@
 
 #include "ExtendedComponent.h"
 
+#include <algorithm>
 #include <cmath>
 #include <memory>
 #include <set>
@@ -217,283 +218,291 @@ void ExtendedComponent::ValidateComponentSpecificDynamicStylesDfx(
     if (!styles.IsObject() || dynamicStyleKeys.empty()) {
         return;
     }
+    std::string componentType = GetType();
+    if (componentType == "Button") {
+        ValidateButtonDynamicStyles(styles, dynamicStyleKeys);
+        return;
+    }
+    if (componentType == "TextInput") {
+        ValidateTextInputDynamicStyles(styles, dynamicStyleKeys);
+        return;
+    }
+    if (componentType == "Toggle") {
+        ValidateToggleDynamicStyles(styles, dynamicStyleKeys);
+        return;
+    }
+    if (componentType == "Radio") {
+        ValidateRadioDynamicStyles(styles, dynamicStyleKeys);
+        return;
+    }
+    if (componentType == "Checkbox") {
+        ValidateCheckboxDynamicStyles(styles, dynamicStyleKeys);
+        return;
+    }
+    if (componentType == "CheckboxGroup") {
+        ValidateCheckboxGroupDynamicStyles(styles, dynamicStyleKeys);
+    }
+}
 
-    auto hasDynamicStyle = [&dynamicStyleKeys, &styles](const char* styleName) {
-        return styleName != nullptr && dynamicStyleKeys.find(styleName) != dynamicStyleKeys.end() &&
-               styles.Has(styleName);
-    };
-    auto reportTypeMismatch = [this](const std::string& path, const std::string& expected) {
-        ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
-            "Property " + path + " expects " + expected + ", fallback/reset has been applied", path);
-    };
-    auto reportInvalidValue = [this](const std::string& path, const std::string& reason) {
-        ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
-            "Property " + path + " " + reason + ", fallback/reset has been applied", path);
-    };
-    auto reportUndefinedField = [this](const std::string& path) {
-        ReportExtendedSchemaWarning(
-            SCHEMA_ERROR_CODE_UNDEFINED_FIELD, "Property " + path + " is undefined and has been ignored", path);
-    };
-    auto validateNumber = [&styles, &hasDynamicStyle, &reportTypeMismatch, &reportInvalidValue](
-                              const char* styleName, bool requirePositive) {
-        if (!hasDynamicStyle(styleName)) {
+void ExtendedComponent::ReportDynamicStyleUndefinedField(const std::string& propertyPath) const
+{
+    if (propertyPath.empty()) {
+        return;
+    }
+    ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_UNDEFINED_FIELD,
+        "Property " + propertyPath + " is undefined and has been ignored", propertyPath);
+}
+
+void ExtendedComponent::ValidateDynamicStyleNumberRange(const JsonValue& styles,
+    const std::set<std::string>& dynamicStyleKeys, const std::string& styleName, double minValue,
+    std::optional<double> maxValue) const
+{
+    if (!HasDynamicStyleValue(styles, dynamicStyleKeys, styleName)) {
+        return;
+    }
+    JsonValue value = styles.GetItem(styleName.c_str());
+    std::string path = "styles." + styleName;
+    if (!value.IsNumber()) {
+        ReportDynamicStyleTypeMismatch(path, "number");
+        return;
+    }
+    double number = value.GetNumberValue(0.0);
+    if (!std::isfinite(number) || number < minValue || (maxValue.has_value() && number > maxValue.value())) {
+        ReportDynamicStyleInvalidValue(path, "is out of range");
+    }
+}
+
+void ExtendedComponent::ValidateDynamicStyleBool(
+    const JsonValue& styles, const std::set<std::string>& dynamicStyleKeys, const std::string& styleName) const
+{
+    if (HasDynamicStyleValue(styles, dynamicStyleKeys, styleName) && !styles.GetItem(styleName.c_str()).IsBool()) {
+        ReportDynamicStyleTypeMismatch("styles." + styleName, "boolean");
+    }
+}
+
+void ExtendedComponent::ValidateDynamicStyleStringColorValue(const JsonValue& value, const std::string& path) const
+{
+    uint32_t color = 0;
+    if (!value.IsString()) {
+        ReportDynamicStyleTypeMismatch(path, "string color");
+        return;
+    }
+    if (!ExtendedStyleResolver::ParseColor(value, color)) {
+        ReportDynamicStyleInvalidValue(path, "has invalid color value");
+    }
+}
+
+void ExtendedComponent::ValidateDynamicStyleStringColor(
+    const JsonValue& styles, const std::set<std::string>& dynamicStyleKeys, const std::string& styleName) const
+{
+    if (HasDynamicStyleValue(styles, dynamicStyleKeys, styleName)) {
+        ValidateDynamicStyleStringColorValue(styles.GetItem(styleName.c_str()), "styles." + styleName);
+    }
+}
+
+void ExtendedComponent::ValidateDynamicStyleFontWeight(const JsonValue& styles,
+    const std::set<std::string>& dynamicStyleKeys, const std::string& styleName,
+    const std::set<std::string>& allowedStringValues) const
+{
+    if (!HasDynamicStyleValue(styles, dynamicStyleKeys, styleName)) {
+        return;
+    }
+    JsonValue value = styles.GetItem(styleName.c_str());
+    std::string path = "styles." + styleName;
+    if (!value.IsString() && !value.IsNumber()) {
+        ReportDynamicStyleTypeMismatch(path, "string or number");
+        return;
+    }
+    if (!IsValidFontWeightValue(value, allowedStringValues)) {
+        ReportDynamicStyleInvalidValue(path, "is out of enum range");
+    }
+}
+
+void ExtendedComponent::ValidateDynamicStyleCancelButton(
+    const JsonValue& styles, const std::set<std::string>& dynamicStyleKeys, const std::string& styleName) const
+{
+    if (!HasDynamicStyleValue(styles, dynamicStyleKeys, styleName)) {
+        return;
+    }
+    JsonValue cancelButtonValue = styles.GetItem(styleName.c_str());
+    std::string path = "styles." + styleName;
+    if (!cancelButtonValue.IsObject()) {
+        ReportDynamicStyleTypeMismatch(path, "object");
+        return;
+    }
+    for (JsonValue child = cancelButtonValue.GetChild(); child.IsValid(); child = child.GetNext()) {
+        std::string key = child.GetKey();
+        if (!key.empty() && key != "style" && key != "fontSize" && key != "fontColor") {
+            ReportDynamicStyleUndefinedField(path + "." + key);
+        }
+    }
+    if (cancelButtonValue.Has("style")) {
+        JsonValue styleValue = cancelButtonValue.GetItem("style");
+        std::string stylePath = path + ".style";
+        if (!styleValue.IsString()) {
+            ReportDynamicStyleTypeMismatch(stylePath, "string enum");
+        } else if (!IsSupportedTextInputCancelButtonStyle(styleValue)) {
+            ReportDynamicStyleInvalidValue(stylePath, "is out of enum range");
+        }
+    }
+    if (cancelButtonValue.Has("fontSize")) {
+        JsonValue fontSizeValue = cancelButtonValue.GetItem("fontSize");
+        float fontSize = 0.0F;
+        std::string fontSizePath = path + ".fontSize";
+        if (fontSizeValue.IsNumber()) {
+            double number = fontSizeValue.GetNumberValue(0.0);
+            if (!std::isfinite(number) || number <= 0.0) {
+                ReportDynamicStyleInvalidValue(fontSizePath, "is out of range");
+            }
+        } else if (!fontSizeValue.IsString()) {
+            ReportDynamicStyleTypeMismatch(fontSizePath, "number or dimension");
+        } else if (!TryParseTextInputCancelButtonFontSize(fontSizeValue, fontSize)) {
+            ReportDynamicStyleInvalidValue(fontSizePath, "is out of range");
+        } else if (fontSize <= 0.0F) {
+            ReportDynamicStyleInvalidValue(fontSizePath, "is out of range");
+        }
+    }
+    if (cancelButtonValue.Has("fontColor")) {
+        ValidateDynamicStyleStringColorValue(cancelButtonValue.GetItem("fontColor"), path + ".fontColor");
+    }
+}
+
+void ExtendedComponent::ValidateDynamicStyleMark(
+    const JsonValue& styles, const std::set<std::string>& dynamicStyleKeys, const std::string& styleName) const
+{
+    if (!HasDynamicStyleValue(styles, dynamicStyleKeys, styleName)) {
+        return;
+    }
+    JsonValue markValue = styles.GetItem(styleName.c_str());
+    std::string path = "styles." + styleName;
+    if (!markValue.IsObject()) {
+        ReportDynamicStyleTypeMismatch(path, "object");
+        return;
+    }
+    for (JsonValue child = markValue.GetChild(); child.IsValid(); child = child.GetNext()) {
+        std::string key = child.GetKey();
+        if (!key.empty() && key != "strokeColor" && key != "size" && key != "strokeWidth") {
+            ReportDynamicStyleUndefinedField(path + "." + key);
+        }
+    }
+    if (markValue.Has("strokeColor")) {
+        ValidateDynamicStyleStringColorValue(markValue.GetItem("strokeColor"), path + ".strokeColor");
+    }
+    auto validateMarkNumber = [this, &markValue, &path](const char* key) {
+        if (key == nullptr || !markValue.Has(key)) {
             return;
         }
-        JsonValue value = styles.GetItem(styleName);
-        float parsed = 0.0F;
-        bool parsedNumber = StyleApplyUtils::ParseNumber(value, parsed);
-        std::string path = "styles." + std::string(styleName);
+        JsonValue value = markValue.GetItem(key);
+        std::string itemPath = path + "." + key;
         if (!value.IsNumber()) {
-            reportTypeMismatch(path, "number");
-            return;
-        }
-        if (!parsedNumber || !std::isfinite(parsed) || (requirePositive && parsed <= 0.0F) ||
-            (!requirePositive && parsed < 0.0F)) {
-            reportInvalidValue(path, "is out of range");
-        }
-    };
-    auto validateNumberType = [&styles, &hasDynamicStyle, &reportTypeMismatch](const char* styleName) {
-        if (!hasDynamicStyle(styleName)) {
-            return;
-        }
-        if (!styles.GetItem(styleName).IsNumber()) {
-            reportTypeMismatch("styles." + std::string(styleName), "number");
-        }
-    };
-    auto validateNumberRange = [&styles, &hasDynamicStyle, &reportTypeMismatch, &reportInvalidValue](
-                                   const char* styleName, double minValue, bool hasMaxValue, double maxValue) {
-        if (!hasDynamicStyle(styleName)) {
-            return;
-        }
-        JsonValue value = styles.GetItem(styleName);
-        std::string path = "styles." + std::string(styleName);
-        if (!value.IsNumber()) {
-            reportTypeMismatch(path, "number");
+            ReportDynamicStyleTypeMismatch(itemPath, "number");
             return;
         }
         double number = value.GetNumberValue(0.0);
-        if (!std::isfinite(number) || number < minValue || (hasMaxValue && number > maxValue)) {
-            reportInvalidValue(path, "is out of range");
+        if (!std::isfinite(number) || number <= 0.0) {
+            ReportDynamicStyleInvalidValue(itemPath, "is out of range");
         }
     };
-    auto validateStringEnum = [&styles, &hasDynamicStyle, &reportTypeMismatch, &reportInvalidValue](
-                                  const char* styleName, const std::set<std::string>& allowedValues) {
-        if (!hasDynamicStyle(styleName)) {
-            return;
-        }
-        JsonValue value = styles.GetItem(styleName);
-        std::string path = "styles." + std::string(styleName);
-        if (!value.IsString()) {
-            reportTypeMismatch(path, "string enum");
-            return;
-        }
-        std::string token = StyleApplyUtils::TrimToken(value.GetStringValue(""));
-        if (allowedValues.find(token) == allowedValues.end()) {
-            reportInvalidValue(path, "is out of enum range");
-        }
-    };
-    auto validateBool = [&styles, &hasDynamicStyle, &reportTypeMismatch](const char* styleName) {
-        if (hasDynamicStyle(styleName) && !styles.GetItem(styleName).IsBool()) {
-            reportTypeMismatch("styles." + std::string(styleName), "boolean");
-        }
-    };
-    auto validateStringColorValue = [&reportTypeMismatch, &reportInvalidValue](
-                                        const JsonValue& value, const std::string& path) {
-        uint32_t color = 0;
-        if (!value.IsString()) {
-            reportTypeMismatch(path, "string color");
-            return;
-        }
-        if (!ExtendedStyleResolver::ParseColor(value, color)) {
-            reportInvalidValue(path, "has invalid color value");
-        }
-    };
-    auto validateStringColor = [&styles, &hasDynamicStyle, &validateStringColorValue](const char* styleName) {
-        if (hasDynamicStyle(styleName)) {
-            validateStringColorValue(styles.GetItem(styleName), "styles." + std::string(styleName));
-        }
-    };
-    auto validateFontWeight = [&styles, &hasDynamicStyle, &reportTypeMismatch, &reportInvalidValue](
-                                  const char* styleName, const std::set<std::string>& allowedStringValues) {
-        if (!hasDynamicStyle(styleName)) {
-            return;
-        }
-        JsonValue value = styles.GetItem(styleName);
-        std::string path = "styles." + std::string(styleName);
-        if (!value.IsString() && !value.IsNumber()) {
-            reportTypeMismatch(path, "string or number");
-            return;
-        }
-        if (!IsValidFontWeightValue(value, allowedStringValues)) {
-            reportInvalidValue(path, "is out of enum range");
-        }
-    };
-    auto validateCancelButton = [&styles, &hasDynamicStyle, &reportTypeMismatch, &reportInvalidValue,
-                                    &reportUndefinedField, &validateStringColorValue](const char* styleName) {
-        if (!hasDynamicStyle(styleName)) {
-            return;
-        }
-        JsonValue cancelButtonValue = styles.GetItem(styleName);
-        std::string path = "styles." + std::string(styleName);
-        if (!cancelButtonValue.IsObject()) {
-            reportTypeMismatch(path, "object");
-            return;
-        }
-        for (JsonValue child = cancelButtonValue.GetChild(); child.IsValid(); child = child.GetNext()) {
+    validateMarkNumber("size");
+    validateMarkNumber("strokeWidth");
+}
+
+void ExtendedComponent::ValidateDynamicStyleUnderlineColor(
+    const JsonValue& styles, const std::set<std::string>& dynamicStyleKeys) const
+{
+    if (!HasDynamicStyleValue(styles, dynamicStyleKeys, "underlineColor")) {
+        return;
+    }
+    JsonValue value = styles.GetItem("underlineColor");
+    if (value.IsObject()) {
+        const char* colorKeys[] = { "typing", "normal", "error", "disable" };
+        for (JsonValue child = value.GetChild(); child.IsValid(); child = child.GetNext()) {
             std::string key = child.GetKey();
-            if (!key.empty() && key != "style" && key != "fontSize" && key != "fontColor") {
-                reportUndefinedField(path + "." + key);
+            if (!key.empty() && key != "typing" && key != "normal" && key != "error" && key != "disable") {
+                ReportDynamicStyleUndefinedField("styles.underlineColor." + key);
             }
         }
-        if (cancelButtonValue.Has("style")) {
-            JsonValue styleValue = cancelButtonValue.GetItem("style");
-            std::string stylePath = path + ".style";
-            if (!styleValue.IsString()) {
-                reportTypeMismatch(stylePath, "string enum");
-            } else if (!IsSupportedTextInputCancelButtonStyle(styleValue)) {
-                reportInvalidValue(stylePath, "is out of enum range");
+        for (const char* key : colorKeys) {
+            if (key != nullptr && value.Has(key)) {
+                ValidateDynamicStyleStringColorValue(value.GetItem(key), "styles.underlineColor." + std::string(key));
             }
         }
-        if (cancelButtonValue.Has("fontSize")) {
-            JsonValue fontSizeValue = cancelButtonValue.GetItem("fontSize");
-            float fontSize = 0.0F;
-            std::string fontSizePath = path + ".fontSize";
-            if (fontSizeValue.IsNumber()) {
-                double number = fontSizeValue.GetNumberValue(0.0);
-                if (!std::isfinite(number) || number <= 0.0) {
-                    reportInvalidValue(fontSizePath, "is out of range");
-                }
-            } else if (!fontSizeValue.IsString()) {
-                reportTypeMismatch(fontSizePath, "number or dimension");
-            } else if (!TryParseTextInputCancelButtonFontSize(fontSizeValue, fontSize)) {
-                reportInvalidValue(fontSizePath, "is out of range");
-            } else if (fontSize <= 0.0F) {
-                reportInvalidValue(fontSizePath, "is out of range");
-            }
-        }
-        if (cancelButtonValue.Has("fontColor")) {
-            validateStringColorValue(cancelButtonValue.GetItem("fontColor"), path + ".fontColor");
-        }
-    };
-    auto validateMark = [&styles, &hasDynamicStyle, &reportTypeMismatch, &reportInvalidValue, &reportUndefinedField,
-                            &validateStringColorValue](const char* styleName) {
-        if (!hasDynamicStyle(styleName)) {
-            return;
-        }
-        JsonValue markValue = styles.GetItem(styleName);
-        std::string path = "styles." + std::string(styleName);
-        if (!markValue.IsObject()) {
-            reportTypeMismatch(path, "object");
-            return;
-        }
-        for (JsonValue child = markValue.GetChild(); child.IsValid(); child = child.GetNext()) {
-            std::string key = child.GetKey();
-            if (!key.empty() && key != "strokeColor" && key != "size" && key != "strokeWidth") {
-                reportUndefinedField(path + "." + key);
-            }
-        }
-        if (markValue.Has("strokeColor")) {
-            validateStringColorValue(markValue.GetItem("strokeColor"), path + ".strokeColor");
-        }
-        auto validateMarkNumber = [&markValue, &path, &reportTypeMismatch, &reportInvalidValue](const char* key) {
-            if (key == nullptr || !markValue.Has(key)) {
-                return;
-            }
-            JsonValue value = markValue.GetItem(key);
-            std::string itemPath = path + "." + key;
-            if (!value.IsNumber()) {
-                reportTypeMismatch(itemPath, "number");
-                return;
-            }
-            double number = value.GetNumberValue(0.0);
-            if (!std::isfinite(number) || number <= 0.0) {
-                reportInvalidValue(itemPath, "is out of range");
-            }
-        };
-        validateMarkNumber("size");
-        validateMarkNumber("strokeWidth");
-    };
-    std::string componentType = GetType();
-    if (componentType == "Button") {
-        validateNumber("fontSize", true);
-        validateNumber("minFontSize", true);
-        validateNumber("maxFontSize", true);
-        validateNumberRange("minFontScale", 0.0, true, 1.0);
-        validateNumberRange("maxFontScale", 1.0, false, 0.0);
-        validateStringEnum("fontScaleMode", { "custom", "followSystem" });
-        validateStringColor("fontColor");
-        validateFontWeight("fontWeight", { "normal", "regular", "medium", "bold", "bolder" });
-        return;
+    } else {
+        ValidateDynamicStyleStringColorValue(value, "styles.underlineColor");
     }
+}
 
-    if (componentType == "TextInput") {
-        validateStringColor("fontColor");
-        validateStringColor("placeholderColor");
-        validateStringColor("caretColor");
-        validateStringColor("selectedBackgroundColor");
-        validateNumber("fontSize", true);
-        validateNumber("minFontSize", true);
-        validateNumber("maxFontSize", true);
-        validateNumber("maxLines", true);
-        validateNumberRange("minFontScale", 0.0, true, 1.0);
-        validateNumberRange("maxFontScale", 1.0, false, 0.0);
-        validateStringEnum("fontScaleMode", { "custom", "followSystem" });
-        validateStringEnum("textAlign",
-            { "start", "center", "end", "justify", "left", "leftToRight", "ltr", "right", "rightToLeft", "rtl" });
-        validateStringEnum("wordBreak", { "normal", "breakAll", "breakWord", "hyphenation" });
-        validateBool("showUnderline");
-        validateCancelButton("cancelButton");
-        validateFontWeight("fontWeight", { "lighter", "normal", "regular", "medium", "bold", "bolder" });
-        if (hasDynamicStyle("underlineColor")) {
-            JsonValue value = styles.GetItem("underlineColor");
-            if (value.IsObject()) {
-                const char* colorKeys[] = { "typing", "normal", "error", "disable" };
-                for (JsonValue child = value.GetChild(); child.IsValid(); child = child.GetNext()) {
-                    std::string key = child.GetKey();
-                    if (!key.empty() && key != "typing" && key != "normal" && key != "error" && key != "disable") {
-                        reportUndefinedField("styles.underlineColor." + key);
-                    }
-                }
-                for (const char* key : colorKeys) {
-                    if (key != nullptr && value.Has(key)) {
-                        validateStringColorValue(value.GetItem(key), "styles.underlineColor." + std::string(key));
-                    }
-                }
-            } else {
-                validateStringColorValue(value, "styles.underlineColor");
-            }
-        }
-        return;
-    }
+void ExtendedComponent::ValidateButtonDynamicStyles(
+    const JsonValue& styles, const std::set<std::string>& dynamicStyleKeys)
+{
+    ValidateDynamicStyleNumberProperty(styles, dynamicStyleKeys, "fontSize", true);
+    ValidateDynamicStyleNumberProperty(styles, dynamicStyleKeys, "minFontSize", true);
+    ValidateDynamicStyleNumberProperty(styles, dynamicStyleKeys, "maxFontSize", true);
+    ValidateDynamicStyleNumberRange(styles, dynamicStyleKeys, "minFontScale", 0.0, 1.0);
+    ValidateDynamicStyleNumberRange(styles, dynamicStyleKeys, "maxFontScale", 1.0, std::nullopt);
+    ValidateDynamicStyleEnumProperty(styles, dynamicStyleKeys, "fontScaleMode", { "custom", "followSystem" });
+    ValidateDynamicStyleStringColor(styles, dynamicStyleKeys, "fontColor");
+    ValidateDynamicStyleFontWeight(
+        styles, dynamicStyleKeys, "fontWeight", { "normal", "regular", "medium", "bold", "bolder" });
+}
 
-    if (componentType == "Toggle") {
-        validateStringColor("selectedColor");
-        validateStringColor("unSelectedColor");
-        validateStringColor("switchPointColor");
-        return;
-    }
+void ExtendedComponent::ValidateTextInputDynamicStyles(
+    const JsonValue& styles, const std::set<std::string>& dynamicStyleKeys)
+{
+    ValidateDynamicStyleStringColor(styles, dynamicStyleKeys, "fontColor");
+    ValidateDynamicStyleStringColor(styles, dynamicStyleKeys, "placeholderColor");
+    ValidateDynamicStyleStringColor(styles, dynamicStyleKeys, "caretColor");
+    ValidateDynamicStyleStringColor(styles, dynamicStyleKeys, "selectedBackgroundColor");
+    ValidateDynamicStyleNumberProperty(styles, dynamicStyleKeys, "fontSize", true);
+    ValidateDynamicStyleNumberProperty(styles, dynamicStyleKeys, "minFontSize", true);
+    ValidateDynamicStyleNumberProperty(styles, dynamicStyleKeys, "maxFontSize", true);
+    ValidateDynamicStyleNumberProperty(styles, dynamicStyleKeys, "maxLines", true);
+    ValidateDynamicStyleNumberRange(styles, dynamicStyleKeys, "minFontScale", 0.0, 1.0);
+    ValidateDynamicStyleNumberRange(styles, dynamicStyleKeys, "maxFontScale", 1.0, std::nullopt);
+    ValidateDynamicStyleEnumProperty(styles, dynamicStyleKeys, "fontScaleMode", { "custom", "followSystem" });
+    ValidateDynamicStyleEnumProperty(styles, dynamicStyleKeys, "textAlign",
+        { "start", "center", "end", "justify", "left", "leftToRight", "ltr", "right", "rightToLeft", "rtl" });
+    ValidateDynamicStyleEnumProperty(
+        styles, dynamicStyleKeys, "wordBreak", { "normal", "breakAll", "breakWord", "hyphenation" });
+    ValidateDynamicStyleBool(styles, dynamicStyleKeys, "showUnderline");
+    ValidateDynamicStyleCancelButton(styles, dynamicStyleKeys, "cancelButton");
+    ValidateDynamicStyleFontWeight(
+        styles, dynamicStyleKeys, "fontWeight", { "lighter", "normal", "regular", "medium", "bold", "bolder" });
+    ValidateDynamicStyleUnderlineColor(styles, dynamicStyleKeys);
+}
 
-    if (componentType == "Radio") {
-        validateStringColor("checkedBackgroundColor");
-        validateStringColor("unCheckedBorderColor");
-        validateStringColor("indicatorColor");
-        return;
-    }
+void ExtendedComponent::ValidateToggleDynamicStyles(
+    const JsonValue& styles, const std::set<std::string>& dynamicStyleKeys)
+{
+    ValidateDynamicStyleStringColor(styles, dynamicStyleKeys, "selectedColor");
+    ValidateDynamicStyleStringColor(styles, dynamicStyleKeys, "unSelectedColor");
+    ValidateDynamicStyleStringColor(styles, dynamicStyleKeys, "switchPointColor");
+}
 
-    if (componentType == "Checkbox") {
-        validateStringColor("selectedColor");
-        validateStringColor("unselectedColor");
-        validateStringEnum("shape", { "circle", "rounded_square" });
-        validateMark("mark");
-        return;
-    }
+void ExtendedComponent::ValidateRadioDynamicStyles(
+    const JsonValue& styles, const std::set<std::string>& dynamicStyleKeys)
+{
+    ValidateDynamicStyleStringColor(styles, dynamicStyleKeys, "checkedBackgroundColor");
+    ValidateDynamicStyleStringColor(styles, dynamicStyleKeys, "unCheckedBorderColor");
+    ValidateDynamicStyleStringColor(styles, dynamicStyleKeys, "indicatorColor");
+}
 
-    if (componentType == "CheckboxGroup") {
-        validateStringColor("selectedColor");
-        validateStringColor("unSelectedColor");
-        validateStringEnum("checkboxShape", { "circle", "rounded_square" });
-        validateMark("mark");
-    }
+void ExtendedComponent::ValidateCheckboxDynamicStyles(
+    const JsonValue& styles, const std::set<std::string>& dynamicStyleKeys)
+{
+    ValidateDynamicStyleStringColor(styles, dynamicStyleKeys, "selectedColor");
+    ValidateDynamicStyleStringColor(styles, dynamicStyleKeys, "unselectedColor");
+    ValidateDynamicStyleEnumProperty(styles, dynamicStyleKeys, "shape", { "circle", "rounded_square" });
+    ValidateDynamicStyleMark(styles, dynamicStyleKeys, "mark");
+}
+
+void ExtendedComponent::ValidateCheckboxGroupDynamicStyles(
+    const JsonValue& styles, const std::set<std::string>& dynamicStyleKeys)
+{
+    ValidateDynamicStyleStringColor(styles, dynamicStyleKeys, "selectedColor");
+    ValidateDynamicStyleStringColor(styles, dynamicStyleKeys, "unSelectedColor");
+    ValidateDynamicStyleEnumProperty(styles, dynamicStyleKeys, "checkboxShape", { "circle", "rounded_square" });
+    ValidateDynamicStyleMark(styles, dynamicStyleKeys, "mark");
 }
 
 void ExtendedComponent::RegisterExtendedListeners()
@@ -605,93 +614,12 @@ void ExtendedComponent::DispatchActionInfo(
     }
 
     switch (actionInfo->GetType()) {
-        case ActionType::FUNCTION_CALL: {
-            std::shared_ptr<FunctionCallInfo> functionCall = actionInfo->GetFunctionCall();
-            JsonValue functionCallDescriptor = actionInfo->GetFunctionCallDescriptor();
-            bool resolvedDynamically = false;
-            SurfaceSlot* surface = RenderManager::GetInstance().FindSurface(GetRenderId(), GetSurfaceId());
-            std::shared_ptr<DataModel> dataModel =
-                surface != nullptr ? surface->GetOrCreateDataModel() : GetRenderContext().dataModel;
-            if (functionCallDescriptor.IsValid()) {
-                DynamicResolveContext context = { .renderId = GetRenderId(),
-                    .surfaceId = GetSurfaceId(),
-                    .componentId = GetComponentId(),
-                    .dataModel = dataModel,
-                    .allowExpression = true,
-                    .localVariables = GetLocalVariables() };
-                std::shared_ptr<FunctionCallInfo> resolvedFunctionCall =
-                    DynamicValueResolver::ResolveFunctionCallDescriptor(functionCallDescriptor, context);
-                if (resolvedFunctionCall != nullptr) {
-                    functionCall = resolvedFunctionCall;
-                    resolvedDynamically = true;
-                }
-            }
-            if (functionCall == nullptr) {
-                LOG_A2UI(LOG_WARN, "ExtendedComponent::DispatchActionInfo: functionCall is null, action=%{public}s",
-                    actionName.c_str());
-                return;
-            }
-            bool invokeResult = false;
-            if (NativeActionRegistry::GetInstance().HasAction(functionCall->GetFunctionName())) {
-                EventHandlerChainExecutor::ExecutionContext nativeActionContext;
-                nativeActionContext.renderId = GetRenderId();
-                nativeActionContext.surfaceId = GetSurfaceId();
-                nativeActionContext.componentId = GetComponentId();
-                nativeActionContext.dataModel = dataModel;
-                nativeActionContext.eventContext = extraContext;
-                nativeActionContext.externalEventContext = extraContext;
-                nativeActionContext.hasExternalEventContext = extraContext.IsValid();
-                nativeActionContext.localVariables = GetLocalVariables();
-                NativeActionRegistry::GetInstance().Execute(
-                    functionCall->GetFunctionName(), functionCall->GetArgs(), nativeActionContext);
-                invokeResult = true;
-            } else if (NativeFunctionRegistry::GetInstance().HasFunction(functionCall->GetFunctionName())) {
-                DynamicResolveContext nativeContext = {
-                    .renderId = GetRenderId(), .surfaceId = GetSurfaceId(), .componentId = GetComponentId()
-                };
-                JsonValue normalizedArgs;
-                std::string normalizedReturnType = functionCall->GetReturnType();
-                auto normalizedCall = std::make_shared<FunctionCallInfo>(
-                    functionCall->GetFunctionName(), functionCall->GetArgs(), functionCall->GetReturnType());
-                bool normalized = FunctionBridge::GetInstance().NormalizeFunctionCall(GetRenderId(), GetSurfaceId(),
-                    GetComponentId(), normalizedCall, normalizedArgs, normalizedReturnType);
-                if (normalized) {
-                    auto nativeResult = NativeFunctionRegistry::GetInstance().Execute(functionCall->GetFunctionName(),
-                        normalizedArgs, nativeContext, normalizedReturnType == "void" ? "" : normalizedReturnType);
-                    invokeResult = nativeResult.success;
-                } else {
-                    LOG_A2UI(LOG_WARN,
-                        "ExtendedComponent::DispatchActionInfo: native function normalize failed, "
-                        "function=%{public}s",
-                        functionCall->GetFunctionName().c_str());
-                }
-            } else {
-                invokeResult =
-                    FunctionBridge::GetInstance().Invoke(GetRenderId(), GetSurfaceId(), GetComponentId(), functionCall);
-            }
-            LOG_A2UI(LOG_DEBUG,
-                "ExtendedComponent::DispatchActionInfo - invoke function, componentId=%{public}s, action=%{public}s, "
-                "call=%{public}s, returnType=%{public}s, resolvedDynamically=%{public}s, result=%{public}s",
-                GetComponentId().c_str(), actionName.c_str(), functionCall->GetFunctionName().c_str(),
-                functionCall->GetReturnType().c_str(), resolvedDynamically ? "true" : "false",
-                invokeResult ? "true" : "false");
+        case ActionType::FUNCTION_CALL:
+            DispatchActionInfoFunctionCall(actionName, actionInfo, extraContext);
             return;
-        }
-        case ActionType::EVENT: {
-            EventResolveContext context = {
-                .renderId = GetRenderId(), .surfaceId = GetSurfaceId(), .componentId = GetComponentId()
-            };
-            JsonValue resolvedContext = EventContextResolver::Resolve(actionInfo->GetEventContextDescriptor(), context);
-            JsonValue dispatchContext = MergeEventContext(resolvedContext, extraContext);
-            bool dispatchResult = ActionDispatchBridge::GetInstance().Dispatch(
-                GetRenderId(), GetSurfaceId(), GetComponentId(), actionInfo->GetEventName(), dispatchContext);
-            LOG_A2UI(LOG_DEBUG,
-                "ExtendedComponent::DispatchActionInfo - dispatch event, componentId=%{public}s, action=%{public}s, "
-                "eventName=%{public}s, result=%{public}s",
-                GetComponentId().c_str(), actionName.c_str(), actionInfo->GetEventName().c_str(),
-                dispatchResult ? "true" : "false");
+        case ActionType::EVENT:
+            DispatchActionInfoEvent(actionName, actionInfo, extraContext);
             return;
-        }
         default:
             LOG_A2UI(LOG_WARN,
                 "ExtendedComponent::DispatchActionInfo - unsupported action type, componentId=%{public}s, "
@@ -699,6 +627,103 @@ void ExtendedComponent::DispatchActionInfo(
                 GetComponentId().c_str(), actionName.c_str());
             return;
     }
+}
+
+void ExtendedComponent::DispatchActionInfoFunctionCall(
+    const std::string& actionName, const std::shared_ptr<ActionInfo>& actionInfo, const JsonValue& extraContext) const
+{
+    std::shared_ptr<FunctionCallInfo> functionCall = actionInfo->GetFunctionCall();
+    JsonValue functionCallDescriptor = actionInfo->GetFunctionCallDescriptor();
+    bool resolvedDynamically = false;
+    SurfaceSlot* surface = RenderManager::GetInstance().FindSurface(GetRenderId(), GetSurfaceId());
+    std::shared_ptr<DataModel> dataModel =
+        surface != nullptr ? surface->GetOrCreateDataModel() : GetRenderContext().dataModel;
+    if (functionCallDescriptor.IsValid()) {
+        DynamicResolveContext context = { .renderId = GetRenderId(),
+            .surfaceId = GetSurfaceId(),
+            .componentId = GetComponentId(),
+            .dataModel = dataModel,
+            .allowExpression = true,
+            .localVariables = GetLocalVariables() };
+        std::shared_ptr<FunctionCallInfo> resolvedFunctionCall =
+            DynamicValueResolver::ResolveFunctionCallDescriptor(functionCallDescriptor, context);
+        if (resolvedFunctionCall != nullptr) {
+            functionCall = resolvedFunctionCall;
+            resolvedDynamically = true;
+        }
+    }
+    if (functionCall == nullptr) {
+        LOG_A2UI(LOG_WARN, "ExtendedComponent::DispatchActionInfo: functionCall is null, action=%{public}s",
+            actionName.c_str());
+        return;
+    }
+    bool invokeResult = InvokeFunctionCall(functionCall, dataModel, extraContext);
+    LOG_A2UI(LOG_DEBUG,
+        "ExtendedComponent::DispatchActionInfo - invoke function, componentId=%{public}s, action=%{public}s, "
+        "call=%{public}s, returnType=%{public}s, resolvedDynamically=%{public}s, result=%{public}s",
+        GetComponentId().c_str(), actionName.c_str(), functionCall->GetFunctionName().c_str(),
+        functionCall->GetReturnType().c_str(), resolvedDynamically ? "true" : "false", invokeResult ? "true" : "false");
+}
+
+bool ExtendedComponent::InvokeFunctionCall(const std::shared_ptr<FunctionCallInfo>& functionCall,
+    const std::shared_ptr<DataModel>& dataModel, const JsonValue& extraContext) const
+{
+    bool invokeResult = false;
+    if (NativeActionRegistry::GetInstance().HasAction(functionCall->GetFunctionName())) {
+        EventHandlerChainExecutor::ExecutionContext nativeActionContext;
+        nativeActionContext.renderId = GetRenderId();
+        nativeActionContext.surfaceId = GetSurfaceId();
+        nativeActionContext.componentId = GetComponentId();
+        nativeActionContext.dataModel = dataModel;
+        nativeActionContext.eventContext = extraContext;
+        nativeActionContext.externalEventContext = extraContext;
+        nativeActionContext.hasExternalEventContext = extraContext.IsValid();
+        nativeActionContext.localVariables = GetLocalVariables();
+        NativeActionRegistry::GetInstance().Execute(
+            functionCall->GetFunctionName(), functionCall->GetArgs(), nativeActionContext);
+        invokeResult = true;
+    } else if (NativeFunctionRegistry::GetInstance().HasFunction(functionCall->GetFunctionName())) {
+        DynamicResolveContext nativeContext = {
+            .renderId = GetRenderId(), .surfaceId = GetSurfaceId(), .componentId = GetComponentId()
+        };
+        JsonValue normalizedArgs;
+        std::string normalizedReturnType = functionCall->GetReturnType();
+        auto normalizedCall = std::make_shared<FunctionCallInfo>(
+            functionCall->GetFunctionName(), functionCall->GetArgs(), functionCall->GetReturnType());
+        bool normalized = FunctionBridge::GetInstance().NormalizeFunctionCall(
+            GetRenderId(), GetSurfaceId(), GetComponentId(), normalizedCall, normalizedArgs, normalizedReturnType);
+        if (normalized) {
+            auto nativeResult = NativeFunctionRegistry::GetInstance().Execute(functionCall->GetFunctionName(),
+                normalizedArgs, nativeContext, normalizedReturnType == "void" ? "" : normalizedReturnType);
+            invokeResult = nativeResult.success;
+        } else {
+            LOG_A2UI(LOG_WARN,
+                "ExtendedComponent::DispatchActionInfo: native function normalize failed, "
+                "function=%{public}s",
+                functionCall->GetFunctionName().c_str());
+        }
+    } else {
+        invokeResult =
+            FunctionBridge::GetInstance().Invoke(GetRenderId(), GetSurfaceId(), GetComponentId(), functionCall);
+    }
+    return invokeResult;
+}
+
+void ExtendedComponent::DispatchActionInfoEvent(
+    const std::string& actionName, const std::shared_ptr<ActionInfo>& actionInfo, const JsonValue& extraContext) const
+{
+    EventResolveContext context = {
+        .renderId = GetRenderId(), .surfaceId = GetSurfaceId(), .componentId = GetComponentId()
+    };
+    JsonValue resolvedContext = EventContextResolver::Resolve(actionInfo->GetEventContextDescriptor(), context);
+    JsonValue dispatchContext = MergeEventContext(resolvedContext, extraContext);
+    bool dispatchResult = ActionDispatchBridge::GetInstance().Dispatch(
+        GetRenderId(), GetSurfaceId(), GetComponentId(), actionInfo->GetEventName(), dispatchContext);
+    LOG_A2UI(LOG_DEBUG,
+        "ExtendedComponent::DispatchActionInfo - dispatch event, componentId=%{public}s, action=%{public}s, "
+        "eventName=%{public}s, result=%{public}s",
+        GetComponentId().c_str(), actionName.c_str(), actionInfo->GetEventName().c_str(),
+        dispatchResult ? "true" : "false");
 }
 
 const EventHandlerMap& ExtendedComponent::GetEventHandlers() const
@@ -724,36 +749,7 @@ void ExtendedComponent::OnDataUpdate(const std::string& property, const JsonValu
             if (binding.propertyName_ != property) {
                 continue;
             }
-            DynamicResolveContext context = { .renderId = GetRenderId(),
-                .surfaceId = GetSurfaceId(),
-                .componentId = GetComponentId(),
-                .dataModel = GetRenderContext().dataModel,
-                .allowExpression = true,
-                .localVariables = GetLocalVariables() };
-            if (binding.type_ == BindingType::EXPRESSION) {
-#ifdef ENABLE_EXPRESSION_ENGINE
-                std::unique_ptr<JsonAdapter> expressionAdapter =
-                    JsonAdapter::CreateString("{{ " + binding.expression_ + " }}");
-                if (expressionAdapter != nullptr) {
-                    ResolvedValue resolved = DynamicValueResolver::Resolve(expressionAdapter->GetRoot(), context);
-                    if (resolved.success && resolved.value.IsValid()) {
-                        ApplySingleResolvedStyle(styleName, resolved.value);
-                    }
-                }
-#endif
-                return;
-            }
-            if (binding.type_ == BindingType::FUNCTION_CALL) {
-                ResolvedValue resolved =
-                    DynamicValueResolver::ResolveRecursivelyAllowPartial(binding.functionCallDescriptor_, context);
-                if (resolved.success && resolved.value.IsValid()) {
-                    ApplySingleResolvedStyle(styleName, resolved.value);
-                } else {
-                    LOG_A2UI(LOG_WARN,
-                        "ExtendedComponent::OnDataUpdate - style descriptor resolve failed, componentId=%{public}s, "
-                        "bindingProperty=%{public}s, reason=%{public}s",
-                        GetComponentId().c_str(), property.c_str(), resolved.errorMessage.c_str());
-                }
+            if (ApplyResolvedStyleForBinding(binding, property, styleName, value)) {
                 return;
             }
         }
@@ -761,6 +757,44 @@ void ExtendedComponent::OnDataUpdate(const std::string& property, const JsonValu
         return;
     }
     A2UIComponent::OnDataUpdate(property, value);
+}
+
+bool ExtendedComponent::ApplyResolvedStyleForBinding(
+    const DataBinding& binding, const std::string& property, const std::string& styleName, const JsonValue& value)
+{
+    if (binding.type_ != BindingType::EXPRESSION && binding.type_ != BindingType::FUNCTION_CALL) {
+        return false;
+    }
+    DynamicResolveContext context = { .renderId = GetRenderId(),
+        .surfaceId = GetSurfaceId(),
+        .componentId = GetComponentId(),
+        .dataModel = GetRenderContext().dataModel,
+        .allowExpression = true,
+        .missingPathPolicy = MissingPathPolicy::DEFER_UNTIL_DATA_UPDATE,
+        .localVariables = GetLocalVariables() };
+    if (binding.type_ == BindingType::EXPRESSION) {
+#ifdef ENABLE_EXPRESSION_ENGINE
+        std::unique_ptr<JsonAdapter> expressionAdapter = JsonAdapter::CreateString("{{ " + binding.expression_ + " }}");
+        if (expressionAdapter != nullptr) {
+            ResolvedValue resolved = DynamicValueResolver::Resolve(expressionAdapter->GetRoot(), context);
+            if (resolved.success && resolved.value.IsValid()) {
+                ApplySingleResolvedStyle(styleName, resolved.value);
+            }
+        }
+#endif
+        return true;
+    }
+    ResolvedValue resolved =
+        DynamicValueResolver::ResolveRecursivelyAllowPartial(binding.functionCallDescriptor_, context);
+    if (resolved.success && resolved.value.IsValid()) {
+        ApplySingleResolvedStyle(styleName, resolved.value);
+    } else {
+        LOG_A2UI(LOG_WARN,
+            "ExtendedComponent::OnDataUpdate - style descriptor resolve failed, componentId=%{public}s, "
+            "bindingProperty=%{public}s, reason=%{public}s",
+            GetComponentId().c_str(), property.c_str(), resolved.errorMessage.c_str());
+    }
+    return true;
 }
 
 void ExtendedComponent::OnConfigChange(const ThemeContext& context)
@@ -776,6 +810,22 @@ void ExtendedComponent::OnConfigChange(const ThemeContext& context)
         return;
     }
     ExtendedStyleResolver::ApplyShadow(cachedShadowValue_, *nodeApplier_, unusedIssues, theme);
+}
+
+void ExtendedComponent::OnAttachToParent()
+{
+    ApplyParentFlexShrinkDefault();
+}
+
+void ExtendedComponent::ApplyParentFlexShrinkDefault()
+{
+    if (flexShrinkStyleState_ != FlexShrinkStyleState::PARENT_DEFAULT || nodeApplier_ == nullptr) {
+        return;
+    }
+    std::shared_ptr<Component> parent = GetParent();
+    std::string parentComponentType = parent == nullptr ? "" : parent->GetType();
+    ExtendedStyleResolver::Reset({ "flexShrink", StylePropertyName::FLEX_SHRINK }, *nodeApplier_,
+        renderContext_.apiVersion, parentComponentType);
 }
 
 void ExtendedComponent::CollectChildListDescriptor(const JsonValue& descriptor)
@@ -846,7 +896,7 @@ bool ExtendedComponent::ApplyExtendedDescriptor(const JsonValue& descriptor, con
     }
 
     if (nodeApplier_ == nullptr) {
-        nodeApplier_ = std::make_shared<ArkUINodeApiAdapter>([this]() { return GetNativeView(); },
+        nodeApplier_ = std::make_shared<ArkUINodeApiAdapter>([this]() { return nativeView_; },
             [this]() { return GetComponentId(); },
             [this](float top, float right, float bottom, float left) { SetMargin(top, right, bottom, left); },
             [this]() { ResetCommonMargin(); },
@@ -880,8 +930,62 @@ void ExtendedComponent::ApplyResolvedStyles(const JsonValue& styles)
     ValidateComponentSpecificStylesSchema(styles);
 
     StyleParseResult parseResult = StyleParser::Parse(styles);
+    StyleResolveResult resolveResult =
+        StyleResolver::Resolve(parseResult, renderContext_, GetComponentId(), appliedStyleKeys_, GetLocalVariables());
+    ReportResolvedStyleIssues(parseResult, resolveResult);
+    ApplyResolvedStyleBindings(resolveResult);
+    UpdateFlexShrinkStyleState(resolveResult);
 
-    // DFX: report unknown style keys (parsed as StylePropertyName::UNKNOWN by StyleParser)
+    std::shared_ptr<Component> parent = GetParent();
+    std::string parentComponentType = parent == nullptr ? "" : parent->GetType();
+    for (const auto& resetProperty : resolveResult.resetProperties) {
+        if (GetType() == "TextInput" && resetProperty.name == StylePropertyName::WORD_BREAK) {
+            nodeApplier_->ResetNodeTextInputWordBreak(nativeView_);
+            continue;
+        }
+        ExtendedStyleResolver::Reset(resetProperty, *nodeApplier_, renderContext_.apiVersion, parentComponentType);
+    }
+
+    ApplyResolvedStyleObject(resolveResult, parentComponentType);
+    appliedStyleKeys_ = resolveResult.currentStyleKeys;
+}
+
+void ExtendedComponent::UpdateFlexShrinkStyleState(const StyleResolveResult& resolveResult)
+{
+    JsonValue flexShrink = resolveResult.resolvedStyles.GetItem("flexShrink");
+    if (flexShrink.IsValid()) {
+        float parsedValue = 0.0F;
+        flexShrinkStyleState_ = StyleApplyUtils::ParseFlexShrink(flexShrink, parsedValue)
+                                    ? FlexShrinkStyleState::EXPLICIT_VALUE
+                                    : FlexShrinkStyleState::PARENT_DEFAULT;
+        return;
+    }
+
+    bool hasCurrentFlexShrink = std::any_of(
+        resolveResult.currentStyleKeys.begin(), resolveResult.currentStyleKeys.end(), [](const std::string& styleName) {
+            return StyleParser::ToPropertyName(styleName) == StylePropertyName::FLEX_SHRINK;
+        });
+    bool resetsFlexShrink = std::any_of(resolveResult.resetProperties.begin(), resolveResult.resetProperties.end(),
+        [](const StyleResetProperty& property) { return property.name == StylePropertyName::FLEX_SHRINK; });
+    if (resetsFlexShrink || (hasCurrentFlexShrink && flexShrinkStyleState_ == FlexShrinkStyleState::UNSPECIFIED)) {
+        flexShrinkStyleState_ = FlexShrinkStyleState::PARENT_DEFAULT;
+    }
+}
+
+void ExtendedComponent::UpdateFlexShrinkStyleState(const std::string& styleName, const JsonValue& styleValue)
+{
+    if (StyleParser::ToPropertyName(styleName) != StylePropertyName::FLEX_SHRINK || !styleValue.IsValid()) {
+        return;
+    }
+    float parsedValue = 0.0F;
+    flexShrinkStyleState_ = StyleApplyUtils::ParseFlexShrink(styleValue, parsedValue)
+                                ? FlexShrinkStyleState::EXPLICIT_VALUE
+                                : FlexShrinkStyleState::PARENT_DEFAULT;
+}
+
+void ExtendedComponent::ReportResolvedStyleIssues(
+    const StyleParseResult& parseResult, const StyleResolveResult& resolveResult)
+{
     for (const auto& property : parseResult.properties) {
         if (property.name == StylePropertyName::UNKNOWN && !property.rawName.empty() &&
             !IsExtendedComponentSpecificStyleKey(GetType(), property.rawName)) {
@@ -891,21 +995,18 @@ void ExtendedComponent::ApplyResolvedStyles(const JsonValue& styles)
         }
     }
 
-    StyleResolveResult resolveResult =
-        StyleResolver::Resolve(parseResult, renderContext_, GetComponentId(), appliedStyleKeys_, GetLocalVariables());
-
-    // DFX: report style parse/resolve errors (resolveResult.errors includes parseResult.errors)
     for (const auto& error : resolveResult.errors) {
         std::string path = error.property.empty() ? "styles" : "styles." + error.property;
         ReportSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE, "Style error at " + path + ": " + error.message, path);
     }
+}
 
+void ExtendedComponent::ApplyResolvedStyleBindings(const StyleResolveResult& resolveResult)
+{
     for (const auto& bindingProperty : resolveResult.clearBindingProperties) {
         RemoveBindingsForProperty(bindingProperty);
     }
-    for (const auto& resetProperty : resolveResult.resetProperties) {
-        ExtendedStyleResolver::Reset(resetProperty, *nodeApplier_, renderContext_.apiVersion);
-    }
+
     for (const auto& binding : resolveResult.bindings) {
         if (binding.bindingProperty.empty()) {
             continue;
@@ -928,42 +1029,44 @@ void ExtendedComponent::ApplyResolvedStyles(const JsonValue& styles)
             dataBindings_.push_back(std::move(functionBinding));
         }
     }
+}
 
-    if (resolveResult.resolvedStyles.IsObject()) {
-        // Cache shadow value for theme change re-application
-        JsonValue shadowValue = resolveResult.resolvedStyles.GetItem("shadow");
-        if (shadowValue.IsValid()) {
-            cachedShadowValue_ = shadowValue;
-            hasCachedShadow_ = true;
-        }
-
-        ValidateComponentSpecificDynamicStylesDfx(
-            resolveResult.resolvedStyles, resolveResult.dynamicallyResolvedStyleKeys);
-        if (!resolveResult.dynamicallyResolvedStyleKeys.empty()) {
-            MarkDescriptorDynamicBindingsResolved();
-        }
-        isApplyingStyleDeltaUpdate_ = false;
-        ConstraintDispatchContext dispatchCtx = { .renderId = GetRenderId(),
-            .componentId = GetComponentId(),
-            .nodeUniqueId = GetNativeNodeUniqueId(),
-            .componentType = GetType(),
-            .apiVersion = renderContext_.apiVersion,
-            .commonTheme = GetCommonTheme() };
-        std::vector<DescriptorValidationIssue> styleResolverIssues;
-        ExtendedStyleResolver::ResolveAndApply(
-            resolveResult.resolvedStyles, *nodeApplier_, dispatchCtx, styleResolverIssues);
-        for (const auto& issue : styleResolverIssues) {
-            ReportSchemaWarning(issue.code, issue.message, issue.path);
-        }
-        ApplyComponentSpecificStyles(resolveResult.resolvedStyles, *nodeApplier_);
-        isApplyingStyleDeltaUpdate_ = false;
-    } else {
+void ExtendedComponent::ApplyResolvedStyleObject(
+    const StyleResolveResult& resolveResult, const std::string& parentComponentType)
+{
+    if (!resolveResult.resolvedStyles.IsObject()) {
         LOG_A2UI(LOG_DEBUG,
             "ExtendedComponent::ApplyResolvedStyles - no resolved style object to apply, componentId=%{public}s",
             GetComponentId().c_str());
+        return;
     }
 
-    appliedStyleKeys_ = resolveResult.currentStyleKeys;
+    JsonValue shadowValue = resolveResult.resolvedStyles.GetItem("shadow");
+    if (shadowValue.IsValid()) {
+        cachedShadowValue_ = shadowValue;
+        hasCachedShadow_ = true;
+    }
+
+    ValidateComponentSpecificDynamicStylesDfx(resolveResult.resolvedStyles, resolveResult.dynamicallyResolvedStyleKeys);
+    if (!resolveResult.dynamicallyResolvedStyleKeys.empty()) {
+        MarkDescriptorDynamicBindingsResolved();
+    }
+    isApplyingStyleDeltaUpdate_ = false;
+    ConstraintDispatchContext dispatchCtx = { .renderId = GetRenderId(),
+        .componentId = GetComponentId(),
+        .nodeUniqueId = GetNativeNodeUniqueId(),
+        .componentType = GetType(),
+        .parentComponentType = parentComponentType,
+        .apiVersion = renderContext_.apiVersion,
+        .commonTheme = GetCommonTheme() };
+    std::vector<DescriptorValidationIssue> styleResolverIssues;
+    ExtendedStyleResolver::ResolveAndApply(
+        resolveResult.resolvedStyles, *nodeApplier_, dispatchCtx, styleResolverIssues);
+    for (const auto& issue : styleResolverIssues) {
+        ReportSchemaWarning(issue.code, issue.message, issue.path);
+    }
+    ApplyComponentSpecificStyles(resolveResult.resolvedStyles, *nodeApplier_);
+    isApplyingStyleDeltaUpdate_ = false;
 }
 
 void ExtendedComponent::ApplySingleResolvedStyle(const std::string& styleName, const JsonValue& styleValue)
@@ -995,12 +1098,16 @@ void ExtendedComponent::ApplySingleResolvedStyle(const std::string& styleName, c
         return;
     }
 
+    UpdateFlexShrinkStyleState(styleName, styleValue);
+
     isApplyingStyleDeltaUpdate_ = true;
     ValidateComponentSpecificDynamicStylesDfx(root, { styleName });
+    std::shared_ptr<Component> parent = GetParent();
     ConstraintDispatchContext dispatchCtx = { .renderId = GetRenderId(),
         .componentId = GetComponentId(),
         .nodeUniqueId = GetNativeNodeUniqueId(),
         .componentType = GetType(),
+        .parentComponentType = parent == nullptr ? "" : parent->GetType(),
         .apiVersion = renderContext_.apiVersion,
         .commonTheme = GetCommonTheme() };
     std::vector<DescriptorValidationIssue> styleResolverIssues;

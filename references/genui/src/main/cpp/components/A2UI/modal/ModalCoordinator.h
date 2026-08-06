@@ -18,6 +18,7 @@
 
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -26,6 +27,8 @@
 #include "ArkUINodeApiAdapter.h"
 
 namespace NativeModule {
+
+class A2UIComponent;
 
 class ModalCoordinator {
 public:
@@ -108,6 +111,15 @@ private:
         bool hasForwardedAccessibilityDescription = false;
     };
 
+    struct ResolvedModalBinding {
+        const ModalDescriptor* descriptor = nullptr;
+        ModalDescriptor resolvedDescriptor;
+        std::vector<ModalDescriptor>* retainedModalDescriptors = nullptr;
+        std::shared_ptr<Component> triggerComponent;
+        std::shared_ptr<A2UIComponent> clickableTrigger;
+        std::shared_ptr<Component> contentComponent;
+    };
+
     // Owner data passed through native dismiss callbacks.
     struct DialogDismissContext {
         int32_t renderId = -1;
@@ -127,6 +139,9 @@ private:
         const ModalBinding* binding = nullptr;
     };
 
+    // Parse the optional accessibility object (label/description) into the descriptor.
+    void ParseAccessibility(const JsonValue& nodeValue, ModalDescriptor& descriptor) const;
+
     // Remove all auxiliary click bindings used for modal triggers.
     void ClearModalTriggerBindings();
     // Remove modal-forwarded common attributes from an old trigger.
@@ -134,6 +149,15 @@ private:
     // Validate descriptors and attach runtime trigger callbacks.
     void ApplyModalBindings(const std::vector<ModalDescriptor>& modalDescriptors,
         std::vector<ModalDescriptor>* retainedModalDescriptors = nullptr);
+    void RetainModalDescriptor(
+        const ModalDescriptor& descriptor, std::vector<ModalDescriptor>* retainedModalDescriptors) const;
+    bool ValidateModalDescriptorForBinding(const ModalDescriptor& descriptor, ModalDescriptor& resolvedDescriptor,
+        std::vector<ModalDescriptor>* retainedModalDescriptors) const;
+    bool ResolveModalBindingComponents(ResolvedModalBinding& binding) const;
+    bool ReserveModalBindingIds(const ModalDescriptor& descriptor, const ModalDescriptor& resolvedDescriptor,
+        std::vector<ModalDescriptor>* retainedModalDescriptors, std::set<std::string>& boundTriggerIds,
+        std::set<std::string>& boundContentIds) const;
+    void ApplyResolvedModalBinding(const ResolvedModalBinding& binding);
     // Resolve dynamic trigger/content ids in a descriptor.
     bool ResolveModalDescriptorIds(ModalDescriptor& descriptor) const;
     // Apply forwarded modal common attributes onto the trigger component.
@@ -147,6 +171,9 @@ private:
     void UpdateModalPresentation();
     // Create and show the native dialog for the target modal.
     bool PresentNativeDialog(const ModalBinding& binding, const std::string& modalId);
+    // Apply dialog content/style/mode/cancel/dismiss/show settings; returns false on the first failure.
+    bool ConfigureNativeDialog(A2UINativeDialogHandle dialogHandle, const ModalBinding& binding,
+        const std::string& modalId, DialogDismissContext* dismissContext) const;
     // Close and release the top-most native dialog before presenting another modal.
     bool CloseTopActiveDialogForTransition();
     // Force close every active dialog in the stack.

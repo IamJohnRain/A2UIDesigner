@@ -13,9 +13,9 @@
  * limitations under the License.
  */
 
-import { CatalogCategory, CatalogItem, EMPTY_COMPONENT_BUILDER } from "../../base/CatalogItem";
-import { SchemaResourceLoader } from "../../schema/SchemaResourceLoader";
-import { SchemaProvider } from "../../types/types";
+import { CatalogCategory, CatalogItem, EMPTY_COMPONENT_BUILDER } from '../../base/CatalogItem';
+import { SchemaResourceLoader } from '../../schema/SchemaResourceLoader';
+import { SchemaProvider } from '../../types/types';
 
 export class A2UIModal {
   private constructor() {

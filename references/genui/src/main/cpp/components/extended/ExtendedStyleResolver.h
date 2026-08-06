@@ -37,6 +37,7 @@ struct ConstraintDispatchContext {
     std::string componentId;
     int32_t nodeUniqueId = -1;
     std::string componentType;
+    std::string parentComponentType;
     int32_t apiVersion = 0;
     std::shared_ptr<ExtendedCommonTheme> commonTheme;
 };
@@ -49,7 +50,7 @@ public:
         std::optional<ConstraintDispatchContext> dispatchContext = std::nullopt);
     static void ApplyTextComponentStyles(const JsonValue& styles, ArkUINodeApiAdapter& applier);
     static void Reset(const StyleResetProperty& property, ArkUINodeApiAdapter& applier,
-        int32_t apiVersion = MIN_API_VERSION_LAYOUT_POLICY);
+        int32_t apiVersion = MIN_API_VERSION_LAYOUT_POLICY, const std::string& parentComponentType = "");
     static bool ParseColor(const JsonValue& value, uint32_t& color);
     static void ApplyShadow(const JsonValue& value, ArkUINodeApiAdapter& applier,
         std::vector<DescriptorValidationIssue>& issues, std::shared_ptr<ExtendedCommonTheme> commonTheme);
@@ -61,15 +62,36 @@ private:
     static void ApplyColorStyles(
         const JsonValue& styles, ArkUINodeApiAdapter& applier, std::vector<DescriptorValidationIssue>& issues);
     static void ApplyTextStyles(const JsonValue& styles, ArkUINodeApiAdapter& applier);
+    static void ApplyTextFontStyles(const JsonValue& styles, ArkUI_NodeHandle nodeHandle, ArkUINodeApiAdapter& applier);
+    static void ApplyTextLineStyles(const JsonValue& styles, ArkUI_NodeHandle nodeHandle, ArkUINodeApiAdapter& applier);
     static void ApplyEdgeStyles(
         const JsonValue& styles, ArkUINodeApiAdapter& applier, std::vector<DescriptorValidationIssue>& issues);
+    static void ApplyPaddingStyles(
+        const JsonValue& styles, ArkUINodeApiAdapter& applier, std::vector<DescriptorValidationIssue>& issues);
+    static void ApplyMarginStyles(
+        const JsonValue& styles, ArkUINodeApiAdapter& applier, std::vector<DescriptorValidationIssue>& issues);
     static void ApplyDecorationStyles(const JsonValue& styles, ArkUINodeApiAdapter& applier,
+        std::optional<ConstraintDispatchContext> dispatchContext, std::vector<DescriptorValidationIssue>& issues);
+    static void ApplyBorderWidthStyle(
+        const JsonValue& styles, ArkUINodeApiAdapter& applier, std::vector<DescriptorValidationIssue>& issues);
+    static void ApplyOpacityStyle(const JsonValue& styles, ArkUINodeApiAdapter& applier);
+    static void ApplyVisibilityStyle(
+        const JsonValue& styles, ArkUINodeApiAdapter& applier, std::vector<DescriptorValidationIssue>& issues);
+    static void ApplyBackgroundImageSizeStyles(const JsonValue& styles, ArkUINodeApiAdapter& applier,
         std::optional<ConstraintDispatchContext> dispatchContext, std::vector<DescriptorValidationIssue>& issues);
     static void ApplyBackgroundImageSize(const JsonValue& value, const char* propertyName, ArkUINodeApiAdapter& applier,
         std::optional<ConstraintDispatchContext> dispatchContext, std::vector<DescriptorValidationIssue>& issues);
     static void ApplyLinearGradient(
         const JsonValue& value, ArkUINodeApiAdapter& applier, std::vector<DescriptorValidationIssue>& issues);
     static void ApplyCommonNodeStyles(const JsonValue& styles, ArkUINodeApiAdapter& applier,
+        std::optional<ConstraintDispatchContext> dispatchContext, std::vector<DescriptorValidationIssue>& issues);
+    static void ApplyFlexShrinkStyle(const JsonValue& value, ArkUINodeApiAdapter& applier,
+        std::optional<ConstraintDispatchContext> dispatchContext, std::vector<DescriptorValidationIssue>& issues);
+    static void ApplyClipStyle(
+        const JsonValue& value, ArkUINodeApiAdapter& applier, std::vector<DescriptorValidationIssue>& issues);
+    static void ApplyLayoutWeightStyle(
+        const JsonValue& value, ArkUINodeApiAdapter& applier, std::vector<DescriptorValidationIssue>& issues);
+    static void ApplyConstraintSizeStyle(const JsonValue& value, ArkUINodeApiAdapter& applier,
         std::optional<ConstraintDispatchContext> dispatchContext, std::vector<DescriptorValidationIssue>& issues);
     static void ApplyBackgroundImage(const char* propertyName, const JsonValue& value, ArkUINodeApiAdapter& applier,
         std::vector<DescriptorValidationIssue>& issues);
@@ -80,8 +102,16 @@ private:
     static void ApplyDimension(const JsonValue& value, ArkUINodeApiAdapter& applier, bool isWidth,
         std::vector<DescriptorValidationIssue>& issues,
         std::optional<ConstraintDispatchContext> dispatchContext = std::nullopt);
+    static void ApplyAspectRatio(
+        const JsonValue& value, ArkUINodeApiAdapter& applier, std::vector<DescriptorValidationIssue>& issues);
     static void ApplyRadius(const JsonValue& value, ArkUINodeApiAdapter& applier,
         std::optional<ConstraintDispatchContext> dispatchContext, std::vector<DescriptorValidationIssue>& issues);
+    static bool ResetLayoutProperty(
+        StylePropertyName propertyName, ArkUI_NodeHandle nodeHandle, ArkUINodeApiAdapter& applier, int32_t apiVersion);
+    static bool ResetTextProperty(
+        StylePropertyName propertyName, ArkUI_NodeHandle nodeHandle, ArkUINodeApiAdapter& applier);
+    static bool ResetCommonProperty(StylePropertyName propertyName, ArkUI_NodeHandle nodeHandle,
+        ArkUINodeApiAdapter& applier, const std::string& parentComponentType);
 };
 
 } // namespace NativeModule

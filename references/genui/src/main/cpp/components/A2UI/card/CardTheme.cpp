@@ -84,17 +84,9 @@ void CardTheme::UpdateStyleMetrics()
 
 CardTheme::ValueMetrics CardTheme::ResolveValueMetrics(Breakpoint breakpoint) const
 {
-    switch (breakpoint) {
-        case Breakpoint::XS:
-        case Breakpoint::SM:
-        case Breakpoint::MD:
-        case Breakpoint::LG:
-        case Breakpoint::XL:
-        default:
-            return { .borderRadius = DEFAULT_CARD_BORDER_RADIUS,
-                .padding = DEFAULT_CARD_PADDING,
-                .borderWidth = DEFAULT_CARD_BORDER_WIDTH };
-    }
+    return { .borderRadius = DEFAULT_CARD_BORDER_RADIUS,
+        .padding = DEFAULT_CARD_PADDING,
+        .borderWidth = DEFAULT_CARD_BORDER_WIDTH };
 }
 
 uint32_t CardTheme::ResolveBackgroundColor() const

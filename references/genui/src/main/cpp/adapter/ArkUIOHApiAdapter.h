@@ -54,8 +54,17 @@ public:
     static int32_t NodeAdapterReloadAllItems(A2UINodeAdapterHandle handle);
     static int32_t SetCrossLanguageOption(ArkUI_NodeHandle node, bool enabled);
     static int32_t GetNodeUniqueId(ArkUI_NodeHandle node, int32_t* uniqueId);
+    static ArkUI_LayoutConstraint* NodeCustomEventGetLayoutConstraintInMeasure(ArkUI_NodeCustomEvent* event);
+    static ArkUI_NodeHandle NodeCustomEventGetNodeHandle(ArkUI_NodeCustomEvent* event);
+    static int32_t NodeCustomEventGetEventType(ArkUI_NodeCustomEvent* event);
+    static void* NodeCustomEventGetUserData(ArkUI_NodeCustomEvent* event);
+    static ArkUI_IntOffset NodeCustomEventGetPositionInLayout(ArkUI_NodeCustomEvent* event);
+    static int32_t LayoutConstraintGetPercentReferenceWidth(const ArkUI_LayoutConstraint* constraint);
+    static int32_t LayoutConstraintGetPercentReferenceHeight(const ArkUI_LayoutConstraint* constraint);
     static NativeDisplayManager_ErrorCode GetDefaultDisplayDensityPixels(float* densityPixels);
     static NativeDisplayManager_ErrorCode GetDefaultDisplayScaledDensity(float* scaledDensity);
+    static ArkUI_PixelRoundPolicy* CreatePixelRoundPolicyNoForceRound();
+    static void DisposePixelRoundPolicy(ArkUI_PixelRoundPolicy* policy);
 };
 
 } // namespace NativeModule

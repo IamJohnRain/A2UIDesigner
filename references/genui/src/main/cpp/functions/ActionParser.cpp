@@ -128,20 +128,17 @@ std::shared_ptr<ActionInfo> ParseEventAction(const JsonValue& eventValue, const 
     }
 
     JsonValue contextValue = eventValue.GetItem("context");
-    if (contextValue.IsValid()) {
-        if (contextValue.IsObject()) {
-            bool maxDepthExceeded = false;
-            if (!ValidateEventContext(contextValue, &maxDepthExceeded)) {
-                if (maxDepthExceeded) {
-                    DispatchActionParseError(
-                        parseContext, "action.event.context depth exceeds maximum supported limit");
-                }
-                LOG_A2UI(LOG_WARN, "ParseEventAction: event.context is invalid, drop action");
-                return nullptr;
+    if (contextValue.IsValid() && contextValue.IsObject()) {
+        bool maxDepthExceeded = false;
+        if (!ValidateEventContext(contextValue, &maxDepthExceeded)) {
+            if (maxDepthExceeded) {
+                DispatchActionParseError(parseContext, "action.event.context depth exceeds maximum supported limit");
             }
-        } else {
-            LOG_A2UI(LOG_WARN, "ParseEventAction: event.context is not an object, fallback to {}");
+            LOG_A2UI(LOG_WARN, "ParseEventAction: event.context is invalid, drop action");
+            return nullptr;
         }
+    } else if (contextValue.IsValid()) {
+        LOG_A2UI(LOG_WARN, "ParseEventAction: event.context is not an object, fallback to {}");
     }
 
     return std::make_shared<ActionInfo>(eventName, contextValue);

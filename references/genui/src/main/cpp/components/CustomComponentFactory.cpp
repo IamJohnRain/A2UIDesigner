@@ -21,13 +21,13 @@
 
 namespace NativeModule {
 
-std::shared_ptr<Component> CustomComponentFactory::Create(const std::string& type)
+std::shared_ptr<Component> CustomComponentFactory::Create(const std::string& type, bool preserveDynamicDescriptors)
 {
     LOG_A2UI(LOG_INFO, "CustomComponentFactory::Create: %{public}s", type.c_str());
     if (type.empty()) {
         return nullptr;
     }
-    return std::make_shared<CustomComponent>(type);
+    return std::make_shared<CustomComponent>(type, preserveDynamicDescriptors);
 }
 
 } // namespace NativeModule

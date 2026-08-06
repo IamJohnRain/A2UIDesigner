@@ -53,7 +53,11 @@ function isFullExpressionString(value: string): boolean {
 
 export class DynamicValueResolver {
   static resolveValue(value: A2UIDynamicValue | undefined, context?: A2UIResolveContext): ResolveResult<A2UIValueType> {
-    return DynamicValueResolver.resolveValueRecursive(value, context, 0);
+    let result: ResolveResult<A2UIValueType> = DynamicValueResolver.resolveValueRecursive(value, context, 0);
+    if (!result.success && context?.reportError !== undefined) {
+      context.reportError(result.source, result.errorMessage ?? 'dynamic value resolve failed');
+    }
+    return result;
   }
 
   static resolveString(value: A2UIDynamicString | undefined, defaultValue: string = '',
@@ -165,20 +169,28 @@ export class DynamicValueResolver {
       for (let index: number = 0; index < items.length; index++) {
         let result: ResolveResult<A2UIValueType> =
           DynamicValueResolver.resolveValueRecursive(items[index] as A2UIDynamicValue, context, depth + 1);
-        resolvedItems.push(result.success ? result.value : undefined);
+        if (!result.success) {
+          return result;
+        }
+        resolvedItems.push(result.value);
       }
       return okResult<A2UIValueType>(resolvedItems, 'literal');
     }
     if (TypeGuards.isRecord(value)) {
       let record: Record<string, Object> = value as Record<string, Object>;
       let resolvedRecord: Record<string, Object> = {};
-      Object.keys(record).forEach((key: string) => {
+      let keys: string[] = Object.keys(record);
+      for (let index: number = 0; index < keys.length; index++) {
+        let key: string = keys[index];
         let result: ResolveResult<A2UIValueType> =
           DynamicValueResolver.resolveValueRecursive(record[key] as A2UIDynamicValue, context, depth + 1);
-        if (result.success && result.value !== undefined) {
+        if (!result.success) {
+          return result;
+        }
+        if (result.value !== undefined) {
           resolvedRecord[key] = result.value as Object;
         }
-      });
+      }
       return okResult<A2UIValueType>(resolvedRecord, 'literal');
     }
     return okResult<A2UIValueType>(value as A2UIValueType, 'literal');
@@ -199,7 +211,7 @@ export class DynamicValueResolver {
     return okResult<A2UIValueType>(result.value as A2UIValueType, 'expression');
   }
 
-  private static readPath(dataModel: ESObject, path: string): A2UIValueType | undefined {
+  private static readPath(dataModel: Object, path: string): A2UIValueType | undefined {
     if (path.length === 0 || path === '/') {
       return dataModel as Object as A2UIValueType;
     }
@@ -225,7 +237,7 @@ export class DynamicValueResolver {
         return undefined;
       }
 
-      let record: ESObject = current as ESObject;
+      let record: Record<string, Object> = current as Record<string, Object>;
       current = record[token] as A2UIValueType | Object;
       if (current === undefined) {
         return undefined;

@@ -336,6 +336,39 @@ ModalCoordinator::~ModalCoordinator()
     UnregisterOwner();
 }
 
+void ModalCoordinator::ParseAccessibility(const JsonValue& nodeValue, ModalDescriptor& descriptor) const
+{
+    JsonValue accessibilityValue = nodeValue.GetItem("accessibility");
+    if (accessibilityValue.IsObject()) {
+        JsonValue labelValue = accessibilityValue.GetItem("label");
+        if (labelValue.IsValid()) {
+            descriptor.accessibilityLabelJson = SerializeDynamicStringValue(labelValue);
+            if (!descriptor.accessibilityLabelJson.empty()) {
+                descriptor.hasAccessibilityLabel = true;
+            } else {
+                DispatchSchemaWarning(renderId_, surfaceId_, descriptor.modalId, SCHEMA_ERROR_CODE_TYPE_MISMATCH,
+                    std::string("Property accessibility.label expects string value or dynamic descriptor, got type '") +
+                        labelValue.GetTypeName() + "', field has been ignored",
+                    "accessibility.label");
+            }
+        }
+
+        JsonValue descriptionValue = accessibilityValue.GetItem("description");
+        if (descriptionValue.IsValid()) {
+            descriptor.accessibilityDescriptionJson = SerializeDynamicStringValue(descriptionValue);
+            if (!descriptor.accessibilityDescriptionJson.empty()) {
+                descriptor.hasAccessibilityDescription = true;
+            } else {
+                DispatchSchemaWarning(renderId_, surfaceId_, descriptor.modalId, SCHEMA_ERROR_CODE_TYPE_MISMATCH,
+                    std::string(
+                        "Property accessibility.description expects string value or dynamic descriptor, got type '") +
+                        descriptionValue.GetTypeName() + "', field has been ignored",
+                    "accessibility.description");
+            }
+        }
+    }
+}
+
 bool ModalCoordinator::TryCreateDescriptor(const JsonValue& nodeValue, ModalDescriptor& descriptor) const
 {
     if (!nodeValue.IsObject()) {
@@ -370,35 +403,7 @@ bool ModalCoordinator::TryCreateDescriptor(const JsonValue& nodeValue, ModalDesc
         }
     }
 
-    JsonValue accessibilityValue = nodeValue.GetItem("accessibility");
-    if (accessibilityValue.IsObject()) {
-        JsonValue labelValue = accessibilityValue.GetItem("label");
-        if (labelValue.IsValid()) {
-            descriptor.accessibilityLabelJson = SerializeDynamicStringValue(labelValue);
-            if (!descriptor.accessibilityLabelJson.empty()) {
-                descriptor.hasAccessibilityLabel = true;
-            } else {
-                DispatchSchemaWarning(renderId_, surfaceId_, descriptor.modalId, SCHEMA_ERROR_CODE_TYPE_MISMATCH,
-                    std::string("Property accessibility.label expects string value or dynamic descriptor, got type '") +
-                        labelValue.GetTypeName() + "', field has been ignored",
-                    "accessibility.label");
-            }
-        }
-
-        JsonValue descriptionValue = accessibilityValue.GetItem("description");
-        if (descriptionValue.IsValid()) {
-            descriptor.accessibilityDescriptionJson = SerializeDynamicStringValue(descriptionValue);
-            if (!descriptor.accessibilityDescriptionJson.empty()) {
-                descriptor.hasAccessibilityDescription = true;
-            } else {
-                DispatchSchemaWarning(renderId_, surfaceId_, descriptor.modalId, SCHEMA_ERROR_CODE_TYPE_MISMATCH,
-                    std::string(
-                        "Property accessibility.description expects string value or dynamic descriptor, got type '") +
-                        descriptionValue.GetTypeName() + "', field has been ignored",
-                    "accessibility.description");
-            }
-        }
-    }
+    ParseAccessibility(nodeValue, descriptor);
 
     return true;
 }
@@ -575,102 +580,133 @@ void ModalCoordinator::ApplyModalBindings(
     std::set<std::string> boundContentIds;
 
     for (const auto& descriptor : modalDescriptors) {
-        ModalDescriptor resolvedDescriptor = descriptor;
-        if (!ResolveModalDescriptorIds(resolvedDescriptor)) {
-            if (retainedModalDescriptors != nullptr) {
-                retainedModalDescriptors->push_back(descriptor);
-            }
-            LOG_A2UI(LOG_WARN, "Modal binding skipped: id/trigger/content is missing, modalId=%{public}s",
-                descriptor.modalId.c_str());
+        ResolvedModalBinding binding = { .descriptor = &descriptor,
+            .resolvedDescriptor = descriptor,
+            .retainedModalDescriptors = retainedModalDescriptors };
+        if (!ValidateModalDescriptorForBinding(
+                descriptor, binding.resolvedDescriptor, binding.retainedModalDescriptors)) {
             continue;
         }
-        if (resolvedDescriptor.contentId == "root") {
-            if (retainedModalDescriptors != nullptr) {
-                retainedModalDescriptors->push_back(descriptor);
-            }
-            LOG_A2UI(LOG_WARN, "Modal binding skipped: root cannot be used as modal content");
+        if (!ResolveModalBindingComponents(binding)) {
             continue;
         }
-
-        auto triggerIt = allComponents_->find(resolvedDescriptor.triggerId);
-        if (triggerIt == allComponents_->end()) {
-            LOG_A2UI(LOG_WARN,
-                "Modal binding skipped: trigger component not found, modalId=%{public}s, triggerId=%{public}s",
-                resolvedDescriptor.modalId.c_str(), resolvedDescriptor.triggerId.c_str());
+        if (!ReserveModalBindingIds(descriptor, binding.resolvedDescriptor, binding.retainedModalDescriptors,
+                boundTriggerIds, boundContentIds)) {
             continue;
         }
-
-        auto contentIt = allComponents_->find(resolvedDescriptor.contentId);
-        if (contentIt == allComponents_->end()) {
-            LOG_A2UI(LOG_WARN,
-                "Modal binding skipped: content component not found, modalId=%{public}s, contentId=%{public}s",
-                resolvedDescriptor.modalId.c_str(), resolvedDescriptor.contentId.c_str());
-            continue;
-        }
-
-        auto triggerComponent = std::dynamic_pointer_cast<A2UIComponent>(triggerIt->second);
-        if (triggerComponent == nullptr) {
-            if (retainedModalDescriptors != nullptr) {
-                retainedModalDescriptors->push_back(descriptor);
-            }
-            LOG_A2UI(LOG_WARN, "Modal binding skipped: trigger does not support click events, triggerId=%{public}s",
-                resolvedDescriptor.triggerId.c_str());
-            continue;
-        }
-
-        const std::shared_ptr<Component>& contentComponent = contentIt->second;
-        if (contentComponent == nullptr || contentComponent->GetNativeView() == nullptr) {
-            if (retainedModalDescriptors != nullptr) {
-                retainedModalDescriptors->push_back(descriptor);
-            }
-            LOG_A2UI(LOG_WARN, "Modal binding skipped: content has no native view, contentId=%{public}s",
-                resolvedDescriptor.contentId.c_str());
-            continue;
-        }
-
-        if (parentsRelations_->find(resolvedDescriptor.contentId) != parentsRelations_->end()) {
-            if (retainedModalDescriptors != nullptr) {
-                retainedModalDescriptors->push_back(descriptor);
-            }
-            LOG_A2UI(LOG_WARN, "Modal binding skipped: content is already mounted in normal tree, contentId=%{public}s",
-                resolvedDescriptor.contentId.c_str());
-            continue;
-        }
-
-        if (!boundTriggerIds.insert(resolvedDescriptor.triggerId).second) {
-            if (retainedModalDescriptors != nullptr) {
-                retainedModalDescriptors->push_back(descriptor);
-            }
-            LOG_A2UI(LOG_WARN, "Modal binding skipped: duplicate trigger id is unsupported, triggerId=%{public}s",
-                resolvedDescriptor.triggerId.c_str());
-            continue;
-        }
-        if (!boundContentIds.insert(resolvedDescriptor.contentId).second) {
-            if (retainedModalDescriptors != nullptr) {
-                retainedModalDescriptors->push_back(descriptor);
-            }
-            LOG_A2UI(LOG_WARN, "Modal binding skipped: duplicate content id is unsupported, contentId=%{public}s",
-                resolvedDescriptor.contentId.c_str());
-            continue;
-        }
-
-        if (retainedModalDescriptors != nullptr) {
-            retainedModalDescriptors->push_back(descriptor);
-        }
-        ApplyTriggerCommonAttributes(resolvedDescriptor, triggerIt->second);
-        modalBindings_[resolvedDescriptor.modalId] = { .triggerId = resolvedDescriptor.triggerId,
-            .contentId = resolvedDescriptor.contentId,
-            .contentComponent = contentComponent,
-            .hasForwardedWeight = resolvedDescriptor.hasWeight,
-            .hasForwardedAccessibilityLabel = resolvedDescriptor.hasAccessibilityLabel,
-            .hasForwardedAccessibilityDescription = resolvedDescriptor.hasAccessibilityDescription };
-
-        std::string modalId = resolvedDescriptor.modalId;
-        triggerComponent->SetAuxiliaryOnClick(
-            MODAL_CLICK_BINDING_KEY, [this, modalId]() { HandleModalTriggerClick(modalId); });
+        ApplyResolvedModalBinding(binding);
     }
 
     UpdateModalPresentation();
+}
+
+void ModalCoordinator::RetainModalDescriptor(
+    const ModalDescriptor& descriptor, std::vector<ModalDescriptor>* retainedModalDescriptors) const
+{
+    if (retainedModalDescriptors != nullptr) {
+        retainedModalDescriptors->push_back(descriptor);
+    }
+}
+
+bool ModalCoordinator::ValidateModalDescriptorForBinding(const ModalDescriptor& descriptor,
+    ModalDescriptor& resolvedDescriptor, std::vector<ModalDescriptor>* retainedModalDescriptors) const
+{
+    if (!ResolveModalDescriptorIds(resolvedDescriptor)) {
+        RetainModalDescriptor(descriptor, retainedModalDescriptors);
+        LOG_A2UI(LOG_WARN, "Modal binding skipped: id/trigger/content is missing, modalId=%{public}s",
+            descriptor.modalId.c_str());
+        return false;
+    }
+    if (resolvedDescriptor.contentId != "root") {
+        return true;
+    }
+
+    RetainModalDescriptor(descriptor, retainedModalDescriptors);
+    LOG_A2UI(LOG_WARN, "Modal binding skipped: root cannot be used as modal content");
+    return false;
+}
+
+bool ModalCoordinator::ResolveModalBindingComponents(ResolvedModalBinding& binding) const
+{
+    const ModalDescriptor& descriptor = *binding.descriptor;
+    const ModalDescriptor& resolvedDescriptor = binding.resolvedDescriptor;
+    auto triggerIt = allComponents_->find(resolvedDescriptor.triggerId);
+    if (triggerIt == allComponents_->end()) {
+        LOG_A2UI(LOG_WARN,
+            "Modal binding skipped: trigger component not found, modalId=%{public}s, triggerId=%{public}s",
+            resolvedDescriptor.modalId.c_str(), resolvedDescriptor.triggerId.c_str());
+        return false;
+    }
+    auto contentIt = allComponents_->find(resolvedDescriptor.contentId);
+    if (contentIt == allComponents_->end()) {
+        LOG_A2UI(LOG_WARN,
+            "Modal binding skipped: content component not found, modalId=%{public}s, contentId=%{public}s",
+            resolvedDescriptor.modalId.c_str(), resolvedDescriptor.contentId.c_str());
+        return false;
+    }
+
+    binding.triggerComponent = triggerIt->second;
+    binding.clickableTrigger = std::dynamic_pointer_cast<A2UIComponent>(binding.triggerComponent);
+    if (binding.clickableTrigger == nullptr) {
+        RetainModalDescriptor(descriptor, binding.retainedModalDescriptors);
+        LOG_A2UI(LOG_WARN, "Modal binding skipped: trigger does not support click events, triggerId=%{public}s",
+            resolvedDescriptor.triggerId.c_str());
+        return false;
+    }
+
+    binding.contentComponent = contentIt->second;
+    if (binding.contentComponent == nullptr || binding.contentComponent->GetNativeView() == nullptr) {
+        RetainModalDescriptor(descriptor, binding.retainedModalDescriptors);
+        LOG_A2UI(LOG_WARN, "Modal binding skipped: content has no native view, contentId=%{public}s",
+            resolvedDescriptor.contentId.c_str());
+        return false;
+    }
+    if (parentsRelations_->find(resolvedDescriptor.contentId) == parentsRelations_->end()) {
+        return true;
+    }
+
+    RetainModalDescriptor(descriptor, binding.retainedModalDescriptors);
+    LOG_A2UI(LOG_WARN, "Modal binding skipped: content is already mounted in normal tree, contentId=%{public}s",
+        resolvedDescriptor.contentId.c_str());
+    return false;
+}
+
+bool ModalCoordinator::ReserveModalBindingIds(const ModalDescriptor& descriptor,
+    const ModalDescriptor& resolvedDescriptor, std::vector<ModalDescriptor>* retainedModalDescriptors,
+    std::set<std::string>& boundTriggerIds, std::set<std::string>& boundContentIds) const
+{
+    if (!boundTriggerIds.insert(resolvedDescriptor.triggerId).second) {
+        RetainModalDescriptor(descriptor, retainedModalDescriptors);
+        LOG_A2UI(LOG_WARN, "Modal binding skipped: duplicate trigger id is unsupported, triggerId=%{public}s",
+            resolvedDescriptor.triggerId.c_str());
+        return false;
+    }
+    if (boundContentIds.insert(resolvedDescriptor.contentId).second) {
+        return true;
+    }
+
+    RetainModalDescriptor(descriptor, retainedModalDescriptors);
+    LOG_A2UI(LOG_WARN, "Modal binding skipped: duplicate content id is unsupported, contentId=%{public}s",
+        resolvedDescriptor.contentId.c_str());
+    return false;
+}
+
+void ModalCoordinator::ApplyResolvedModalBinding(const ResolvedModalBinding& binding)
+{
+    const ModalDescriptor& descriptor = *binding.descriptor;
+    const ModalDescriptor& resolvedDescriptor = binding.resolvedDescriptor;
+    RetainModalDescriptor(descriptor, binding.retainedModalDescriptors);
+    ApplyTriggerCommonAttributes(resolvedDescriptor, binding.triggerComponent);
+    modalBindings_[resolvedDescriptor.modalId] = { .triggerId = resolvedDescriptor.triggerId,
+        .contentId = resolvedDescriptor.contentId,
+        .contentComponent = binding.contentComponent,
+        .hasForwardedWeight = resolvedDescriptor.hasWeight,
+        .hasForwardedAccessibilityLabel = resolvedDescriptor.hasAccessibilityLabel,
+        .hasForwardedAccessibilityDescription = resolvedDescriptor.hasAccessibilityDescription };
+
+    std::string modalId = resolvedDescriptor.modalId;
+    binding.clickableTrigger->SetAuxiliaryOnClick(
+        MODAL_CLICK_BINDING_KEY, [this, modalId]() { HandleModalTriggerClick(modalId); });
 }
 
 bool ModalCoordinator::ResolveModalDescriptorIds(ModalDescriptor& descriptor) const
@@ -679,9 +715,10 @@ bool ModalCoordinator::ResolveModalDescriptorIds(ModalDescriptor& descriptor) co
         return false;
     }
 
-    DynamicResolveContext context = {
-        .renderId = renderId_, .surfaceId = surfaceId_, .componentId = descriptor.modalId
-    };
+    DynamicResolveContext context = { .renderId = renderId_,
+        .surfaceId = surfaceId_,
+        .componentId = descriptor.modalId,
+        .missingPathPolicy = MissingPathPolicy::DEFER_UNTIL_DATA_UPDATE };
 
     if (!descriptor.triggerJsonLiteral.empty()) {
         std::optional<std::string> triggerId = ResolveDynamicStringLiteral(descriptor.triggerJsonLiteral, context);
@@ -720,9 +757,10 @@ void ModalCoordinator::ApplyTriggerCommonAttributes(
     }
 
     if (descriptor.hasAccessibilityLabel) {
-        DynamicResolveContext context = {
-            .renderId = renderId_, .surfaceId = surfaceId_, .componentId = descriptor.modalId
-        };
+        DynamicResolveContext context = { .renderId = renderId_,
+            .surfaceId = surfaceId_,
+            .componentId = descriptor.modalId,
+            .missingPathPolicy = MissingPathPolicy::DEFER_UNTIL_DATA_UPDATE };
         std::optional<std::string> label =
             ResolveForwardedAccessibilityText(descriptor.accessibilityLabelJson, context);
         if (label.has_value()) {
@@ -735,9 +773,10 @@ void ModalCoordinator::ApplyTriggerCommonAttributes(
     }
 
     if (descriptor.hasAccessibilityDescription) {
-        DynamicResolveContext context = {
-            .renderId = renderId_, .surfaceId = surfaceId_, .componentId = descriptor.modalId
-        };
+        DynamicResolveContext context = { .renderId = renderId_,
+            .surfaceId = surfaceId_,
+            .componentId = descriptor.modalId,
+            .missingPathPolicy = MissingPathPolicy::DEFER_UNTIL_DATA_UPDATE };
         std::optional<std::string> description =
             ResolveForwardedAccessibilityText(descriptor.accessibilityDescriptionJson, context);
         if (description.has_value()) {
@@ -797,6 +836,49 @@ void ModalCoordinator::UpdateModalPresentation()
     }
 }
 
+bool ModalCoordinator::ConfigureNativeDialog(A2UINativeDialogHandle dialogHandle, const ModalBinding& binding,
+    const std::string& modalId, DialogDismissContext* dismissContext) const
+{
+    if (ArkUINodeApiAdapter::DialogSetContent(dialogHandle, binding.contentComponent->GetNativeView()) !=
+        A2UI_ERROR_CODE_NO_ERROR) {
+        LOG_A2UI(
+            LOG_ERROR, "PresentNativeDialog failed: setContent returned error, modalId=%{public}s", modalId.c_str());
+        return false;
+    }
+    if (ArkUINodeApiAdapter::DialogEnableCustomStyle(dialogHandle, true) != A2UI_ERROR_CODE_NO_ERROR) {
+        LOG_A2UI(
+            LOG_WARN, "PresentNativeDialog: enableCustomStyle returned error, modalId=%{public}s", modalId.c_str());
+    }
+    if (ArkUINodeApiAdapter::DialogSetContentAlignment(dialogHandle, A2UIAlignment::CENTER, 0.0f, 0.0f) !=
+        A2UI_ERROR_CODE_NO_ERROR) {
+        LOG_A2UI(LOG_ERROR, "PresentNativeDialog failed: setContentAlignment returned error, modalId=%{public}s",
+            modalId.c_str());
+        return false;
+    }
+    if (ArkUINodeApiAdapter::DialogSetModalMode(dialogHandle, true) != A2UI_ERROR_CODE_NO_ERROR) {
+        LOG_A2UI(
+            LOG_ERROR, "PresentNativeDialog failed: setModalMode returned error, modalId=%{public}s", modalId.c_str());
+        return false;
+    }
+    if (ArkUINodeApiAdapter::DialogSetAutoCancel(dialogHandle, true) != A2UI_ERROR_CODE_NO_ERROR) {
+        LOG_A2UI(
+            LOG_ERROR, "PresentNativeDialog failed: setAutoCancel returned error, modalId=%{public}s", modalId.c_str());
+        return false;
+    }
+    if (ArkUINodeApiAdapter::DialogRegisterOnWillDismissWithUserData(
+            dialogHandle, dismissContext, ModalCoordinator::OnNativeDialogWillDismiss) != A2UI_ERROR_CODE_NO_ERROR) {
+        LOG_A2UI(LOG_ERROR,
+            "PresentNativeDialog failed: registerOnWillDismissWithUserData returned error, modalId=%{public}s",
+            modalId.c_str());
+        return false;
+    }
+    if (ArkUINodeApiAdapter::DialogShow(dialogHandle, false) != A2UI_ERROR_CODE_NO_ERROR) {
+        LOG_A2UI(LOG_ERROR, "PresentNativeDialog failed: show returned error, modalId=%{public}s", modalId.c_str());
+        return false;
+    }
+    return true;
+}
+
 bool ModalCoordinator::PresentNativeDialog(const ModalBinding& binding, const std::string& modalId)
 {
     if (binding.contentComponent == nullptr || binding.contentComponent->GetNativeView() == nullptr) {
@@ -818,46 +900,7 @@ bool ModalCoordinator::PresentNativeDialog(const ModalBinding& binding, const st
         delete dismissContext;
     };
 
-    if (ArkUINodeApiAdapter::DialogSetContent(dialogHandle, binding.contentComponent->GetNativeView()) !=
-        A2UI_ERROR_CODE_NO_ERROR) {
-        LOG_A2UI(
-            LOG_ERROR, "PresentNativeDialog failed: setContent returned error, modalId=%{public}s", modalId.c_str());
-        cleanup();
-        return false;
-    }
-    if (ArkUINodeApiAdapter::DialogEnableCustomStyle(dialogHandle, true) != A2UI_ERROR_CODE_NO_ERROR) {
-        LOG_A2UI(
-            LOG_WARN, "PresentNativeDialog: enableCustomStyle returned error, modalId=%{public}s", modalId.c_str());
-    }
-    if (ArkUINodeApiAdapter::DialogSetContentAlignment(dialogHandle, A2UIAlignment::CENTER, 0.0f, 0.0f) !=
-        A2UI_ERROR_CODE_NO_ERROR) {
-        LOG_A2UI(LOG_ERROR, "PresentNativeDialog failed: setContentAlignment returned error, modalId=%{public}s",
-            modalId.c_str());
-        cleanup();
-        return false;
-    }
-    if (ArkUINodeApiAdapter::DialogSetModalMode(dialogHandle, true) != A2UI_ERROR_CODE_NO_ERROR) {
-        LOG_A2UI(
-            LOG_ERROR, "PresentNativeDialog failed: setModalMode returned error, modalId=%{public}s", modalId.c_str());
-        cleanup();
-        return false;
-    }
-    if (ArkUINodeApiAdapter::DialogSetAutoCancel(dialogHandle, true) != A2UI_ERROR_CODE_NO_ERROR) {
-        LOG_A2UI(
-            LOG_ERROR, "PresentNativeDialog failed: setAutoCancel returned error, modalId=%{public}s", modalId.c_str());
-        cleanup();
-        return false;
-    }
-    if (ArkUINodeApiAdapter::DialogRegisterOnWillDismissWithUserData(
-            dialogHandle, dismissContext, ModalCoordinator::OnNativeDialogWillDismiss) != A2UI_ERROR_CODE_NO_ERROR) {
-        LOG_A2UI(LOG_ERROR,
-            "PresentNativeDialog failed: registerOnWillDismissWithUserData returned error, modalId=%{public}s",
-            modalId.c_str());
-        cleanup();
-        return false;
-    }
-    if (ArkUINodeApiAdapter::DialogShow(dialogHandle, false) != A2UI_ERROR_CODE_NO_ERROR) {
-        LOG_A2UI(LOG_ERROR, "PresentNativeDialog failed: show returned error, modalId=%{public}s", modalId.c_str());
+    if (!ConfigureNativeDialog(dialogHandle, binding, modalId, dismissContext)) {
         cleanup();
         return false;
     }

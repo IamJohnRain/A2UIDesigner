@@ -13,7 +13,6 @@
  * limitations under the License.
  */
 
-import { CatalogItem } from '../../base/CatalogItem';
 import { createAudioPlayerDefinition } from './CustomAudioPlayer';
 import { createChoicePickerDefinition } from './CustomChoicePicker';
 import { CustomComponentDefinition, CustomComponentFactory } from './CustomComponentFactory';
@@ -49,14 +48,4 @@ export function registerBuiltInCustomComponents(): void {
   for (const definition of definitions) {
     CustomComponentFactory.registerCustomComponent(definition);
   }
-}
-
-export function getBuiltInCustomCatalogItems(): CatalogItem[] {
-  registerBuiltInCustomComponents();
-
-  const items: CatalogItem[] = [];
-  for (const definition of getOrCreateBuiltInDefinitions()) {
-    items.push(CustomComponentFactory.createCatalogItem(definition.type));
-  }
-  return items;
 }

@@ -1,38 +1,25 @@
 {
   "type": "object",
   "$defs": {
-    "NumericLike": {
+    "NonNegativeNumericLike": {
       "oneOf": [
         {
-          "type": "number"
+          "type": "number",
+          "minimum": 0
         },
         {
           "type": "string",
-          "pattern": "^-?(0|[1-9]\\d*)(?:\\.\\d+)?$"
+          "pattern": "^(0|[1-9]\\d*)(?:\\.\\d+)?$"
         }
       ]
-    },
-    "ExpressionString": {
-      "type": "string",
-      "pattern": "^\\s*\\{\\{[\\s\\S]*\\}\\}\\s*$",
-      "description": "A full {{ }} expression string."
     },
     "ItemMarginValue": {
       "oneOf": [
         {
-          "$ref": "#/$defs/NumericLike"
+          "$ref": "#/$defs/NonNegativeNumericLike"
         },
         {
-          "$ref": "../common_types.json#/$defs/DataBinding"
-        },
-        {
-          "$ref": "../common_types.json#/$defs/FunctionCallString"
-        },
-        {
-          "$ref": "../common_types.json#/$defs/FunctionCallNumber"
-        },
-        {
-          "$ref": "#/$defs/ExpressionString"
+          "$ref": "../common_types.json#/$defs/ExtendedDynamicValueRef"
         }
       ]
     },
@@ -52,24 +39,7 @@
           "default": "start"
         },
         {
-          "$ref": "#/$defs/ExpressionString"
-        },
-        {
-          "$ref": "../common_types.json#/$defs/DataBinding"
-        },
-        {
-          "allOf": [
-            {
-              "$ref": "../common_types.json#/$defs/FunctionCall"
-            },
-            {
-              "properties": {
-                "returnType": {
-                  "const": "string"
-                }
-              }
-            }
-          ]
+          "$ref": "../common_types.json#/$defs/ExtendedDynamicValueRef"
         }
       ]
     },
@@ -86,24 +56,7 @@
           "default": "center"
         },
         {
-          "$ref": "#/$defs/ExpressionString"
-        },
-        {
-          "$ref": "../common_types.json#/$defs/DataBinding"
-        },
-        {
-          "allOf": [
-            {
-              "$ref": "../common_types.json#/$defs/FunctionCall"
-            },
-            {
-              "properties": {
-                "returnType": {
-                  "const": "string"
-                }
-              }
-            }
-          ]
+          "$ref": "../common_types.json#/$defs/ExtendedDynamicValueRef"
         }
       ]
     },
@@ -119,24 +72,7 @@
           "default": "noWrap"
         },
         {
-          "$ref": "#/$defs/ExpressionString"
-        },
-        {
-          "$ref": "../common_types.json#/$defs/DataBinding"
-        },
-        {
-          "allOf": [
-            {
-              "$ref": "../common_types.json#/$defs/FunctionCall"
-            },
-            {
-              "properties": {
-                "returnType": {
-                  "const": "string"
-                }
-              }
-            }
-          ]
+          "$ref": "../common_types.json#/$defs/ExtendedDynamicValueRef"
         }
       ]
     }
@@ -187,6 +123,9 @@
                 },
                 "alignItems": {
                   "$ref": "#/$defs/AlignItemsValue"
+                },
+                "wrap": {
+                  "$ref": "#/$defs/WrapValue"
                 }
               },
               "additionalProperties": true

@@ -14,7 +14,7 @@
  */
 
 import { CatalogItem } from '../../base/CatalogItem';
-import { getBuiltInCustomCatalogItems } from './A2UIBasicCustomComponents';
+import { registerBuiltInCustomComponents } from './A2UIBasicCustomComponents';
 import { A2UIButton } from './A2UIButton';
 import { A2UICard } from './A2UICard';
 import { A2UICheckbox } from './A2UICheckbox';
@@ -55,9 +55,6 @@ export function allA2UIBasicComponents(): CatalogItem[] {
     choicePickerCatalogItem(),
     dateTimeInputCatalogItem(),
   ];
-  const customComponents: CatalogItem[] = getBuiltInCustomCatalogItems();
-  for (const item of customComponents) {
-    components.push(item);
-  }
+  registerBuiltInCustomComponents();
   return components;
 }

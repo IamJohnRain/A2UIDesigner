@@ -57,6 +57,7 @@
 #include "utils/DisplayDensityUtils.h"
 #include "utils/JsonAdapter.h"
 #include "utils/NapiUtils.h"
+#include "utils/SystemProperties.h"
 #include "utils/ThemeColorUtils.h"
 
 #include "NapiBridge.h"
@@ -120,15 +121,17 @@ napi_value CreateSurfaceIdArray(napi_env env, const std::vector<std::string>& su
 }
 
 #ifdef ENABLE_EXPRESSION_ENGINE
-const char* EvalValueTypeToString(EvalValueType type)
+const char* EvalValueTypeToString(const EvalResult& evalResult)
 {
-    switch (type) {
+    switch (evalResult.type) {
         case EvalValueType::STRING:
             return "string";
         case EvalValueType::NUMBER:
             return "number";
         case EvalValueType::BOOLEAN:
             return "boolean";
+        case EvalValueType::JSON_VALUE:
+            return evalResult.IsArray() ? "array" : "object";
         case EvalValueType::NULL_VALUE:
             return "null";
         case EvalValueType::UNDEFINED:
@@ -149,7 +152,7 @@ napi_value CreateExpressionResult(napi_env env, const EvalResult& evalResult)
     napi.SetNamedProperty(env, result, "success", successValue);
 
     napi_value typeValue = nullptr;
-    napi.CreateStringUtf8(env, EvalValueTypeToString(evalResult.type), NAPI_AUTO_LENGTH, &typeValue);
+    napi.CreateStringUtf8(env, EvalValueTypeToString(evalResult), NAPI_AUTO_LENGTH, &typeValue);
     napi.SetNamedProperty(env, result, "type", typeValue);
 
     napi_value value = nullptr;
@@ -159,6 +162,8 @@ napi_value CreateExpressionResult(napi_env env, const EvalResult& evalResult)
         napi.CreateDouble(env, evalResult.numberValue, &value);
     } else if (evalResult.IsBoolean()) {
         napi.GetBoolean(env, evalResult.boolValue, &value);
+    } else if (evalResult.IsJson()) {
+        value = JsonValueToNapiValue(env, evalResult.AsJson());
     } else if (evalResult.IsNull()) {
         napi.GetNull(env, &value);
     }
@@ -214,6 +219,12 @@ struct ParsedMessage {
     JsonValue messageBody;
 };
 
+struct MessageSelection {
+    uint32_t count = 0;
+    const char* key = nullptr;
+    uint32_t type = 0;
+};
+
 struct ProcessResult {
     bool success = false;
     std::string errorCode;
@@ -229,6 +240,34 @@ struct SurfacePolicyOptions {
     bool supportsMultipleSurfaces = false;
     int32_t maxSurfaceCount = -1;
     bool isExtend = false;
+};
+
+struct ProcessMessageInput {
+    int32_t renderId = 0;
+    std::string dsl;
+    napi_value catalog = nullptr;
+    SurfacePolicyOptions policyOptions;
+};
+
+struct MessageDispatchContext {
+    int32_t renderId = 0;
+    RenderSlot* renderSlot = nullptr;
+    const std::shared_ptr<SurfaceManager>& surfaceManager;
+    napi_env env = nullptr;
+    napi_value catalog = nullptr;
+};
+
+struct CustomComponentActionInput {
+    int32_t renderId = 0;
+    std::string surfaceId;
+    std::string componentId;
+    std::string eventName;
+    std::string contextJson;
+};
+
+struct CustomComponentActionTarget {
+    std::shared_ptr<Component> component;
+    std::shared_ptr<CustomComponent> customComponent;
 };
 
 ProcessResult Ok()
@@ -253,6 +292,11 @@ ProcessResult Fail(const std::string& errorCode, const std::string& errorMessage
     result.hasSurfaceResultCode = true;
     result.surfaceResultCode = surfaceResultCode;
     return result;
+}
+
+ProcessResult FailSurfaceNotFound(const std::string& surfaceId)
+{
+    return Fail("SURFACE_NOT_FOUND", "Surface not found: " + surfaceId, SURFACE_ERROR_NO_SURFACE_MATCHED);
 }
 
 ProcessResult Ok(const ParsedMessage& parsedMessage)
@@ -392,176 +436,236 @@ void ApplyCreateSurfaceTheme(SurfaceSlot& slot, const ThemeContext& defaultTheme
     themeManager->SetComponentTheme(componentThemeContext);
 }
 
-ProcessResult ParseDslMessage(const std::string& dsl, int32_t renderId, ParsedMessage& parsedMessage)
+void DispatchDslWarning(int32_t renderId, const std::string& code, const std::string& message, const std::string& path,
+    const std::string& itemName)
 {
-    auto dispatchWarning = [renderId](const std::string& code, const std::string& message, const std::string& path,
-                               const std::string& itemName) {
-        WarningDispatchBridge::GetInstance().Dispatch(renderId, "", "", code, message, path, "message", itemName);
-    };
+    WarningDispatchBridge::GetInstance().Dispatch(renderId, "", "", code, message, path, "message", itemName);
+}
 
-    auto failSchema = [](const std::string& errorCode, const std::string& message,
-                          int32_t surfaceResultCode) -> ProcessResult {
-        LOG_A2UI(LOG_ERROR, "ParseDslMessage: %{public}s", message.c_str());
-        return Fail(errorCode, message, surfaceResultCode);
-    };
-    auto failUnsupportedVersion = [](const std::string& version) -> ProcessResult {
-        LOG_A2UI(LOG_ERROR, "ParseDslMessage: unsupported A2UI protocol version=%{public}s", version.c_str());
-        return Fail("UNSUPPORTED_PROTOCOL_VERSION", "unsupported A2UI protocol version",
-            SURFACE_RESULT_UNSUPPORTED_PROTOCOL_VERSION);
-    };
+ProcessResult FailDslSchema(const std::string& errorCode, const std::string& message, int32_t surfaceResultCode)
+{
+    LOG_A2UI(LOG_ERROR, "ParseDslMessage: %{public}s", message.c_str());
+    return Fail(errorCode, message, surfaceResultCode);
+}
 
-    if (IsBlankString(dsl)) {
-        return failSchema("DSL_EMPTY", "dsl is empty", SURFACE_RESULT_SCHEMA_DSL_EMPTY);
-    }
+ProcessResult FailUnsupportedDslVersion(const std::string& version)
+{
+    LOG_A2UI(LOG_ERROR, "ParseDslMessage: unsupported A2UI protocol version=%{public}s", version.c_str());
+    return Fail("UNSUPPORTED_PROTOCOL_VERSION", "unsupported A2UI protocol version",
+        SURFACE_RESULT_UNSUPPORTED_PROTOCOL_VERSION);
+}
 
-    std::unique_ptr<JsonAdapter> adapter = JsonAdapter::Parse(dsl);
-    if (adapter == nullptr) {
-        dispatchWarning(SCHEMA_ERROR_CODE_SCHEMA_PARSE_FAILED, "DSL JSON parse failed", "root", "dsl");
-        return failSchema("JSON_PARSE_FAILED", "dsl json parse failed", SURFACE_RESULT_SCHEMA_JSON_PARSE_FAILED);
-    }
-
-    JsonValue root = adapter->GetRoot();
-    if (!root.IsObject()) {
-        dispatchWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH, "Root JSON must be an object", "root", "dsl");
-        return failSchema("ROOT_NOT_OBJECT", "root json must be an object", SURFACE_RESULT_SCHEMA_ROOT_NOT_OBJECT);
-    }
-
+ProcessResult ValidateDslVersion(JsonValue& root, int32_t renderId, std::string& version)
+{
     JsonValue versionValue = root.GetItem("version");
     if (!versionValue.IsValid()) {
-        dispatchWarning(SCHEMA_ERROR_CODE_REQUIRED_MISS, "Message version is required", "version", "dsl");
-        return failSchema("VERSION_INVALID", "version is invalid", SURFACE_RESULT_SCHEMA_VERSION_INVALID);
+        DispatchDslWarning(renderId, SCHEMA_ERROR_CODE_REQUIRED_MISS, "Message version is required", "version", "dsl");
+        return FailDslSchema("VERSION_INVALID", "version is invalid", SURFACE_RESULT_SCHEMA_VERSION_INVALID);
     }
     if (!versionValue.IsString()) {
-        dispatchWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH, "Message version must be a string", "version", "dsl");
-        return failSchema("VERSION_INVALID", "version is invalid", SURFACE_RESULT_SCHEMA_VERSION_INVALID);
+        DispatchDslWarning(
+            renderId, SCHEMA_ERROR_CODE_TYPE_MISMATCH, "Message version must be a string", "version", "dsl");
+        return FailDslSchema("VERSION_INVALID", "version is invalid", SURFACE_RESULT_SCHEMA_VERSION_INVALID);
     }
-
-    std::string version = versionValue.GetStringValue("");
+    version = versionValue.GetStringValue("");
     if (IsBlankString(version)) {
-        dispatchWarning(SCHEMA_ERROR_CODE_REQUIRED_MISS, "Message version is required", "version", "dsl");
-        return failSchema("VERSION_INVALID", "version is invalid", SURFACE_RESULT_SCHEMA_VERSION_INVALID);
+        DispatchDslWarning(renderId, SCHEMA_ERROR_CODE_REQUIRED_MISS, "Message version is required", "version", "dsl");
+        return FailDslSchema("VERSION_INVALID", "version is invalid", SURFACE_RESULT_SCHEMA_VERSION_INVALID);
     }
     if (!IsSupportedA2UIProtocolVersion(version)) {
-        dispatchWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
+        DispatchDslWarning(renderId, SCHEMA_ERROR_CODE_INVALID_VALUE,
             "Message version is unsupported and native processing will reject this message", "version", "dsl");
-        return failUnsupportedVersion(version);
+        return FailUnsupportedDslVersion(version);
     }
+    return Ok();
+}
 
-    uint32_t messageCount = 0;
-    const char* messageKey = nullptr;
-    uint32_t messageType = 0;
+void SelectDslMessageBody(JsonValue& root, MessageSelection& selection)
+{
     if (root.HasObjectItem("createSurface")) {
-        messageCount++;
-        messageKey = "createSurface";
-        messageType = MESSAGE_TYPE_CREATE_SURFACE;
+        selection = { selection.count + 1, "createSurface", MESSAGE_TYPE_CREATE_SURFACE };
     }
     if (root.HasObjectItem("updateComponents")) {
-        messageCount++;
-        messageKey = "updateComponents";
-        messageType = MESSAGE_TYPE_UPDATE_COMPONENTS;
+        selection = { selection.count + 1, "updateComponents", MESSAGE_TYPE_UPDATE_COMPONENTS };
     }
     if (root.HasObjectItem("updateDataModel")) {
-        messageCount++;
-        messageKey = "updateDataModel";
-        messageType = MESSAGE_TYPE_UPDATE_DATA_MODEL;
+        selection = { selection.count + 1, "updateDataModel", MESSAGE_TYPE_UPDATE_DATA_MODEL };
     }
     if (root.HasObjectItem("deleteSurface")) {
-        messageCount++;
-        messageKey = "deleteSurface";
-        messageType = MESSAGE_TYPE_DELETE_SURFACE;
+        selection = { selection.count + 1, "deleteSurface", MESSAGE_TYPE_DELETE_SURFACE };
     }
+}
 
-    if (messageCount == 0) {
-        std::string unknownKeys;
-        JsonValue child = root.GetChild();
-        while (child.IsValid()) {
-            std::string key = child.GetKey();
-            if (key != "version") {
-                if (!unknownKeys.empty()) {
-                    unknownKeys += ", ";
-                }
-                unknownKeys += key;
-            }
-            child = child.GetNext();
+std::string BuildUnknownDslOperationKeys(JsonValue& root)
+{
+    std::string unknownKeys;
+    JsonValue child = root.GetChild();
+    while (child.IsValid()) {
+        std::string key = child.GetKey();
+        if (key != "version") {
+            unknownKeys += unknownKeys.empty() ? key : (", " + key);
         }
+        child = child.GetNext();
+    }
+    return unknownKeys;
+}
+
+ProcessResult ValidateDslOperationSelection(JsonValue& root, int32_t renderId, const MessageSelection& selection)
+{
+    if (selection.count == 0) {
+        std::string unknownKeys = BuildUnknownDslOperationKeys(root);
         std::string errorMessage = unknownKeys.empty()
                                        ? "Message body is missing, expected exactly one of createSurface, "
                                          "updateComponents, updateDataModel, deleteSurface"
                                        : "Message operation is unknown: " + unknownKeys;
-        dispatchWarning(SCHEMA_ERROR_CODE_INVALID_VALUE, errorMessage, "root", "dsl");
-        return failSchema("MESSAGE_OPERATION_INVALID", errorMessage, SURFACE_RESULT_SCHEMA_MESSAGE_OPERATION_INVALID);
+        DispatchDslWarning(renderId, SCHEMA_ERROR_CODE_INVALID_VALUE, errorMessage, "root", "dsl");
+        return FailDslSchema(
+            "MESSAGE_OPERATION_INVALID", errorMessage, SURFACE_RESULT_SCHEMA_MESSAGE_OPERATION_INVALID);
     }
-
-    if (messageCount > 1) {
+    if (selection.count > 1) {
         std::string errorMessage = "Message contains multiple bodies, only one is allowed";
-        dispatchWarning(SCHEMA_ERROR_CODE_INVALID_VALUE, errorMessage, "root", "dsl");
-        return failSchema("MESSAGE_MULTIPLE_BODIES", errorMessage, SURFACE_RESULT_SCHEMA_MESSAGE_MULTIPLE_BODIES);
+        DispatchDslWarning(renderId, SCHEMA_ERROR_CODE_INVALID_VALUE, errorMessage, "root", "dsl");
+        return FailDslSchema("MESSAGE_MULTIPLE_BODIES", errorMessage, SURFACE_RESULT_SCHEMA_MESSAGE_MULTIPLE_BODIES);
     }
+    return Ok();
+}
 
-    JsonValue body = root.GetObjectItem(messageKey);
+ProcessResult ValidateDslMessageBody(
+    JsonValue& body, int32_t renderId, const MessageSelection& selection, std::string& surfaceId)
+{
     if (!body.IsObject()) {
-        std::string errorMessage = std::string("Message ") + messageKey + " body must be an object";
-        dispatchWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH, errorMessage, messageKey, messageKey);
-        return failSchema("MESSAGE_BODY_INVALID", std::string(messageKey) + " body is invalid",
+        std::string errorMessage = std::string("Message ") + selection.key + " body must be an object";
+        DispatchDslWarning(renderId, SCHEMA_ERROR_CODE_TYPE_MISMATCH, errorMessage, selection.key, selection.key);
+        return FailDslSchema("MESSAGE_BODY_INVALID", std::string(selection.key) + " body is invalid",
             SURFACE_RESULT_SCHEMA_MESSAGE_BODY_INVALID);
     }
-
-    std::string surfaceId = body.GetString("surfaceId", "");
+    surfaceId = body.GetString("surfaceId", "");
     if (IsBlankString(surfaceId)) {
-        dispatchWarning(SCHEMA_ERROR_CODE_REQUIRED_MISS, "Message surfaceId is required",
-            std::string(messageKey) + ".surfaceId", messageKey);
-        return failSchema("SURFACE_ID_MISSING", std::string(messageKey) + ".surfaceId is invalid",
+        DispatchDslWarning(renderId, SCHEMA_ERROR_CODE_REQUIRED_MISS, "Message surfaceId is required",
+            std::string(selection.key) + ".surfaceId", selection.key);
+        return FailDslSchema("SURFACE_ID_MISSING", std::string(selection.key) + ".surfaceId is invalid",
             SURFACE_RESULT_SCHEMA_SURFACE_ID_MISSING);
     }
+    return Ok();
+}
 
-    if (messageType == MESSAGE_TYPE_CREATE_SURFACE) {
-        std::string catalogId = body.GetString("catalogId", "");
-        if (IsBlankString(catalogId)) {
-            dispatchWarning(SCHEMA_ERROR_CODE_REQUIRED_MISS, "Message catalogId is required",
-                std::string(messageKey) + ".catalogId", messageKey);
-            return failSchema("CATALOG_ID_MISSING", std::string(messageKey) + ".catalogId is invalid",
-                SURFACE_RESULT_SCHEMA_CATALOG_ID_MISSING);
+void DispatchUnsupportedComponentFieldExpressionWarnings(
+    JsonValue& body, int32_t renderId, const MessageSelection& selection)
+{
+#ifdef ENABLE_EXPRESSION_ENGINE
+    JsonValue components = body.GetObjectItem("components");
+    constexpr const char* STRUCTURAL_FIELDS[] = { "id", "component" };
+    for (int32_t index = 0; index < components.GetArraySize(); ++index) {
+        JsonValue component = components.GetArrayItem(index);
+        if (!component.IsObject()) {
+            continue;
+        }
+        for (const char* field : STRUCTURAL_FIELDS) {
+            JsonValue value = component.GetItem(field);
+            if (!value.IsString() || !ExpressionEngine::IsExpression(value.GetStringValue(""))) {
+                continue;
+            }
+            std::string path = std::string(selection.key) + ".components[" + std::to_string(index) + "]." + field;
+            DispatchDslWarning(renderId, SCHEMA_ERROR_CODE_INVALID_VALUE,
+                "Component field " + std::string(field) + " does not support expression values", path, selection.key);
         }
     }
+#else
+    (void)body;
+    (void)renderId;
+    (void)selection;
+#endif
+}
 
-    switch (messageType) {
-        case MESSAGE_TYPE_UPDATE_COMPONENTS:
-            if (!body.GetObjectItem("components").IsArray()) {
-                dispatchWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH, "Message components must be an array",
-                    std::string(messageKey) + ".components", messageKey);
-                return failSchema("COMPONENTS_INVALID", std::string(messageKey) + ".components is invalid",
-                    SURFACE_RESULT_SCHEMA_COMPONENTS_INVALID);
-            }
-            break;
-        case MESSAGE_TYPE_UPDATE_DATA_MODEL:
-            if (!body.HasObjectItem("path") && !body.HasObjectItem("value")) {
-                dispatchWarning(SCHEMA_ERROR_CODE_REQUIRED_MISS,
-                    "Message updateDataModel requires path or value, fallback path to \"/\"",
-                    std::string(messageKey) + ".path", messageKey);
-                LOG_A2UI(LOG_WARN, "ParseDslMessage: updateDataModel requires path or value, fallback path to /");
-                body.PutString("path", "/");
-            }
-            break;
-        default:
-            break;
+ProcessResult ValidateTypedDslMessageBody(JsonValue& body, int32_t renderId, const MessageSelection& selection)
+{
+    if (selection.type == MESSAGE_TYPE_CREATE_SURFACE && IsBlankString(body.GetString("catalogId", ""))) {
+        DispatchDslWarning(renderId, SCHEMA_ERROR_CODE_REQUIRED_MISS, "Message catalogId is required",
+            std::string(selection.key) + ".catalogId", selection.key);
+        return FailDslSchema("CATALOG_ID_MISSING", std::string(selection.key) + ".catalogId is invalid",
+            SURFACE_RESULT_SCHEMA_CATALOG_ID_MISSING);
     }
+    if (selection.type == MESSAGE_TYPE_UPDATE_COMPONENTS && !body.GetObjectItem("components").IsArray()) {
+        DispatchDslWarning(renderId, SCHEMA_ERROR_CODE_TYPE_MISMATCH, "Message components must be an array",
+            std::string(selection.key) + ".components", selection.key);
+        return FailDslSchema("COMPONENTS_INVALID", std::string(selection.key) + ".components is invalid",
+            SURFACE_RESULT_SCHEMA_COMPONENTS_INVALID);
+    }
+    if (selection.type == MESSAGE_TYPE_UPDATE_COMPONENTS) {
+        DispatchUnsupportedComponentFieldExpressionWarnings(body, renderId, selection);
+    }
+    if (selection.type == MESSAGE_TYPE_UPDATE_DATA_MODEL && !body.HasObjectItem("path") &&
+        !body.HasObjectItem("value")) {
+        DispatchDslWarning(renderId, SCHEMA_ERROR_CODE_REQUIRED_MISS,
+            "Message updateDataModel requires path or value, fallback path to \"/\"",
+            std::string(selection.key) + ".path", selection.key);
+        LOG_A2UI(LOG_WARN, "ParseDslMessage: updateDataModel requires path or value, fallback path to /");
+        body.PutString("path", "/");
+    }
+    return Ok();
+}
 
+void DispatchUndefinedDslRootFields(JsonValue& root, int32_t renderId, const char* messageKey)
+{
     JsonValue checkChild = root.GetChild();
     while (checkChild.IsValid()) {
         std::string key = checkChild.GetKey();
         if (key != "version" && key != messageKey) {
-            dispatchWarning(SCHEMA_ERROR_CODE_UNDEFINED_FIELD,
+            DispatchDslWarning(renderId, SCHEMA_ERROR_CODE_UNDEFINED_FIELD,
                 "Root field " + key + " is undefined in schema and has been removed", key, "dsl");
         }
         checkChild = checkChild.GetNext();
     }
+}
+
+ProcessResult ParseDslMessage(const std::string& dsl, int32_t renderId, ParsedMessage& parsedMessage)
+{
+    if (IsBlankString(dsl)) {
+        return FailDslSchema("DSL_EMPTY", "dsl is empty", SURFACE_RESULT_SCHEMA_DSL_EMPTY);
+    }
+
+    std::unique_ptr<JsonAdapter> adapter = JsonAdapter::Parse(dsl);
+    if (adapter == nullptr) {
+        DispatchDslWarning(renderId, SCHEMA_ERROR_CODE_SCHEMA_PARSE_FAILED, "DSL JSON parse failed", "root", "dsl");
+        return FailDslSchema("JSON_PARSE_FAILED", "dsl json parse failed", SURFACE_RESULT_SCHEMA_JSON_PARSE_FAILED);
+    }
+
+    JsonValue root = adapter->GetRoot();
+    if (!root.IsObject()) {
+        DispatchDslWarning(renderId, SCHEMA_ERROR_CODE_TYPE_MISMATCH, "Root JSON must be an object", "root", "dsl");
+        return FailDslSchema("ROOT_NOT_OBJECT", "root json must be an object", SURFACE_RESULT_SCHEMA_ROOT_NOT_OBJECT);
+    }
+
+    std::string version;
+    ProcessResult versionResult = ValidateDslVersion(root, renderId, version);
+    if (!versionResult.success) {
+        return versionResult;
+    }
+
+    MessageSelection selection;
+    SelectDslMessageBody(root, selection);
+    ProcessResult selectionResult = ValidateDslOperationSelection(root, renderId, selection);
+    if (!selectionResult.success) {
+        return selectionResult;
+    }
+    JsonValue body = root.GetObjectItem(selection.key);
+    std::string surfaceId;
+    ProcessResult bodyResult = ValidateDslMessageBody(body, renderId, selection, surfaceId);
+    if (!bodyResult.success) {
+        return bodyResult;
+    }
+    ProcessResult typedBodyResult = ValidateTypedDslMessageBody(body, renderId, selection);
+    if (!typedBodyResult.success) {
+        return typedBodyResult;
+    }
+    DispatchUndefinedDslRootFields(root, renderId, selection.key);
 
     parsedMessage.version = version;
     parsedMessage.surfaceId = surfaceId;
-    if (messageType == MESSAGE_TYPE_CREATE_SURFACE) {
+    if (selection.type == MESSAGE_TYPE_CREATE_SURFACE) {
         parsedMessage.catalogId = body.GetString("catalogId", "");
     }
-    parsedMessage.messageType = messageType;
+    parsedMessage.messageType = selection.type;
     parsedMessage.messageBody = body;
     return Ok();
 }
@@ -687,11 +791,39 @@ static std::shared_ptr<CatalogItem> ParseCatalogItem(napi_env env, napi_value it
         NapiBridge::GetInstance().Provider().GetValueBool(env, boolValue, &isInnerNative);
     }
 
+    bool preserveDynamicDescriptors = false;
+    if (NapiHasProperty(env, itemNapi, "preserveDynamicDescriptors")) {
+        napi_value boolValue = NapiGetProperty(env, itemNapi, "preserveDynamicDescriptors");
+        NapiBridge::GetInstance().Provider().GetValueBool(env, boolValue, &preserveDynamicDescriptors);
+    }
+
     auto item = std::make_shared<CatalogItem>(name, static_cast<CatalogItemType>(typeValue));
     item->SetCategory(static_cast<CatalogCategory>(categoryValue));
     item->SetInnerNative(isInnerNative);
+    item->SetPreserveDynamicDescriptors(preserveDynamicDescriptors);
 
     return item;
+}
+
+static void AddCatalogItemsFromNapi(
+    napi_env env, napi_value arrayNapi, const std::shared_ptr<Catalog>& catalog, bool asFunction)
+{
+    if (!NapiIsArray(env, arrayNapi)) {
+        return;
+    }
+    uint32_t length = NapiGetArrayLength(env, arrayNapi);
+    for (uint32_t i = 0; i < length; ++i) {
+        napi_value itemNapi = NapiGetElement(env, arrayNapi, i);
+        auto item = ParseCatalogItem(env, itemNapi);
+        if (item == nullptr) {
+            continue;
+        }
+        if (asFunction) {
+            catalog->AddFunction(item);
+        } else {
+            catalog->AddComponent(item);
+        }
+    }
 }
 
 static std::shared_ptr<Catalog> ParseCatalog(napi_env env, napi_value catalogNapi)
@@ -708,31 +840,11 @@ static std::shared_ptr<Catalog> ParseCatalog(napi_env env, napi_value catalogNap
     LOG_A2UI(LOG_ERROR, "ParseCatalog=%{public}s, a2UIProtocolVersion=%{public}s", catalogId.c_str(),
         a2UIProtocolVersion.c_str());
     if (NapiHasProperty(env, catalogNapi, "components")) {
-        napi_value componentsArray = NapiGetProperty(env, catalogNapi, "components");
-        if (NapiIsArray(env, componentsArray)) {
-            uint32_t length = NapiGetArrayLength(env, componentsArray);
-            for (uint32_t i = 0; i < length; ++i) {
-                napi_value itemNapi = NapiGetElement(env, componentsArray, i);
-                auto item = ParseCatalogItem(env, itemNapi);
-                if (item != nullptr) {
-                    catalog->AddComponent(item);
-                }
-            }
-        }
+        AddCatalogItemsFromNapi(env, NapiGetProperty(env, catalogNapi, "components"), catalog, false);
     }
 
     if (NapiHasProperty(env, catalogNapi, "functions")) {
-        napi_value functionsArray = NapiGetProperty(env, catalogNapi, "functions");
-        if (NapiIsArray(env, functionsArray)) {
-            uint32_t length = NapiGetArrayLength(env, functionsArray);
-            for (uint32_t i = 0; i < length; ++i) {
-                napi_value itemNapi = NapiGetElement(env, functionsArray, i);
-                auto item = ParseCatalogItem(env, itemNapi);
-                if (item != nullptr) {
-                    catalog->AddFunction(item);
-                }
-            }
-        }
+        AddCatalogItemsFromNapi(env, NapiGetProperty(env, catalogNapi, "functions"), catalog, true);
     }
 
     return catalog;
@@ -770,7 +882,7 @@ ProcessResult UpdateNativeTreeInternal(
     SurfaceSlot* slot = surfaceManager->FindSurface(surfaceId);
     if (slot == nullptr) {
         LOG_A2UI(LOG_ERROR, "UpdateNativeTreeInternal: surface not found, surfaceId=%{public}s", surfaceId.c_str());
-        return Fail("SURFACE_NOT_FOUND", "Surface not found: " + surfaceId);
+        return FailSurfaceNotFound(surfaceId);
     }
 
     if (slot->GetCatalog() == nullptr) {
@@ -815,7 +927,7 @@ ProcessResult SyncComponentBoundDataModelInternal(int32_t renderId, const std::s
     std::string resolvedSurfaceId = surfaceId.empty() ? "default" : surfaceId;
     SurfaceSlot* slot = surfaceManager->FindSurface(resolvedSurfaceId);
     if (slot == nullptr) {
-        return Fail("SURFACE_NOT_FOUND", "Surface not found: " + resolvedSurfaceId);
+        return FailSurfaceNotFound(resolvedSurfaceId);
     }
 
     std::shared_ptr<Component> component = slot->FindComponentById(componentId);
@@ -843,55 +955,81 @@ ProcessResult SyncComponentBoundDataModelInternal(int32_t renderId, const std::s
     return Ok();
 }
 
-ProcessResult DispatchV09Message(int32_t renderId, const ParsedMessage& parsedMessage, RenderSlot* renderSlot,
+ProcessResult DispatchCreateSurfaceMessage(const ParsedMessage& parsedMessage, RenderSlot* renderSlot,
     const std::shared_ptr<SurfaceManager>& surfaceManager, napi_env env, napi_value catalog)
 {
     const std::string& surfaceId = parsedMessage.surfaceId;
+    if (surfaceManager->HasSurface(surfaceId)) {
+        LOG_A2UI(LOG_ERROR, "ProcessMessage: Surface already exists for surfaceId=%{public}s", surfaceId.c_str());
+        return Fail(
+            "SURFACE_ALREADY_EXISTS", "Surface already exists: " + surfaceId, SURFACE_RESULT_SURFACE_ALREADY_EXISTS);
+    }
+
+    SurfaceSlot& slot = surfaceManager->CreateSurface(surfaceId, renderSlot->GetContentHandle());
+    ApplyCreateSurfaceTheme(slot, surfaceManager->GetThemeContext(), parsedMessage.messageBody);
+    ResolveCatalogForSurface(&slot, parsedMessage.catalogId, env, catalog);
+    return Ok(parsedMessage);
+}
+
+ProcessResult DispatchUpdateComponentsMessage(
+    int32_t renderId, const ParsedMessage& parsedMessage, napi_env env, napi_value catalog)
+{
+    ProcessResult updateResult =
+        UpdateNativeTreeInternal(renderId, parsedMessage.surfaceId, parsedMessage.messageBody, env, catalog);
+    return updateResult.success ? Ok(parsedMessage) : updateResult;
+}
+
+ProcessResult DispatchUpdateDataModelMessage(
+    const ParsedMessage& parsedMessage, const std::shared_ptr<SurfaceManager>& surfaceManager)
+{
+    const std::string& surfaceId = parsedMessage.surfaceId;
+    SurfaceSlot* slot = surfaceManager->FindSurface(surfaceId);
+    if (slot == nullptr) {
+        return FailSurfaceNotFound(surfaceId);
+    }
+
+    bool success = slot->UpdateDataModel(parsedMessage.messageBody);
+    if (!success) {
+        return Fail("UPDATE_DATA_MODEL_FAILED", "Update data model failed for surfaceId=" + surfaceId);
+    }
+    return Ok(parsedMessage);
+}
+
+ProcessResult DispatchDeleteSurfaceMessage(
+    const ParsedMessage& parsedMessage, const std::shared_ptr<SurfaceManager>& surfaceManager)
+{
+    const std::string& surfaceId = parsedMessage.surfaceId;
+    SurfaceSlot* slot = surfaceManager->FindSurface(surfaceId);
+    if (slot == nullptr) {
+        return FailSurfaceNotFound(surfaceId);
+    }
+
+    surfaceManager->RemoveSurface(surfaceId);
+    return Ok(parsedMessage);
+}
+
+ProcessResult DispatchV09Message(const ParsedMessage& parsedMessage, const MessageDispatchContext& context)
+{
+    const std::string& surfaceId = parsedMessage.surfaceId;
     uint32_t messageType = parsedMessage.messageType;
-    const JsonValue& messageBody = parsedMessage.messageBody;
 
     switch (messageType) {
         case MESSAGE_TYPE_CREATE_SURFACE: {
             HiTraceScoped trace("SurfaceController:onReceive:CREATE_SURFACE");
-            if (surfaceManager->HasSurface(surfaceId)) {
-                LOG_A2UI(
-                    LOG_ERROR, "ProcessMessage: Surface already exists for surfaceId=%{public}s", surfaceId.c_str());
-                return Fail("SURFACE_ALREADY_EXISTS", "Surface already exists: " + surfaceId,
-                    SURFACE_RESULT_SURFACE_ALREADY_EXISTS);
-            }
-            SurfaceSlot& slot = surfaceManager->CreateSurface(surfaceId, renderSlot->GetContentHandle());
-            ApplyCreateSurfaceTheme(slot, surfaceManager->GetThemeContext(), messageBody);
-            ResolveCatalogForSurface(&slot, parsedMessage.catalogId, env, catalog);
-            return Ok(parsedMessage);
+            return DispatchCreateSurfaceMessage(
+                parsedMessage, context.renderSlot, context.surfaceManager, context.env, context.catalog);
         }
         case MESSAGE_TYPE_UPDATE_COMPONENTS: {
             HiTraceScoped trace("SurfaceController:onReceive:UPDATE_COMPONENTS");
-            ProcessResult updateResult = UpdateNativeTreeInternal(renderId, surfaceId, messageBody, env, catalog);
-            if (!updateResult.success) {
-                return updateResult;
-            }
-            return Ok(parsedMessage);
+            return DispatchUpdateComponentsMessage(context.renderId, parsedMessage, context.env, context.catalog);
         }
         case MESSAGE_TYPE_UPDATE_DATA_MODEL: {
             HiTraceScoped trace("SurfaceController:onReceive:UPDATE_DATA_MODEL");
-            SurfaceSlot* slot = surfaceManager->FindSurface(surfaceId);
-            if (slot == nullptr) {
-                return Fail("SURFACE_NOT_FOUND", "Surface not found: " + surfaceId);
-            }
-            bool success = slot->UpdateDataModel(messageBody);
-            if (!success) {
-                return Fail("UPDATE_DATA_MODEL_FAILED", "Update data model failed for surfaceId=" + surfaceId);
-            }
-            return Ok(parsedMessage);
+            return DispatchUpdateDataModelMessage(parsedMessage, context.surfaceManager);
         }
         case MESSAGE_TYPE_DELETE_SURFACE: {
             HiTraceScoped trace("SurfaceController:onReceive:DELETE_SURFACE");
-            SurfaceSlot* slot = surfaceManager->FindSurface(surfaceId);
-            if (slot == nullptr) {
-                return Fail("SURFACE_NOT_FOUND", "Surface not found: " + surfaceId);
-            }
-            surfaceManager->RemoveSurface(surfaceId);
-            return Ok(parsedMessage);
+            return DispatchDeleteSurfaceMessage(parsedMessage, context.surfaceManager);
         }
         default:
             LOG_A2UI(LOG_ERROR, "ProcessMessage: unknown messageType=%{public}u, surfaceId=%{public}s", messageType,
@@ -900,15 +1038,212 @@ ProcessResult DispatchV09Message(int32_t renderId, const ParsedMessage& parsedMe
     }
 }
 
-ProcessResult DispatchMessageByVersion(int32_t renderId, const ParsedMessage& parsedMessage, RenderSlot* renderSlot,
-    const std::shared_ptr<SurfaceManager>& surfaceManager, napi_env env, napi_value catalog)
+ProcessResult DispatchMessageByVersion(const ParsedMessage& parsedMessage, const MessageDispatchContext& context)
 {
     if (parsedMessage.version == DEFAULT_A2UI_PROTOCOL_VERSION) {
-        return DispatchV09Message(renderId, parsedMessage, renderSlot, surfaceManager, env, catalog);
+        return DispatchV09Message(parsedMessage, context);
     }
 
     return Fail("UNSUPPORTED_PROTOCOL_VERSION", "unsupported A2UI protocol version",
         SURFACE_RESULT_UNSUPPORTED_PROTOCOL_VERSION);
+}
+
+ProcessResult ParseProcessMessageInput(napi_env env, napi_callback_info info, ProcessMessageInput& input)
+{
+    size_t argc = 4;
+    napi_value args[4] = { nullptr, nullptr, nullptr, nullptr };
+    NapiBridge::GetInstance().Provider().GetCbInfo(env, info, &argc, args, nullptr, nullptr);
+    LOG_A2UI(LOG_DEBUG, "ProcessMessage: received, argc=%{public}zu", argc);
+    if (argc < 3 || args[0] == nullptr || args[1] == nullptr || args[2] == nullptr) {
+        LOG_A2UI(LOG_ERROR, "ProcessMessage: invalid arguments, argc=%{public}zu", argc);
+        return Fail("INVALID_ARGUMENT", "ProcessMessage: invalid arguments");
+    }
+
+    napi_status status = NapiBridge::GetInstance().Provider().GetValueInt32(env, args[0], &input.renderId);
+    if (status != napi_ok) {
+        LOG_A2UI(LOG_ERROR, "ProcessMessage: failed to get renderId from napi value");
+        return Fail("INVALID_ARGUMENT", "ProcessMessage: failed to get renderId from napi value");
+    }
+
+    input.dsl = NapiGetStringValue(env, args[1]);
+    input.catalog = args[2];
+    input.policyOptions = ParseSurfacePolicyOptions(env, args[3]);
+    return Ok();
+}
+
+ProcessResult DispatchDslLengthErrorIfNeeded(int32_t renderId, const std::string& dsl)
+{
+    constexpr size_t MAX_DSL_LENGTH = 10 * 1024;
+    if (dsl.size() <= MAX_DSL_LENGTH) {
+        return Ok();
+    }
+
+    std::string errorMessage = "DSL string length " + std::to_string(dsl.size()) + " exceeds maximum allowed " +
+                               std::to_string(MAX_DSL_LENGTH);
+    LOG_A2UI(LOG_ERROR, "ProcessMessage: %{public}s", errorMessage.c_str());
+    return Fail("NATIVE_PROCESS_FAILED", errorMessage, SURFACE_ERROR_NATIVE_PROCESS_FAILED);
+}
+
+napi_value CreateTimedProcessResultValue(napi_env env, const ProcessResult& result,
+    std::chrono::steady_clock::time_point startTime, const ParsedMessage& parsedMessage)
+{
+    if (result.success) {
+        auto durationMs =
+            std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - startTime).count();
+        LOG_A2UI(LOG_INFO,
+            "ProcessMessage timing: messageType=%{public}s, surfaceId=%{public}s, durationMs=%{public}lld",
+            DescribeMessageType(parsedMessage.messageType), parsedMessage.surfaceId.c_str(),
+            static_cast<long long>(durationMs));
+    }
+    return CreateProcessResultValue(env, result);
+}
+
+ProcessResult ResolveProcessMessageTarget(int32_t renderId, const ParsedMessage& parsedMessage,
+    const SurfacePolicyOptions& policyOptions, RenderSlot*& renderSlot, std::shared_ptr<SurfaceManager>& surfaceManager)
+{
+    renderSlot = RenderManager::GetInstance().FindRenderSlot(renderId);
+    if (renderSlot == nullptr) {
+        LOG_A2UI(LOG_ERROR, "ProcessMessage: RenderSlot not found for renderId=%{public}d", renderId);
+        return Fail("RENDER_SLOT_NOT_FOUND", "RenderSlot not found for renderId=" + std::to_string(renderId));
+    }
+
+    surfaceManager = renderSlot->GetSurfaceManager();
+    if (surfaceManager == nullptr) {
+        LOG_A2UI(LOG_ERROR, "ProcessMessage: SurfaceManager is nullptr for renderId=%{public}d", renderId);
+        return Fail("SURFACE_MANAGER_NOT_READY", "SurfaceManager is nullptr for renderId=" + std::to_string(renderId));
+    }
+
+    ProcessResult protocolResult = ValidateSurfaceProtocol(parsedMessage, policyOptions);
+    if (!protocolResult.success) {
+        return protocolResult;
+    }
+    return ValidateSurfacePolicy(parsedMessage, surfaceManager, policyOptions);
+}
+
+bool ParseCustomComponentActionInput(napi_env env, napi_callback_info info, CustomComponentActionInput& input)
+{
+    auto& napi = NapiBridge::GetInstance().Provider();
+    size_t argc = 5;
+    napi_value args[5] = { nullptr };
+    napi.GetCbInfo(env, info, &argc, args, nullptr, nullptr);
+    if (argc < 5) {
+        LOG_A2UI(LOG_ERROR, "DispatchCustomComponentAction: expected 5 args, got %{public}zu", argc);
+        return false;
+    }
+
+    if (napi.GetValueInt32(env, args[0], &input.renderId) != napi_ok) {
+        LOG_A2UI(LOG_ERROR, "DispatchCustomComponentAction: failed to get renderId");
+        return false;
+    }
+
+    input.surfaceId = NapiGetStringValue(env, args[1]);
+    input.componentId = NapiGetStringValue(env, args[2]);
+    input.eventName = NapiGetStringValue(env, args[3]);
+    input.contextJson = NapiGetStringValue(env, args[4]);
+    return true;
+}
+
+bool FindCustomComponentActionTarget(const CustomComponentActionInput& input, CustomComponentActionTarget& target)
+{
+    RenderSlot* renderSlot = RenderManager::GetInstance().FindRenderSlot(input.renderId);
+    if (renderSlot == nullptr) {
+        LOG_A2UI(LOG_WARN, "DispatchCustomComponentAction: RenderSlot not found, renderId=%{public}d", input.renderId);
+        return false;
+    }
+
+    std::shared_ptr<SurfaceManager> surfaceManager = renderSlot->GetSurfaceManager();
+    if (surfaceManager == nullptr) {
+        return false;
+    }
+
+    SurfaceSlot* surface = surfaceManager->FindSurface(input.surfaceId);
+    if (surface == nullptr) {
+        return false;
+    }
+
+    target.component = surface->FindComponentById(input.componentId);
+    target.customComponent = std::dynamic_pointer_cast<CustomComponent>(target.component);
+    if (target.customComponent == nullptr) {
+        LOG_A2UI(LOG_WARN,
+            "DispatchCustomComponentAction: component not found or not a CustomComponent, componentId=%{public}s",
+            input.componentId.c_str());
+        return false;
+    }
+    return true;
+}
+
+JsonValue ParseCustomComponentActionContext(const std::string& contextJson)
+{
+    if (contextJson.empty()) {
+        return JsonValue();
+    }
+
+    std::unique_ptr<JsonAdapter> contextAdapter = JsonAdapter::Parse(contextJson);
+    if (contextAdapter == nullptr) {
+        return JsonValue();
+    }
+    return contextAdapter->GetRoot();
+}
+
+std::string FindCheckedBindingPath(const std::shared_ptr<Component>& component)
+{
+    const auto& bindings = component->GetDataBindings();
+    for (auto iter = bindings.rbegin(); iter != bindings.rend(); ++iter) {
+        if (iter->propertyName_ == "checked" && !iter->dataPath_.empty()) {
+            return iter->dataPath_;
+        }
+    }
+    return "";
+}
+
+bool TryGetCheckedValue(const JsonValue& extraContext, bool& checkedValue)
+{
+    if (extraContext.IsBool()) {
+        checkedValue = extraContext.GetBoolValue(false);
+        return true;
+    }
+    if (extraContext.IsObject() && extraContext.Has("checked")) {
+        checkedValue = extraContext.GetBool("checked", false);
+        return true;
+    }
+    return false;
+}
+
+void SyncCustomComponentCheckedState(const CustomComponentActionTarget& target, const JsonValue& extraContext)
+{
+    bool checkedValue = false;
+    bool hasCheckedValue = TryGetCheckedValue(extraContext, checkedValue);
+    if (hasCheckedValue && GetShortComponentType(target.customComponent->GetType()) == "Radio") {
+        std::unique_ptr<JsonAdapter> checkedAdapter = JsonAdapter::CreateBool(checkedValue);
+        if (checkedAdapter != nullptr) {
+            target.customComponent->SetRuntimeCustomProperty("checked", checkedAdapter->GetRoot());
+        }
+    }
+
+    std::string checkedBindingPath = FindCheckedBindingPath(target.component);
+    if (!checkedBindingPath.empty() && hasCheckedValue) {
+        target.customComponent->SyncCheckedToBoundDataModel(checkedBindingPath, checkedValue);
+    }
+}
+
+void SyncCustomComponentRuntimeValues(
+    const std::shared_ptr<CustomComponent>& customComponent, const JsonValue& extraContext)
+{
+    if (!extraContext.IsObject()) {
+        return;
+    }
+
+    JsonValue selectedVal =
+        extraContext.Has("index") ? extraContext.GetItem("index") : extraContext.GetItem("selected");
+    if (selectedVal.IsValid()) {
+        customComponent->SetRuntimeCustomProperty("selected", selectedVal);
+    }
+    if (extraContext.Has("value")) {
+        JsonValue valueVal = extraContext.GetItem("value");
+        if (valueVal.IsValid()) {
+            customComponent->SetRuntimeCustomProperty("value", valueVal);
+        }
+    }
 }
 
 } // namespace
@@ -975,91 +1310,45 @@ napi_value DestroyRenderSlot(napi_env env, napi_callback_info info)
 
 napi_value ProcessMessage(napi_env env, napi_callback_info info)
 {
-    size_t argc = 4;
-    napi_value args[4] = { nullptr, nullptr, nullptr, nullptr };
-    NapiBridge::GetInstance().Provider().GetCbInfo(env, info, &argc, args, nullptr, nullptr);
-    LOG_A2UI(LOG_DEBUG, "ProcessMessage: received, argc=%{public}zu", argc);
-
-    if (argc < 3 || args[0] == nullptr || args[1] == nullptr || args[2] == nullptr) {
-        LOG_A2UI(LOG_ERROR, "ProcessMessage: invalid arguments, argc=%{public}zu", argc);
-        return CreateProcessResultValue(env, Fail("INVALID_ARGUMENT", "ProcessMessage: invalid arguments"));
+    ProcessMessageInput input;
+    ProcessResult inputResult = ParseProcessMessageInput(env, info, input);
+    if (!inputResult.success) {
+        return CreateProcessResultValue(env, inputResult);
     }
 
-    int32_t renderId = 0;
-    napi_status status = NapiBridge::GetInstance().Provider().GetValueInt32(env, args[0], &renderId);
-    if (status != napi_ok) {
-        LOG_A2UI(LOG_ERROR, "ProcessMessage: failed to get renderId from napi value");
-        return CreateProcessResultValue(
-            env, Fail("INVALID_ARGUMENT", "ProcessMessage: failed to get renderId from napi value"));
+    ProcessResult dslLengthResult = DispatchDslLengthErrorIfNeeded(input.renderId, input.dsl);
+    if (!dslLengthResult.success) {
+        return CreateProcessResultValue(env, dslLengthResult);
     }
-
-    std::string dsl = NapiGetStringValue(env, args[1]);
-
-    constexpr size_t MAX_DSL_LENGTH = 10 * 1024;
-    if (dsl.size() > MAX_DSL_LENGTH) {
-        std::string errorMessage = "DSL string length " + std::to_string(dsl.size()) + " exceeds maximum allowed " +
-                                   std::to_string(MAX_DSL_LENGTH);
-        LOG_A2UI(LOG_ERROR, "ProcessMessage: %{public}s", errorMessage.c_str());
-        RuntimeErrorDispatchBridge::GetInstance().Dispatch(
-            renderId, "", "", SURFACE_ERROR_NATIVE_PROCESS_FAILED, errorMessage, "NativeEntry::ProcessMessage");
-    }
-
-    napi_value catalog = args[2];
-    SurfacePolicyOptions policyOptions = ParseSurfacePolicyOptions(env, args[3]);
 
     ParsedMessage parsedMessage;
-    ProcessResult parseResult = ParseDslMessage(dsl, renderId, parsedMessage);
+    ProcessResult parseResult = ParseDslMessage(input.dsl, input.renderId, parsedMessage);
     if (!parseResult.success) {
         return CreateProcessResultValue(env, parseResult);
     }
 
-    const std::string& surfaceId = parsedMessage.surfaceId;
-    uint32_t messageType = parsedMessage.messageType;
     auto startTime = std::chrono::steady_clock::now();
-    auto finishWithResult = [&](const ProcessResult& result) -> napi_value {
-        if (result.success) {
-            auto durationMs =
-                std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - startTime)
-                    .count();
-            LOG_A2UI(LOG_INFO,
-                "ProcessMessage timing: messageType=%{public}s, surfaceId=%{public}s, durationMs=%{public}lld",
-                DescribeMessageType(messageType), surfaceId.c_str(), static_cast<long long>(durationMs));
-        }
-        return CreateProcessResultValue(env, result);
-    };
-
     LOG_A2UI(LOG_DEBUG, "ProcessMessage: parsed, renderId=%{public}d, surfaceId=%{public}s, messageType=%{public}u",
-        renderId, surfaceId.c_str(), messageType);
+        input.renderId, parsedMessage.surfaceId.c_str(), parsedMessage.messageType);
 
-    auto& renderManager = RenderManager::GetInstance();
-    RenderSlot* renderSlot = renderManager.FindRenderSlot(renderId);
-    if (renderSlot == nullptr) {
-        LOG_A2UI(LOG_ERROR, "ProcessMessage: RenderSlot not found for renderId=%{public}d", renderId);
-        return finishWithResult(
-            Fail("RENDER_SLOT_NOT_FOUND", "RenderSlot not found for renderId=" + std::to_string(renderId)));
+    RenderSlot* renderSlot = nullptr;
+    std::shared_ptr<SurfaceManager> surfaceManager;
+    ProcessResult targetResult =
+        ResolveProcessMessageTarget(input.renderId, parsedMessage, input.policyOptions, renderSlot, surfaceManager);
+    if (!targetResult.success) {
+        return CreateTimedProcessResultValue(env, targetResult, startTime, parsedMessage);
     }
 
-    std::shared_ptr<SurfaceManager> surfaceManager = renderSlot->GetSurfaceManager();
-    if (surfaceManager == nullptr) {
-        LOG_A2UI(LOG_ERROR, "ProcessMessage: SurfaceManager is nullptr for renderId=%{public}d", renderId);
-        return finishWithResult(
-            Fail("SURFACE_MANAGER_NOT_READY", "SurfaceManager is nullptr for renderId=" + std::to_string(renderId)));
-    }
-
-    ProcessResult protocolResult = ValidateSurfaceProtocol(parsedMessage, policyOptions);
-    if (!protocolResult.success) {
-        return finishWithResult(protocolResult);
-    }
-
-    ProcessResult policyResult = ValidateSurfacePolicy(parsedMessage, surfaceManager, policyOptions);
-    if (!policyResult.success) {
-        return finishWithResult(policyResult);
-    }
-
-    MaybeDispatchCreateSurfaceCatalogMismatchWarning(parsedMessage, env, catalog, renderId);
-
-    return finishWithResult(
-        DispatchMessageByVersion(renderId, parsedMessage, renderSlot, surfaceManager, env, catalog));
+    MaybeDispatchCreateSurfaceCatalogMismatchWarning(parsedMessage, env, input.catalog, input.renderId);
+    MessageDispatchContext dispatchContext = {
+        .renderId = input.renderId,
+        .renderSlot = renderSlot,
+        .surfaceManager = surfaceManager,
+        .env = env,
+        .catalog = input.catalog,
+    };
+    ProcessResult dispatchResult = DispatchMessageByVersion(parsedMessage, dispatchContext);
+    return CreateTimedProcessResultValue(env, dispatchResult, startTime, parsedMessage);
 }
 
 napi_value BindSurfaceToRender(napi_env env, napi_callback_info info)
@@ -1297,6 +1586,39 @@ napi_value GetLatestSurfaceId(napi_env env, napi_callback_info info)
 }
 
 #ifdef ENABLE_EXPRESSION_ENGINE
+namespace {
+void ApplyThemeContextFromRenderId(EvaluationContext& context, int32_t renderId)
+{
+    RenderSlot* renderSlot = RenderManager::GetInstance().FindRenderSlot(renderId);
+    if (renderSlot == nullptr) {
+        return;
+    }
+    std::shared_ptr<SurfaceManager> surfaceManager = renderSlot->GetSurfaceManager();
+    if (surfaceManager == nullptr) {
+        return;
+    }
+    context.SetThemeContext(&surfaceManager->GetThemeContext());
+}
+
+void ApplySurfaceDataModel(EvaluationContext& context, const std::string& surfaceId)
+{
+    RenderSlot* renderSlot = RenderManager::GetInstance().FindRenderSlot(context.GetRenderId());
+    if (renderSlot == nullptr) {
+        return;
+    }
+    std::shared_ptr<SurfaceManager> surfaceManager = renderSlot->GetSurfaceManager();
+    if (surfaceManager == nullptr) {
+        return;
+    }
+    SurfaceSlot* surfaceSlot = surfaceManager->FindSurface(surfaceId);
+    if (surfaceSlot == nullptr || surfaceSlot->GetBindingEngine() == nullptr) {
+        return;
+    }
+    auto dataModel = surfaceSlot->GetBindingEngine()->GetOrCreateDataModel(surfaceId);
+    context.SetDataModel(dataModel.get());
+}
+} // namespace
+
 napi_value EvaluateExpression(napi_env env, napi_callback_info info)
 {
     auto& napi = NapiBridge::GetInstance().Provider();
@@ -1332,15 +1654,7 @@ napi_value EvaluateExpression(napi_env env, napi_callback_info info)
             int32_t renderId = 0;
             napi.GetValueInt32(env, args[1], &renderId);
             context.SetRenderId(renderId);
-
-            auto& renderManager = RenderManager::GetInstance();
-            RenderSlot* renderSlot = renderManager.FindRenderSlot(renderId);
-            if (renderSlot != nullptr) {
-                std::shared_ptr<SurfaceManager> surfaceManager = renderSlot->GetSurfaceManager();
-                if (surfaceManager != nullptr) {
-                    context.SetThemeContext(&surfaceManager->GetThemeContext());
-                }
-            }
+            ApplyThemeContextFromRenderId(context, renderId);
         }
     }
 
@@ -1350,22 +1664,12 @@ napi_value EvaluateExpression(napi_env env, napi_callback_info info)
         if (argType == napi_string) {
             std::string surfaceId = NapiGetStringValue(env, args[2]);
             context.SetSurfaceId(surfaceId);
-
-            RenderSlot* renderSlot = RenderManager::GetInstance().FindRenderSlot(context.GetRenderId());
-            if (renderSlot != nullptr) {
-                std::shared_ptr<SurfaceManager> surfaceManager = renderSlot->GetSurfaceManager();
-                if (surfaceManager != nullptr) {
-                    SurfaceSlot* surfaceSlot = surfaceManager->FindSurface(surfaceId);
-                    if (surfaceSlot != nullptr && surfaceSlot->GetBindingEngine() != nullptr) {
-                        auto dataModel = surfaceSlot->GetBindingEngine()->GetOrCreateDataModel(surfaceId);
-                        context.SetDataModel(dataModel.get());
-                    }
-                }
-            }
+            ApplySurfaceDataModel(context, surfaceId);
         }
     }
 
-    EvalResult evalResult = ExpressionEngine::GetInstance().Evaluate(expression, context);
+    JsonValue evaluatedValue = ExpressionEngine::GetInstance().EvaluateAsJsonValue(expression, context, true);
+    EvalResult evalResult = EvalResult::FromJson(evaluatedValue);
     return CreateExpressionResult(env, evalResult);
 }
 #endif
@@ -1509,15 +1813,7 @@ napi_value SetApiVersion(napi_env env, napi_callback_info info)
         LOG_A2UI(LOG_ERROR, "SetApiVersion: failed to get apiVersion");
         return nullptr;
     }
-
-    auto& renderManager = RenderManager::GetInstance();
-    RenderSlot* renderSlot = renderManager.FindRenderSlot(renderId);
-    if (renderSlot == nullptr) {
-        LOG_A2UI(LOG_WARN, "SetApiVersion: RenderSlot not found, renderId=%{public}d", renderId);
-        return nullptr;
-    }
-
-    renderSlot->SetApiVersion(apiVersion);
+    SystemProperties::GetInstance().SetApiVersion(apiVersion);
 
     LOG_A2UI(LOG_INFO, "SetApiVersion: renderId=%{public}d, apiVersion=%{public}d", renderId, apiVersion);
     return nullptr;
@@ -1525,105 +1821,20 @@ napi_value SetApiVersion(napi_env env, napi_callback_info info)
 
 napi_value DispatchCustomComponentAction(napi_env env, napi_callback_info info)
 {
-    auto& napi = NapiBridge::GetInstance().Provider();
-    size_t argc = 5;
-    napi_value args[5] = { nullptr };
-    napi.GetCbInfo(env, info, &argc, args, nullptr, nullptr);
-    if (argc < 5) {
-        LOG_A2UI(LOG_ERROR, "DispatchCustomComponentAction: expected 5 args, got %{public}zu", argc);
+    CustomComponentActionInput input;
+    if (!ParseCustomComponentActionInput(env, info, input)) {
         return nullptr;
     }
 
-    int32_t renderId = 0;
-    napi_status status = napi.GetValueInt32(env, args[0], &renderId);
-    if (status != napi_ok) {
-        LOG_A2UI(LOG_ERROR, "DispatchCustomComponentAction: failed to get renderId");
+    CustomComponentActionTarget target;
+    if (!FindCustomComponentActionTarget(input, target)) {
         return nullptr;
     }
 
-    std::string surfaceId = NapiGetStringValue(env, args[1]);
-    std::string componentId = NapiGetStringValue(env, args[2]);
-    std::string eventName = NapiGetStringValue(env, args[3]);
-    std::string contextJson = NapiGetStringValue(env, args[4]);
-
-    auto& renderManager = RenderManager::GetInstance();
-    RenderSlot* renderSlot = renderManager.FindRenderSlot(renderId);
-    if (renderSlot == nullptr) {
-        LOG_A2UI(LOG_WARN, "DispatchCustomComponentAction: RenderSlot not found, renderId=%{public}d", renderId);
-        return nullptr;
-    }
-
-    std::shared_ptr<SurfaceManager> surfaceManager = renderSlot->GetSurfaceManager();
-    if (surfaceManager == nullptr) {
-        return nullptr;
-    }
-
-    SurfaceSlot* surface = surfaceManager->FindSurface(surfaceId);
-    if (surface == nullptr) {
-        return nullptr;
-    }
-
-    std::shared_ptr<Component> component = surface->FindComponentById(componentId);
-    std::shared_ptr<CustomComponent> customComponent = std::dynamic_pointer_cast<CustomComponent>(component);
-    if (customComponent == nullptr) {
-        LOG_A2UI(LOG_WARN,
-            "DispatchCustomComponentAction: component not found or not a CustomComponent, componentId=%{public}s",
-            componentId.c_str());
-        return nullptr;
-    }
-
-    JsonValue extraContext;
-    if (!contextJson.empty()) {
-        std::unique_ptr<JsonAdapter> contextAdapter = JsonAdapter::Parse(contextJson);
-        if (contextAdapter != nullptr) {
-            extraContext = contextAdapter->GetRoot();
-        }
-    }
-
-    std::string checkedBindingPath;
-    const auto& bindings = component->GetDataBindings();
-    for (auto iter = bindings.rbegin(); iter != bindings.rend(); ++iter) {
-        if (iter->propertyName_ == "checked" && !iter->dataPath_.empty()) {
-            checkedBindingPath = iter->dataPath_;
-            break;
-        }
-    }
-
-    bool hasCheckedValue = false;
-    bool checkedValue = false;
-    if (extraContext.IsBool()) {
-        checkedValue = extraContext.GetBoolValue(false);
-        hasCheckedValue = true;
-    } else if (extraContext.IsObject() && extraContext.Has("checked")) {
-        checkedValue = extraContext.GetBool("checked", false);
-        hasCheckedValue = true;
-    }
-    if (hasCheckedValue && GetShortComponentType(customComponent->GetType()) == "Radio") {
-        std::unique_ptr<JsonAdapter> checkedAdapter = JsonAdapter::CreateBool(checkedValue);
-        if (checkedAdapter != nullptr) {
-            customComponent->SetRuntimeCustomProperty("checked", checkedAdapter->GetRoot());
-        }
-    }
-
-    if (!checkedBindingPath.empty() && hasCheckedValue) {
-        customComponent->SyncCheckedToBoundDataModel(checkedBindingPath, checkedValue);
-    }
-
-    if (extraContext.IsObject()) {
-        JsonValue selectedVal =
-            extraContext.Has("index") ? extraContext.GetItem("index") : extraContext.GetItem("selected");
-        if (selectedVal.IsValid()) {
-            customComponent->SetRuntimeCustomProperty("selected", selectedVal);
-        }
-        if (extraContext.Has("value")) {
-            JsonValue valueVal = extraContext.GetItem("value");
-            if (valueVal.IsValid()) {
-                customComponent->SetRuntimeCustomProperty("value", valueVal);
-            }
-        }
-    }
-
-    customComponent->DispatchEvent(eventName, extraContext);
+    JsonValue extraContext = ParseCustomComponentActionContext(input.contextJson);
+    SyncCustomComponentCheckedState(target, extraContext);
+    SyncCustomComponentRuntimeValues(target.customComponent, extraContext);
+    target.customComponent->DispatchEvent(input.eventName, extraContext);
     return nullptr;
 }
 
@@ -1737,6 +1948,40 @@ napi_value ResolveCustomComponentDynamicValue(napi_env env, napi_callback_info i
                 errorMessage.empty() ? "ResolveCustomComponentDynamicValue: register callback failed" : errorMessage));
     }
 
+    return CreateProcessResultValue(env, Ok());
+}
+
+napi_value ClearCustomComponentDynamicValue(napi_env env, napi_callback_info info)
+{
+    auto& napi = NapiBridge::GetInstance().Provider();
+    size_t argc = 2;
+    napi_value args[2] = { nullptr };
+    napi.GetCbInfo(env, info, &argc, args, nullptr, nullptr);
+    if (argc < 2 || args[0] == nullptr || args[1] == nullptr) {
+        return CreateProcessResultValue(
+            env, Fail("INVALID_ARGUMENT", "ClearCustomComponentDynamicValue: invalid arguments"));
+    }
+
+    double handleValue = 0.0;
+    if (napi.GetValueDouble(env, args[0], &handleValue) != napi_ok || !std::isfinite(handleValue) ||
+        handleValue <= 0.0) {
+        return CreateProcessResultValue(
+            env, Fail("INVALID_ARGUMENT", "ClearCustomComponentDynamicValue: invalid customComponentHandle"));
+    }
+
+    CustomComponent* customComponent = CustomComponent::FindByHandle(static_cast<uintptr_t>(handleValue));
+    if (customComponent == nullptr) {
+        return CreateProcessResultValue(
+            env, Fail("CUSTOM_COMPONENT_NOT_FOUND", "ClearCustomComponentDynamicValue: component handle not found"));
+    }
+
+    std::string propertyName = NapiGetStringValue(env, args[1]);
+    if (propertyName.empty()) {
+        return CreateProcessResultValue(
+            env, Fail("INVALID_ARGUMENT", "ClearCustomComponentDynamicValue: propertyName is empty"));
+    }
+
+    customComponent->ClearDynamicValueCallback(propertyName);
     return CreateProcessResultValue(env, Ok());
 }
 
@@ -1892,6 +2137,25 @@ napi_value UpdateThemeMode(napi_env env, napi_callback_info info)
     return nullptr;
 }
 
+Breakpoint ResolveBreakpointValue(int32_t breakpoint)
+{
+    switch (breakpoint) {
+        case 0:
+            return Breakpoint::XS;
+        case 1:
+            return Breakpoint::SM;
+        case 2:
+            return Breakpoint::MD;
+        case 3:
+            return Breakpoint::LG;
+        case 4:
+            return Breakpoint::XL;
+        default:
+            LOG_A2UI(LOG_WARN, "UpdateBreakpoint: Invalid breakpoint value=%{public}d, using SM", breakpoint);
+            return Breakpoint::SM;
+    }
+}
+
 napi_value UpdateBreakpoint(napi_env env, napi_callback_info info)
 {
     auto& napi = NapiBridge::GetInstance().Provider();
@@ -1929,30 +2193,7 @@ napi_value UpdateBreakpoint(napi_env env, napi_callback_info info)
         return nullptr;
     }
 
-    Breakpoint themeBreakpoint;
-    switch (breakpoint) {
-        case 0:
-            themeBreakpoint = Breakpoint::XS;
-            break;
-        case 1:
-            themeBreakpoint = Breakpoint::SM;
-            break;
-        case 2:
-            themeBreakpoint = Breakpoint::MD;
-            break;
-        case 3:
-            themeBreakpoint = Breakpoint::LG;
-            break;
-        case 4:
-            themeBreakpoint = Breakpoint::XL;
-            break;
-        default:
-            LOG_A2UI(LOG_WARN, "UpdateBreakpoint: Invalid breakpoint value=%{public}d, using SM", breakpoint);
-            themeBreakpoint = Breakpoint::SM;
-            break;
-    }
-
-    surfaceManager->UpdateBreakpoint(themeBreakpoint);
+    surfaceManager->UpdateBreakpoint(ResolveBreakpointValue(breakpoint));
     LOG_A2UI(
         LOG_INFO, "UpdateBreakpoint: Updated breakpoint to %{public}d for renderId=%{public}d", breakpoint, renderId);
     return nullptr;

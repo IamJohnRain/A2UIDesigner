@@ -31,6 +31,7 @@ class TemplateAdapterNode;
 class A2UIComponent : public Component {
 public:
     using ClickHandler = std::function<void(const JsonValue&)>;
+    using NodeEventHandler = std::function<void(A2UINodeEvent*)>;
 
     explicit A2UIComponent(ArkUI_NodeHandle nativeView, bool ownsNativeView = true, bool isCompositeType = false);
     ~A2UIComponent() override;
@@ -48,7 +49,7 @@ public:
     void SetBackgroundColor(uint32_t color);
     void SetPadding(float top, float right, float bottom, float left);
     void SetPaddingPercent(float top, float right, float bottom, float left);
-    void SetMargin(float top, float right, float bottom, float left);
+    void SetMargin(float top, float right, float bottom, float left) override;
     void ResetCommonMargin();
     void SetMarginPercent(float top, float right, float bottom, float left);
     void SetBorderRadius(float radius);
@@ -66,17 +67,19 @@ protected:
     bool IsKnownAdditionalDescriptorKey(const std::string& propertyName) const override;
     int32_t GetNativeNodeUniqueId() const;
     void RegisterNodeEventHandler(A2UINodeEventType eventType, const std::function<void()>& handler);
+    bool RegisterNodeEventHandlerWithEvent(A2UINodeEventType eventType, const NodeEventHandler& handler);
 
 private:
     static void NodeEventReceiver(A2UINodeEvent* event);
     void HandleNodeEvent(A2UINodeEvent* event);
+    void DispatchClickEvent(A2UINodeEvent* event);
     static JsonValue BuildClickContext(A2UINodeEvent* event);
     bool HasClickHandler() const;
     void UpdateClickEventRegistration();
 
     ClickHandler onClick_;
     std::map<std::string, ClickHandler> auxiliaryOnClick_;
-    std::map<A2UINodeEventType, std::function<void()>> nodeEventHandlers_;
+    std::map<A2UINodeEventType, NodeEventHandler> nodeEventHandlers_;
     bool clickEventRegistered_ = false;
 };
 

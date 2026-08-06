@@ -30,12 +30,15 @@ namespace NativeModule {
 
 class DataModel;
 
+enum class MissingPathPolicy { REPORT_ALWAYS = 0, DEFER_UNTIL_DATA_UPDATE };
+
 struct DynamicResolveContext {
     int32_t renderId = 0;
     std::string surfaceId;
     std::string componentId;
     std::shared_ptr<DataModel> dataModel;
     bool allowExpression = false;
+    MissingPathPolicy missingPathPolicy = MissingPathPolicy::REPORT_ALWAYS;
     std::map<std::string, JsonValue> localVariables;
 };
 
@@ -46,6 +49,7 @@ struct DynamicValueDependencies {
 
 class DynamicValueResolver {
 public:
+    static void ReportMissingPath(const DynamicResolveContext& context, const std::string& path);
     static ResolvedValue Resolve(const JsonValue& value, const DynamicResolveContext& context);
     static ResolvedValue ResolveRecursively(const JsonValue& value, const DynamicResolveContext& context);
     static ResolvedValue ResolveRecursivelyAllowPartial(const JsonValue& value, const DynamicResolveContext& context);

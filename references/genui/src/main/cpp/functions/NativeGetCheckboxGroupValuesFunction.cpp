@@ -112,6 +112,45 @@ void AddCurrentCheckboxSelection(const std::string& value, bool selected, std::m
     MergeSelectionByValue(value, selected, selectedByValue);
 }
 
+void CollectCheckboxSelection(
+    const std::shared_ptr<Component>& component, const std::string& group, RuntimeSelections& selections)
+{
+    std::shared_ptr<ExtendedCheckboxComponent> checkboxComponent =
+        std::dynamic_pointer_cast<ExtendedCheckboxComponent>(component);
+    if (checkboxComponent != nullptr) {
+        if (checkboxComponent->GetGroup() == group) {
+            if (selections.selectedByRuntimeKey.find(checkboxComponent->GetRuntimeStateKey()) ==
+                selections.selectedByRuntimeKey.end()) {
+                AddCurrentCheckboxSelection(
+                    checkboxComponent->GetValue(), checkboxComponent->GetSelect(), selections.selectedByValue);
+            }
+        }
+        return;
+    }
+
+    std::shared_ptr<CustomComponent> customComponent = std::dynamic_pointer_cast<CustomComponent>(component);
+    if (customComponent == nullptr ||
+        NativeFunctionComponentUtils::GetShortType(customComponent->GetType()) != "Checkbox") {
+        return;
+    }
+
+    JsonValue groupValue = customComponent->GetCustomProperty("group");
+    if (!groupValue.IsString() || groupValue.GetStringValue("") != group) {
+        return;
+    }
+
+    JsonValue checkedValue = customComponent->GetCustomProperty("select");
+    if (!checkedValue.IsBool()) {
+        return;
+    }
+
+    JsonValue labelValue = customComponent->GetCustomProperty("value");
+    if (labelValue.IsString()) {
+        std::string cbValue = labelValue.GetStringValue("");
+        AddCurrentCheckboxSelection(cbValue, checkedValue.GetBoolValue(false), selections.selectedByValue);
+    }
+}
+
 } // namespace
 
 std::string NativeGetCheckboxGroupValuesFunction::GetName() const
@@ -145,42 +184,8 @@ FunctionResult NativeGetCheckboxGroupValuesFunction::ExecuteWithContext(
     RuntimeSelections selections;
     ReadRuntimeSelections(surface, group, selections);
 
-    surface->ForEachComponent([&](const std::shared_ptr<Component>& component) {
-        std::shared_ptr<ExtendedCheckboxComponent> checkboxComponent =
-            std::dynamic_pointer_cast<ExtendedCheckboxComponent>(component);
-        if (checkboxComponent != nullptr) {
-            if (checkboxComponent->GetGroup() == group) {
-                if (selections.selectedByRuntimeKey.find(checkboxComponent->GetRuntimeStateKey()) ==
-                    selections.selectedByRuntimeKey.end()) {
-                    AddCurrentCheckboxSelection(
-                        checkboxComponent->GetValue(), checkboxComponent->GetSelect(), selections.selectedByValue);
-                }
-            }
-            return;
-        }
-
-        std::shared_ptr<CustomComponent> customComponent = std::dynamic_pointer_cast<CustomComponent>(component);
-        if (customComponent == nullptr ||
-            NativeFunctionComponentUtils::GetShortType(customComponent->GetType()) != "Checkbox") {
-            return;
-        }
-
-        JsonValue groupValue = customComponent->GetCustomProperty("group");
-        if (!groupValue.IsString() || groupValue.GetStringValue("") != group) {
-            return;
-        }
-
-        JsonValue checkedValue = customComponent->GetCustomProperty("select");
-        if (!checkedValue.IsBool()) {
-            return;
-        }
-
-        JsonValue labelValue = customComponent->GetCustomProperty("value");
-        if (labelValue.IsString()) {
-            std::string cbValue = labelValue.GetStringValue("");
-            AddCurrentCheckboxSelection(cbValue, checkedValue.GetBoolValue(false), selections.selectedByValue);
-        }
-    });
+    surface->ForEachComponent(
+        [&](const std::shared_ptr<Component>& component) { CollectCheckboxSelection(component, group, selections); });
 
     std::vector<std::string> selectedLabels;
     for (const auto& entry : selections.selectedByValue) {

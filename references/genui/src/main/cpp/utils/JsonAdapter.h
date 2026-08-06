@@ -111,6 +111,12 @@ private:
 
 class JsonAdapter {
 public:
+    class ConstructionToken {
+    private:
+        ConstructionToken() = default;
+        friend class JsonAdapter;
+    };
+
     static std::unique_ptr<JsonAdapter> Parse(const std::string& jsonString);
     static std::unique_ptr<JsonAdapter> Clone(const JsonValue& value);
     static std::unique_ptr<JsonAdapter> Adopt(cJSON* root);
@@ -123,9 +129,9 @@ public:
 
     JsonValue GetRoot() const;
 
-private:
-    JsonAdapter(std::shared_ptr<void> rootHolder, ::cJSON* root);
+    JsonAdapter(ConstructionToken, std::shared_ptr<void> rootHolder, ::cJSON* root);
 
+private:
     std::shared_ptr<void> rootHolder_;
     ::cJSON* root_ = nullptr;
 };

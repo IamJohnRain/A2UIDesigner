@@ -133,27 +133,17 @@ bool StyleApplyUtils::ParseFontWeight(const JsonValue& value, int32_t& fontWeigh
 
 bool StyleApplyUtils::ParseMaxLines(const JsonValue& value, int32_t& maxLines)
 {
-    float parsed = 0.0F;
-    if (value.IsNumber()) {
-        double rawValue = value.GetNumberValue(std::numeric_limits<double>::quiet_NaN());
-        if (!std::isfinite(rawValue)) {
-            return false;
-        }
-        parsed = static_cast<float>(rawValue);
-    } else if (!ParseNumber(value, parsed)) {
+    if (!value.IsNumber() && !value.IsString()) {
         return false;
     }
-    if (!std::isfinite(parsed)) {
+
+    double rawValue = value.ToNumber(std::numeric_limits<double>::quiet_NaN());
+    if (!std::isfinite(rawValue) || rawValue < 0.0 ||
+        rawValue > static_cast<double>(std::numeric_limits<int32_t>::max())) {
         return false;
     }
-    if (parsed < 0.0F) {
-        return false;
-    }
-    maxLines = static_cast<int32_t>(parsed);
-    if (parsed == 0.0F) {
-        return true;
-    }
-    return maxLines > 0;
+    maxLines = static_cast<int32_t>(rawValue);
+    return rawValue == 0.0 || maxLines > 0;
 }
 
 bool StyleApplyUtils::ParseTextOverflow(const JsonValue& value, int32_t& textOverflow)

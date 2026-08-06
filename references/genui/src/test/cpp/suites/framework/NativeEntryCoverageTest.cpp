@@ -14,6 +14,7 @@
  */
 
 #include <gtest/gtest.h>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <string>
@@ -512,6 +513,21 @@ TEST_F(NativeEntryCoverageTest, should_sync_component_bound_data_model_via_napi)
     EXPECT_EQ(GetStringProperty(invalidResult, "errorCode", ""), "INVALID_ARGUMENT");
 }
 
+TEST_F(NativeEntryCoverageTest, should_return_no_surface_matched_when_sync_bound_data_model_surface_is_missing)
+{
+    RenderManager::GetInstance().CreateRenderSlot(NATIVE_ENTRY_TEST_RENDER_ID);
+
+    mockNapiPtr_->SetCallbackArgs({ CreateInt32Arg(NATIVE_ENTRY_TEST_RENDER_ID), CreateStringArg("missing"),
+        CreateStringArg("text-1"), CreateStringArg("text"), CreateStringArg(R"("new")") });
+    napi_value result = SyncComponentBoundDataModel(env_, cbInfo_);
+    ASSERT_NE(result, nullptr);
+    EXPECT_FALSE(GetBoolProperty(result, "success", true));
+    EXPECT_EQ(GetStringProperty(result, "errorCode", ""), "SURFACE_NOT_FOUND");
+    EXPECT_EQ(GetStringProperty(result, "errorMessage", ""), "Surface not found: missing");
+    EXPECT_EQ(
+        static_cast<int32_t>(GetNumberProperty(result, "surfaceResultCode", 0)), SURFACE_ERROR_NO_SURFACE_MATCHED);
+}
+
 TEST_F(NativeEntryCoverageTest, should_evaluate_dynamic_value_native_function_call_via_napi)
 {
     FunctionBridge::GetInstance().RegisterInvokeLocalFunction(env_, CreateFunctionArg());
@@ -584,6 +600,87 @@ TEST_F(NativeEntryCoverageTest, should_use_create_surface_catalog_id_for_extende
     std::shared_ptr<Component> component = surface->FindComponentById("root");
     ASSERT_NE(component, nullptr);
     EXPECT_NE(std::dynamic_pointer_cast<ExtendedTextComponent>(component), nullptr);
+}
+
+TEST_F(NativeEntryCoverageTest, should_parse_catalog_descriptor_flags_and_functions)
+{
+    RenderManager::GetInstance().CreateRenderSlot(NATIVE_ENTRY_TEST_RENDER_ID);
+
+    napi_value catalog = nullptr;
+    mockNapiPtr_->CreateObject(env_, &catalog);
+    mockNapiPtr_->SetNamedProperty(env_, catalog, "id", CreateStringArg("catalog-preserved-descriptors"));
+
+    napi_value components = nullptr;
+    mockNapiPtr_->CreateArrayWithLength(env_, 2, &components);
+    napi_value componentItem = nullptr;
+    mockNapiPtr_->CreateObject(env_, &componentItem);
+    mockNapiPtr_->SetNamedProperty(env_, componentItem, "name", CreateStringArg("DynamicResolveProbe"));
+    mockNapiPtr_->SetNamedProperty(
+        env_, componentItem, "category", CreateInt32Arg(static_cast<int32_t>(CatalogCategory::A2UI_STANDARD)));
+    mockNapiPtr_->SetNamedProperty(
+        env_, componentItem, "type", CreateInt32Arg(static_cast<int32_t>(CatalogItemType::COMPONENT)));
+    mockNapiPtr_->SetNamedProperty(env_, componentItem, "preserveDynamicDescriptors", CreateBoolArg(true));
+    mockNapiPtr_->SetElement(env_, components, 0, componentItem);
+    napi_value unnamedComponent = nullptr;
+    mockNapiPtr_->CreateObject(env_, &unnamedComponent);
+    mockNapiPtr_->SetElement(env_, components, 1, unnamedComponent);
+    mockNapiPtr_->SetNamedProperty(env_, catalog, "components", components);
+
+    napi_value functions = nullptr;
+    mockNapiPtr_->CreateArrayWithLength(env_, 2, &functions);
+    napi_value functionItem = nullptr;
+    mockNapiPtr_->CreateObject(env_, &functionItem);
+    mockNapiPtr_->SetNamedProperty(env_, functionItem, "name", CreateStringArg("customFunction"));
+    mockNapiPtr_->SetNamedProperty(
+        env_, functionItem, "type", CreateInt32Arg(static_cast<int32_t>(CatalogItemType::LOCAL_FUNCTION)));
+    mockNapiPtr_->SetElement(env_, functions, 0, functionItem);
+    napi_value unnamedFunction = nullptr;
+    mockNapiPtr_->CreateObject(env_, &unnamedFunction);
+    mockNapiPtr_->SetElement(env_, functions, 1, unnamedFunction);
+    mockNapiPtr_->SetNamedProperty(env_, catalog, "functions", functions);
+
+    const std::string createDsl = R"({"version":"v0.9","createSurface":{)"
+                                  R"("surfaceId":"native-entry-surface-a",)"
+                                  R"("catalogId":"catalog-preserved-descriptors"}})";
+    mockNapiPtr_->SetCallbackArgs({ CreateInt32Arg(NATIVE_ENTRY_TEST_RENDER_ID), CreateStringArg(createDsl), catalog });
+    ExpectProcessSuccess(ProcessMessage(env_, cbInfo_));
+
+    SurfaceSlot* surface = RenderManager::GetInstance().FindSurface(NATIVE_ENTRY_TEST_SURFACE_A);
+    ASSERT_NE(surface, nullptr);
+    std::shared_ptr<Catalog> parsedCatalog = surface->GetCatalog();
+    ASSERT_NE(parsedCatalog, nullptr);
+    std::shared_ptr<CatalogItem> parsedComponent = parsedCatalog->GetCatalogItemByName("DynamicResolveProbe");
+    ASSERT_NE(parsedComponent, nullptr);
+    EXPECT_TRUE(parsedComponent->ShouldPreserveDynamicDescriptors());
+    EXPECT_FALSE(parsedComponent->IsInnerNative());
+    EXPECT_EQ(parsedCatalog->GetComponents().size(), 1U);
+    EXPECT_TRUE(parsedCatalog->HasFunction("customFunction"));
+    EXPECT_EQ(parsedCatalog->GetFunctions().size(), 1U);
+}
+
+TEST_F(NativeEntryCoverageTest, should_ignore_non_array_catalog_collections)
+{
+    RenderManager::GetInstance().CreateRenderSlot(NATIVE_ENTRY_TEST_RENDER_ID);
+
+    napi_value catalog = nullptr;
+    mockNapiPtr_->CreateObject(env_, &catalog);
+    mockNapiPtr_->SetNamedProperty(env_, catalog, "id", CreateStringArg("catalog-non-array-collections"));
+    napi_value components = nullptr;
+    mockNapiPtr_->CreateObject(env_, &components);
+    mockNapiPtr_->SetNamedProperty(env_, catalog, "components", components);
+    mockNapiPtr_->SetNamedProperty(env_, catalog, "functions", CreateStringArg("not-an-array"));
+
+    const std::string createDsl = R"({"version":"v0.9","createSurface":{)"
+                                  R"("surfaceId":"native-entry-surface-b",)"
+                                  R"("catalogId":"catalog-non-array-collections"}})";
+    mockNapiPtr_->SetCallbackArgs({ CreateInt32Arg(NATIVE_ENTRY_TEST_RENDER_ID), CreateStringArg(createDsl), catalog });
+    ExpectProcessSuccess(ProcessMessage(env_, cbInfo_));
+
+    SurfaceSlot* surface = RenderManager::GetInstance().FindSurface(NATIVE_ENTRY_TEST_SURFACE_B);
+    ASSERT_NE(surface, nullptr);
+    ASSERT_NE(surface->GetCatalog(), nullptr);
+    EXPECT_TRUE(surface->GetCatalog()->GetComponents().empty());
+    EXPECT_TRUE(surface->GetCatalog()->GetFunctions().empty());
 }
 
 TEST_F(NativeEntryCoverageTest, should_reject_create_surface_when_catalog_id_is_missing_even_with_extended_catalog)
@@ -780,6 +877,74 @@ TEST_F(NativeEntryCoverageTest, should_return_default_valid_result_when_custom_c
     mockNapiPtr_->GetNamedProperty(env_, result, "valid", &validValue);
     ASSERT_NE(validValue, nullptr);
     EXPECT_TRUE(mockNapiPtr_->boolValues_[validValue]);
+}
+
+TEST_F(NativeEntryCoverageTest, should_clear_custom_component_dynamic_value_subscription_via_napi)
+{
+    RenderSlot& slot = RenderManager::GetInstance().CreateRenderSlot(NATIVE_ENTRY_TEST_RENDER_ID);
+    std::shared_ptr<SurfaceManager> manager = slot.GetSurfaceManager();
+    ASSERT_NE(manager, nullptr);
+    SurfaceSlot& surface = manager->CreateSurface(NATIVE_ENTRY_TEST_SURFACE_A);
+    auto dataModel = surface.GetOrCreateDataModel();
+    ASSERT_NE(dataModel, nullptr);
+    std::unique_ptr<JsonAdapter> data = JsonAdapter::Parse(R"({"user":{"name":"Alice"}})");
+    ASSERT_NE(data, nullptr);
+    dataModel->ReplaceAll(data->GetRoot());
+
+    auto component = std::make_shared<CustomComponent>("DynamicResolveProbe", true);
+    component->SetRenderId(NATIVE_ENTRY_TEST_RENDER_ID);
+    component->SetSurfaceId(NATIVE_ENTRY_TEST_SURFACE_A);
+    component->SetComponentId("dynamic-resolve-probe");
+    surface.SetRootComponent(component);
+
+    std::unique_ptr<JsonAdapter> descriptor = JsonAdapter::Parse(R"({"path":"/user/name"})");
+    ASSERT_NE(descriptor, nullptr);
+    std::string errorMessage;
+    ASSERT_TRUE(component->RegisterDynamicValueCallback(
+        "value", descriptor->GetRoot(), env_, CreateFunctionArg(), &errorMessage));
+    EXPECT_FALSE(mockNapiPtr_->refToValue_.empty());
+
+    mockNapiPtr_->SetCallbackArgs(
+        { CreateDoubleArg(static_cast<double>(component->GetCustomComponentHandle())), CreateStringArg("value") });
+    napi_value result = ClearCustomComponentDynamicValue(env_, cbInfo_);
+    ASSERT_NE(result, nullptr);
+    napi_value successValue = nullptr;
+    mockNapiPtr_->GetNamedProperty(env_, result, "success", &successValue);
+    ASSERT_NE(successValue, nullptr);
+    EXPECT_TRUE(mockNapiPtr_->boolValues_[successValue]);
+    EXPECT_TRUE(mockNapiPtr_->refToValue_.empty());
+}
+
+TEST_F(NativeEntryCoverageTest, should_reject_invalid_clear_custom_component_dynamic_value_requests)
+{
+    mockNapiPtr_->SetCallbackArgs({});
+    ExpectProcessFailure(ClearCustomComponentDynamicValue(env_, cbInfo_), "INVALID_ARGUMENT");
+
+    mockNapiPtr_->SetCallbackArgs({ nullptr, CreateStringArg("value") });
+    ExpectProcessFailure(ClearCustomComponentDynamicValue(env_, cbInfo_), "INVALID_ARGUMENT");
+
+    mockNapiPtr_->SetCallbackArgs({ CreateDoubleArg(1.0), nullptr });
+    ExpectProcessFailure(ClearCustomComponentDynamicValue(env_, cbInfo_), "INVALID_ARGUMENT");
+
+    mockNapiPtr_->SetCallbackArgs({ CreateDoubleArg(1.0), CreateStringArg("value") });
+    mockNapiPtr_->SetGetValueDoubleStatus(napi_number_expected);
+    ExpectProcessFailure(ClearCustomComponentDynamicValue(env_, cbInfo_), "INVALID_ARGUMENT");
+    mockNapiPtr_->ResetGetValueDoubleStatus();
+
+    mockNapiPtr_->SetCallbackArgs(
+        { CreateDoubleArg(std::numeric_limits<double>::quiet_NaN()), CreateStringArg("value") });
+    ExpectProcessFailure(ClearCustomComponentDynamicValue(env_, cbInfo_), "INVALID_ARGUMENT");
+
+    mockNapiPtr_->SetCallbackArgs({ CreateDoubleArg(0.0), CreateStringArg("value") });
+    ExpectProcessFailure(ClearCustomComponentDynamicValue(env_, cbInfo_), "INVALID_ARGUMENT");
+
+    mockNapiPtr_->SetCallbackArgs({ CreateDoubleArg(999999.0), CreateStringArg("value") });
+    ExpectProcessFailure(ClearCustomComponentDynamicValue(env_, cbInfo_), "CUSTOM_COMPONENT_NOT_FOUND");
+
+    CustomComponent component("DynamicResolveProbe", true);
+    mockNapiPtr_->SetCallbackArgs(
+        { CreateDoubleArg(static_cast<double>(component.GetCustomComponentHandle())), CreateStringArg("") });
+    ExpectProcessFailure(ClearCustomComponentDynamicValue(env_, cbInfo_), "INVALID_ARGUMENT");
 }
 
 TEST_F(NativeEntryCoverageTest, should_execute_get_radio_value_for_extended_radio_component)
@@ -1050,13 +1215,11 @@ TEST_F(NativeEntryCoverageTest, should_set_font_size_scale_via_napi)
 
 TEST_F(NativeEntryCoverageTest, should_set_api_version_via_napi)
 {
-    RenderSlot& slot = RenderManager::GetInstance().CreateRenderSlot(NATIVE_ENTRY_TEST_RENDER_ID);
-
+    SystemProperties::GetInstance().SetApiVersion(0);
     mockNapiPtr_->SetCallbackArgs({ CreateInt32Arg(NATIVE_ENTRY_TEST_RENDER_ID), CreateInt32Arg(12) });
     EXPECT_EQ(SetApiVersion(env_, cbInfo_), nullptr);
+    EXPECT_EQ(SystemProperties::GetInstance().GetApiVersion(), 12);
 
     mockNapiPtr_->SetCallbackArgs({});
     EXPECT_EQ(SetApiVersion(env_, cbInfo_), nullptr);
-
-    RenderManager::GetInstance().RemoveRenderSlot(NATIVE_ENTRY_TEST_RENDER_ID);
 }

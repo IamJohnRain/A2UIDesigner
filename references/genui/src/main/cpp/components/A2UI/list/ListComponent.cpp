@@ -16,6 +16,7 @@
 #include "ListComponent.h"
 
 #include "data/DataModel.h"
+#include "data/DynamicValueResolver.h"
 #include "utils/LogA2UI.h"
 
 #include "../../../SurfaceSlot.h"
@@ -128,59 +129,76 @@ void ListComponent::SetupLazyAdapter(const LazyAdapterConfig& config)
     LOG_A2UI(LOG_INFO, "ListComponent::SetupLazyAdapter: templateComponentId=%{public}s, templatePath=%{public}s",
         config.templateComponentId.c_str(), config.templatePath.c_str());
 
-    int itemCount = 0;
-    bool isRelativePath = !config.templatePath.empty() && config.templatePath[0] != '/';
-
-    if (isRelativePath) {
-        LOG_A2UI(LOG_INFO,
-            "ListComponent::SetupLazyAdapter: relative path detected, will be resolved at runtime, path=%{public}s",
-            config.templatePath.c_str());
-    } else {
-        if (config.dataModel == nullptr) {
-            LOG_A2UI(LOG_ERROR, "ListComponent::SetupLazyAdapter: data model is null, templateComponentId=%{public}s",
-                config.templateComponentId.c_str());
-            return;
-        }
-
-        auto arrayOpt = config.dataModel->GetNode(config.templatePath);
-        if (!arrayOpt.has_value()) {
-            LOG_A2UI(LOG_WARN,
-                "ListComponent::SetupLazyAdapter: data path not found, create empty adapter, path=%{public}s",
-                config.templatePath.c_str());
-        } else if (!arrayOpt.value().IsArray()) {
-            LOG_A2UI(LOG_WARN,
-                "ListComponent::SetupLazyAdapter: data path is not array, create empty adapter, path=%{public}s",
-                config.templatePath.c_str());
-        } else {
-            itemCount = arrayOpt.value().GetArraySize();
-            LOG_A2UI(LOG_INFO, "ListComponent::SetupLazyAdapter: itemCount=%{public}d", itemCount);
-        }
+    std::optional<int32_t> itemCount = ResolveLazyAdapterItemCount(config);
+    if (!itemCount.has_value()) {
+        return;
     }
 
-    if (!adapterNode_) {
-        auto adapterNode = std::make_shared<ListAdapterNode>();
-        adapterNode->Initialize(config.templateComponentId, config.templatePath, itemCount);
-        adapterNode->SetDataModel(config.dataModel);
-        adapterNode->SetTemplateDescriptor(config.templateDescriptor);
-        adapterNode->SetAllDescriptors(config.allDescriptors);
-        adapterNode->SetSurfaceInfo(config.surfaceId, config.renderId);
-        adapterNode->SetSurfaceContext(config.surfaceContext);
-
-        SetLazyMode(true);
-        SetAdapterNode(adapterNode);
-    } else {
-        adapterNode_->Initialize(config.templateComponentId, config.templatePath, itemCount);
-        adapterNode_->SetDataModel(config.dataModel);
-        adapterNode_->SetTemplateDescriptor(config.templateDescriptor);
-        adapterNode_->SetAllDescriptors(config.allDescriptors);
-        adapterNode_->SetSurfaceInfo(config.surfaceId, config.renderId);
-        adapterNode_->SetSurfaceContext(config.surfaceContext);
-        adapterNode_->ReloadAllItems();
-    }
+    ApplyLazyAdapterConfig(config, itemCount.value());
 
     LOG_A2UI(LOG_INFO,
         "ListComponent::SetupLazyAdapter: NodeAdapter configured successfully, templateComponentId=%{public}s",
         config.templateComponentId.c_str());
+}
+
+std::optional<int32_t> ListComponent::ResolveLazyAdapterItemCount(const LazyAdapterConfig& config) const
+{
+    if (!config.templatePath.empty() && config.templatePath[0] != '/') {
+        LOG_A2UI(LOG_INFO,
+            "ListComponent::SetupLazyAdapter: relative path detected, will be resolved at runtime, path=%{public}s",
+            config.templatePath.c_str());
+        return 0;
+    }
+
+    if (config.dataModel == nullptr) {
+        LOG_A2UI(LOG_ERROR, "ListComponent::SetupLazyAdapter: data model is null, templateComponentId=%{public}s",
+            config.templateComponentId.c_str());
+        return std::nullopt;
+    }
+
+    auto arrayOpt = config.dataModel->GetNode(config.templatePath);
+    if (!arrayOpt.has_value()) {
+        DynamicResolveContext context = { .renderId = config.renderId,
+            .surfaceId = config.surfaceId,
+            .componentId = GetComponentId(),
+            .missingPathPolicy = MissingPathPolicy::DEFER_UNTIL_DATA_UPDATE };
+        DynamicValueResolver::ReportMissingPath(context, config.templatePath);
+        LOG_A2UI(LOG_WARN,
+            "ListComponent::SetupLazyAdapter: data path not found, create empty adapter, path=%{public}s",
+            config.templatePath.c_str());
+        return 0;
+    }
+
+    if (!arrayOpt.value().IsArray()) {
+        LOG_A2UI(LOG_WARN,
+            "ListComponent::SetupLazyAdapter: data path is not array, create empty adapter, path=%{public}s",
+            config.templatePath.c_str());
+        return 0;
+    }
+
+    int32_t itemCount = arrayOpt.value().GetArraySize();
+    LOG_A2UI(LOG_INFO, "ListComponent::SetupLazyAdapter: itemCount=%{public}d", itemCount);
+    return itemCount;
+}
+
+void ListComponent::ApplyLazyAdapterConfig(const LazyAdapterConfig& config, int32_t itemCount)
+{
+    bool isNewAdapter = !adapterNode_;
+    std::shared_ptr<ListAdapterNode> adapterNode = isNewAdapter ? std::make_shared<ListAdapterNode>() : adapterNode_;
+
+    adapterNode->Initialize(config.templateComponentId, config.templatePath, itemCount);
+    adapterNode->SetDataModel(config.dataModel);
+    adapterNode->SetTemplateDescriptor(config.templateDescriptor);
+    adapterNode->SetAllDescriptors(config.allDescriptors);
+    adapterNode->SetSurfaceInfo(config.surfaceId, config.renderId);
+    adapterNode->SetSurfaceContext(config.surfaceContext);
+
+    if (isNewAdapter) {
+        SetLazyMode(true);
+        SetAdapterNode(adapterNode);
+    } else {
+        adapterNode->ReloadAllItems();
+    }
 }
 
 void ListComponent::CollectChildListDescriptor(const JsonValue& descriptor)

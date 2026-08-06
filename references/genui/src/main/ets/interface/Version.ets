@@ -16,9 +16,9 @@
 /**
  * Protocol version for the basic A2UI catalog (v0.9).
  */
-export const BASIC_CATALOG_PROTOCOL_VERSION_V09: string = "v0.9";
+export const BASIC_CATALOG_PROTOCOL_VERSION_V09: string = 'v0.9';
 
 /**
  * Protocol version for the extended A2UI catalog (v1.0.0).
  */
-export const EXTENDED_CATALOG_PROTOCOL_VERSION_V100: string = "v1.0.0";
+export const EXTENDED_CATALOG_PROTOCOL_VERSION_V100: string = 'v1.0.0';

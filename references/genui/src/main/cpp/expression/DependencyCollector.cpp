@@ -127,6 +127,32 @@ size_t FindMatchingParenthesis(const std::string& expression, size_t openIndex)
     return std::string::npos;
 }
 
+void CollectRecursive(const std::shared_ptr<AstNode>& node, std::vector<Dependency>& deps);
+void CollectFunctionCallDeps(const std::shared_ptr<FunctionCall>& func, std::vector<Dependency>& deps);
+
+void CollectVariableReferenceDeps(const std::shared_ptr<AstNode>& node, std::vector<Dependency>& deps)
+{
+    auto varRef = std::static_pointer_cast<VariableReference>(node);
+    if (varRef->isAbsolute) {
+        deps.push_back({ varRef->name, "" });
+    }
+}
+
+void CollectBinaryDeps(const std::shared_ptr<AstNode>& node, std::vector<Dependency>& deps)
+{
+    auto binary = std::static_pointer_cast<BinaryExpression>(node);
+    CollectRecursive(binary->left, deps);
+    CollectRecursive(binary->right, deps);
+}
+
+void CollectConditionalDeps(const std::shared_ptr<AstNode>& node, std::vector<Dependency>& deps)
+{
+    auto cond = std::static_pointer_cast<ConditionalExpression>(node);
+    CollectRecursive(cond->condition, deps);
+    CollectRecursive(cond->consequent, deps);
+    CollectRecursive(cond->alternate, deps);
+}
+
 void CollectRecursive(const std::shared_ptr<AstNode>& node, std::vector<Dependency>& deps)
 {
     if (node == nullptr) {
@@ -135,10 +161,7 @@ void CollectRecursive(const std::shared_ptr<AstNode>& node, std::vector<Dependen
 
     switch (node->type) {
         case AstNodeType::VARIABLE_REFERENCE: {
-            auto varRef = std::static_pointer_cast<VariableReference>(node);
-            if (varRef->isAbsolute) {
-                deps.push_back({ varRef->name, "" });
-            }
+            CollectVariableReferenceDeps(node, deps);
             break;
         }
         case AstNodeType::MEMBER_ACCESS: {
@@ -157,9 +180,7 @@ void CollectRecursive(const std::shared_ptr<AstNode>& node, std::vector<Dependen
             break;
         }
         case AstNodeType::BINARY_EXPRESSION: {
-            auto binary = std::static_pointer_cast<BinaryExpression>(node);
-            CollectRecursive(binary->left, deps);
-            CollectRecursive(binary->right, deps);
+            CollectBinaryDeps(node, deps);
             break;
         }
         case AstNodeType::UNARY_EXPRESSION: {
@@ -168,38 +189,12 @@ void CollectRecursive(const std::shared_ptr<AstNode>& node, std::vector<Dependen
             break;
         }
         case AstNodeType::CONDITIONAL_EXPRESSION: {
-            auto cond = std::static_pointer_cast<ConditionalExpression>(node);
-            CollectRecursive(cond->condition, deps);
-            CollectRecursive(cond->consequent, deps);
-            CollectRecursive(cond->alternate, deps);
+            CollectConditionalDeps(node, deps);
             break;
         }
         case AstNodeType::FUNCTION_CALL: {
             auto func = std::static_pointer_cast<FunctionCall>(node);
-            Dependency dependency;
-            if (TryCollectJsonPointerIntrinsicDependency(func, dependency)) {
-                deps.push_back(std::move(dependency));
-                break;
-            }
-            std::string fragmentExpression;
-            if (TryGetFragmentIntrinsicExpression(func, fragmentExpression)) {
-                auto parseResult = ExpressionEngine::GetInstance().Parse(fragmentExpression);
-                if (parseResult.success && parseResult.ast != nullptr) {
-                    CollectRecursive(parseResult.ast, deps);
-                }
-                break;
-            }
-            std::string sizeArgumentExpression;
-            if (TryGetSizeFragmentIntrinsicExpression(func, sizeArgumentExpression)) {
-                auto parseResult = ExpressionEngine::GetInstance().Parse(sizeArgumentExpression);
-                if (parseResult.success && parseResult.ast != nullptr) {
-                    CollectRecursive(parseResult.ast, deps);
-                }
-                break;
-            }
-            for (const auto& arg : func->arguments) {
-                CollectRecursive(arg, deps);
-            }
+            CollectFunctionCallDeps(func, deps);
             break;
         }
         case AstNodeType::GROUPED_EXPRESSION: {
@@ -209,6 +204,34 @@ void CollectRecursive(const std::shared_ptr<AstNode>& node, std::vector<Dependen
         }
         default:
             break;
+    }
+}
+
+void CollectFunctionCallDeps(const std::shared_ptr<FunctionCall>& func, std::vector<Dependency>& deps)
+{
+    Dependency dependency;
+    if (TryCollectJsonPointerIntrinsicDependency(func, dependency)) {
+        deps.push_back(std::move(dependency));
+        return;
+    }
+    std::string fragmentExpression;
+    if (TryGetFragmentIntrinsicExpression(func, fragmentExpression)) {
+        auto parseResult = ExpressionEngine::GetInstance().Parse(fragmentExpression);
+        if (parseResult.success) {
+            CollectRecursive(parseResult.ast, deps);
+        }
+        return;
+    }
+    std::string sizeArgumentExpression;
+    if (TryGetSizeFragmentIntrinsicExpression(func, sizeArgumentExpression)) {
+        auto parseResult = ExpressionEngine::GetInstance().Parse(sizeArgumentExpression);
+        if (parseResult.success) {
+            CollectRecursive(parseResult.ast, deps);
+        }
+        return;
+    }
+    for (const auto& arg : func->arguments) {
+        CollectRecursive(arg, deps);
     }
 }
 

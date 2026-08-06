@@ -149,6 +149,14 @@ private:
     bool ResolveDecorationWithFallback(
         const JsonValue& styles, TextDecorationState& decoration, bool* usedDefaultColor = nullptr) const;
     void ApplyDecorationStyleWithFallback(const JsonValue& styles);
+    void ValidateDecorationFields(const JsonValue& styles, bool isDeltaUpdate);
+    void ApplyFontWeightAndColorStyle(const JsonValue& styles, bool isDeltaUpdate);
+    void ApplyFontScaleRangeStyle(const JsonValue& styles, bool isDeltaUpdate);
+    void ApplyFontScaleModeAndSizeStyle(const JsonValue& styles, bool isDeltaUpdate);
+    void ApplyMaxLinesAndOverflowStyle(const JsonValue& styles, bool isDeltaUpdate);
+    void ApplyTextAlignAndBreakStyle(const JsonValue& styles, bool isDeltaUpdate);
+    void ApplyMinFontSizeStyle(const JsonValue& styles, bool isDeltaUpdate, float& minFontSize);
+    void ApplyMaxFontSizeStyle(const JsonValue& styles, bool isDeltaUpdate, float minFontSize);
     void ApplyDecorationState(const TextDecorationState& decoration);
     void SetFontColor(uint32_t fontColor);
     void SetFontSize(float fontSize);
@@ -165,6 +173,10 @@ private:
     void SetMaxFontScale(float maxFontScale);
 #ifdef TDD_BUILD
     void ApplyTextStyleStateForTest(const JsonValue& styles);
+    void ApplyFontColorFontSizeWeightForTest(const JsonValue& styles, bool isDeltaUpdate);
+    void ApplyFontScaleRangeAndModeForTest(const JsonValue& styles, bool isDeltaUpdate);
+    void ApplyMaxLinesAndAdaptiveFontForTest(const JsonValue& styles, bool isDeltaUpdate);
+    void ApplyOverflowAlignBreakForTest(const JsonValue& styles, bool isDeltaUpdate);
 #endif
 
     std::string textValue_;

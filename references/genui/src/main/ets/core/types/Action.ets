@@ -17,8 +17,8 @@ import { DynamicValue } from './DynamicValue'
 import { A2UIFunctionCall } from './FunctionCall'
 
 export class A2UIEventAction {
-  name: string = ''
-  context?: Record<string, Object>
+  public name: string = ''
+  public context?: Record<string, Object>
 
   static schema(): string {
     return `{
@@ -42,7 +42,7 @@ export class A2UIEventAction {
 }
 
 export class A2UIServerAction {
-  event: A2UIEventAction = new A2UIEventAction()
+  public event: A2UIEventAction = new A2UIEventAction()
 
   static schema(): string {
     return `{
@@ -58,7 +58,7 @@ export class A2UIServerAction {
 }
 
 export class A2UILocalFunctionAction {
-  functionCall: A2UIFunctionCall = new A2UIFunctionCall()
+  public functionCall: A2UIFunctionCall = new A2UIFunctionCall()
 
   static schema(): string {
     return `{

@@ -131,7 +131,7 @@ export struct CustomTabs {
         })
       }
     }
-    .height("auto")
+    .height('auto')
     .barMode(BarMode.Fixed)
     .animationDuration(200)
     .onChange((index: number) => {

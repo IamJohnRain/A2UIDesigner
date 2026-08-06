@@ -138,6 +138,26 @@ export default function ExpressionEngineWithContextUnitTest() {
       expect(result.value as number).assertEqual(42);
     });
 
+    it('should_return_object_result_from_context_evaluation', 0, () => {
+      let offset: Record<string, Object> = {};
+      offset['dx'] = 12 as Object;
+      offset['dy'] = 8 as Object;
+      nativeResult = {
+        success: true,
+        type: 'object',
+        value: offset as Object
+      };
+
+      const result: ExpressionEvaluateResult =
+        ExpressionEngine.evaluateWithContext('{{ $__dataModel.menuOffset }}', 200, 'surface-2');
+
+      expect(result.success).assertTrue();
+      expect(result.type).assertEqual('object');
+      let resolvedOffset: Record<string, Object> = result.value as Record<string, Object>;
+      expect(resolvedOffset['dx'] as number).assertEqual(12);
+      expect(resolvedOffset['dy'] as number).assertEqual(8);
+    });
+
     it('should_return_undefined_when_native_result_is_malformed', 0, () => {
       const malformed: Record<string, Object> = {};
       nativeResult = malformed as Object as ExpressionEvaluateResult;

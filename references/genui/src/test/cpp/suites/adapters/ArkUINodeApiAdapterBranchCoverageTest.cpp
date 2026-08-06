@@ -33,6 +33,7 @@
 #undef private
 
 #include "A2UIArkUITypes.h"
+#include "ArkUIConstraintSizeAdapter.h"
 #include "ArkUINodeApiAdapter.h"
 #include "TestFixture.h"
 
@@ -126,6 +127,106 @@ TEST_F(A2UITest, SetNode_ThinWrappers_RecordAttributes)
     ArkUINodeApiAdapter::SetNodeMargin(node, 1.0F, 2.0F, 3.0F, 4.0F);
 
     EXPECT_GT(mockArkUIPtr_->setAttributeRecords_.size(), prevSize);
+}
+
+TEST_F(A2UITest, SetNodeTextInputStyle_MapsInlineFlagToNativeStyle)
+{
+    ArkUI_NodeHandle node = ArkUINodeApiAdapter::CreateNode(A2UINodeType::TEXT_INPUT);
+    ASSERT_NE(node, nullptr);
+
+    EXPECT_EQ(ArkUINodeApiAdapter::SetNodeTextInputStyle(node, false), 0);
+    EXPECT_EQ(ArkUINodeApiAdapter::SetNodeTextInputStyle(node, true), 0);
+
+    ASSERT_GE(mockArkUIPtr_->setAttributeRecords_.size(), 2U);
+    const auto& defaultRecord = mockArkUIPtr_->setAttributeRecords_[mockArkUIPtr_->setAttributeRecords_.size() - 2U];
+    const auto& inlineRecord = mockArkUIPtr_->setAttributeRecords_.back();
+    EXPECT_EQ(defaultRecord.nodeHandle, node);
+    EXPECT_EQ(defaultRecord.attribute, NODE_TEXT_INPUT_STYLE);
+    ASSERT_FALSE(defaultRecord.values.empty());
+    EXPECT_EQ(defaultRecord.values[0].i32, ARKUI_TEXTINPUT_STYLE_DEFAULT);
+    EXPECT_EQ(inlineRecord.nodeHandle, node);
+    EXPECT_EQ(inlineRecord.attribute, NODE_TEXT_INPUT_STYLE);
+    ASSERT_FALSE(inlineRecord.values.empty());
+    EXPECT_EQ(inlineRecord.values[0].i32, ARKUI_TEXTINPUT_STYLE_INLINE);
+}
+
+TEST_F(A2UITest, SetNodePixelRoundNoForceRound_RecordsPixelRoundAttribute)
+{
+    ArkUI_NodeHandle listNode = ArkUINodeApiAdapter::CreateNode(A2UINodeType::LIST);
+    ArkUI_NodeHandle gridNode = ArkUINodeApiAdapter::CreateNode(A2UINodeType::GRID);
+    ASSERT_NE(listNode, nullptr);
+    ASSERT_NE(gridNode, nullptr);
+
+    const auto prevSize = mockArkUIPtr_->setAttributeRecords_.size();
+    EXPECT_EQ(ArkUINodeApiAdapter::SetNodePixelRoundNoForceRound(listNode, 21), 0);
+    EXPECT_EQ(ArkUINodeApiAdapter::SetNodePixelRoundNoForceRound(gridNode, 21), 0);
+
+    ASSERT_GE(mockArkUIPtr_->setAttributeRecords_.size(), prevSize + 2);
+    const auto& listRecord = mockArkUIPtr_->setAttributeRecords_[mockArkUIPtr_->setAttributeRecords_.size() - 2];
+    const auto& gridRecord = mockArkUIPtr_->setAttributeRecords_.back();
+    EXPECT_EQ(listRecord.nodeHandle, listNode);
+    EXPECT_EQ(listRecord.attribute, NODE_PIXEL_ROUND);
+    EXPECT_EQ(gridRecord.nodeHandle, gridNode);
+    EXPECT_EQ(gridRecord.attribute, NODE_PIXEL_ROUND);
+}
+
+TEST_F(A2UITest, SetNodePixelRoundNoForceRound_ReturnsErrorForUnsupportedApiVersion)
+{
+    ArkUI_NodeHandle node = ArkUINodeApiAdapter::CreateNode(A2UINodeType::LIST);
+    ASSERT_NE(node, nullptr);
+
+    EXPECT_EQ(ArkUINodeApiAdapter::SetNodePixelRoundNoForceRound(node, 20), -1);
+}
+
+// Null nodeHandle guard: returns -1 without touching the mock.
+TEST_F(A2UITest, SetNodePixelRoundNoForceRound_NullNode_ReturnsError)
+{
+    const auto prevSize = mockArkUIPtr_->setAttributeRecords_.size();
+    EXPECT_EQ(ArkUINodeApiAdapter::SetNodePixelRoundNoForceRound(nullptr, 21), -1);
+    EXPECT_EQ(mockArkUIPtr_->setAttributeRecords_.size(), prevSize);
+}
+
+// Default apiVersion parameter (= MIN_API_VERSION_PIXEL_ROUND = 21) succeeds.
+TEST_F(A2UITest, SetNodePixelRoundNoForceRound_DefaultApiVersion_RecordsAttribute)
+{
+    ArkUI_NodeHandle node = ArkUINodeApiAdapter::CreateNode(A2UINodeType::LIST);
+    ASSERT_NE(node, nullptr);
+
+    const auto prevSize = mockArkUIPtr_->setAttributeRecords_.size();
+    EXPECT_EQ(ArkUINodeApiAdapter::SetNodePixelRoundNoForceRound(node), 0);
+    ASSERT_EQ(mockArkUIPtr_->setAttributeRecords_.size(), prevSize + 1);
+    const auto& record = mockArkUIPtr_->setAttributeRecords_.back();
+    EXPECT_EQ(record.nodeHandle, node);
+    EXPECT_EQ(record.attribute, NODE_PIXEL_ROUND);
+}
+
+// Verify that all four policy fields are set to NOFORCEROUND.
+TEST_F(A2UITest, SetNodePixelRoundNoForceRound_PolicyValuesSetToNoForceRound)
+{
+    ArkUI_NodeHandle node = ArkUINodeApiAdapter::CreateNode(A2UINodeType::GRID);
+    ASSERT_NE(node, nullptr);
+
+    EXPECT_EQ(ArkUINodeApiAdapter::SetNodePixelRoundNoForceRound(node, 21), 0);
+
+    auto* policy = TddLastPixelRoundPolicy();
+    ASSERT_NE(policy, nullptr);
+    EXPECT_EQ(policy->start, ARKUI_PIXELROUNDCALCPOLICY_NOFORCEROUND);
+    EXPECT_EQ(policy->end, ARKUI_PIXELROUNDCALCPOLICY_NOFORCEROUND);
+    EXPECT_EQ(policy->top, ARKUI_PIXELROUNDCALCPOLICY_NOFORCEROUND);
+    EXPECT_EQ(policy->bottom, ARKUI_PIXELROUNDCALCPOLICY_NOFORCEROUND);
+}
+
+// Create() returns nullptr -> policy-null guard returns -1.
+TEST_F(A2UITest, SetNodePixelRoundNoForceRound_NullPolicy_ReturnsError)
+{
+    ArkUI_NodeHandle node = ArkUINodeApiAdapter::CreateNode(A2UINodeType::LIST);
+    ASSERT_NE(node, nullptr);
+
+    TddPixelRoundCreateShouldFail() = true;
+    const auto prevSize = mockArkUIPtr_->setAttributeRecords_.size();
+    EXPECT_EQ(ArkUINodeApiAdapter::SetNodePixelRoundNoForceRound(node, 21), -1);
+    EXPECT_EQ(mockArkUIPtr_->setAttributeRecords_.size(), prevSize);
+    TddPixelRoundCreateShouldFail() = false;
 }
 
 TEST_F(A2UITest, ResetNode_ThinWrappers_RecordResets)
@@ -486,4 +587,108 @@ TEST_F(A2UITest, Dialog_NullCallbackGuard)
     A2UINativeDialogHandle dlg = ArkUINodeApiAdapter::DialogCreate();
     ASSERT_NE(dlg, nullptr);
     EXPECT_EQ(ArkUINodeApiAdapter::DialogRegisterOnWillDismissWithUserData(dlg, nullptr, nullptr), -1);
+}
+
+TEST_F(A2UITest, ConstraintSizeAdapter_RealNodeApiCoversLifecycleAndParentLayoutRouting)
+{
+    ArkUI_NodeHandle content = reinterpret_cast<ArkUI_NodeHandle>(0xA720);
+    ArkUINodeApiAdapter owner([content]() { return content; }, []() { return std::string("constraint-coverage"); },
+        ArkUINodeApiAdapter::EdgeSetter(), []() {}, [](const std::function<void()>&) {});
+
+    EXPECT_EQ(ArkUINodeApiAdapter::SetNodeMargin(content, 1.0F, 2.0F, 3.0F, 4.0F), 0);
+    EXPECT_EQ(ArkUINodeApiAdapter::SetNodeFlexShrink(content, 0.5F), 0);
+    EXPECT_EQ(ArkUINodeApiAdapter::SetNodeLayoutWeight(content, 2U), 0);
+
+    A2UIConstraintSizeSpec spec;
+    spec.minWidth = { 10.0F, true };
+    spec.maxWidth = { 80.0F, true };
+    spec.minHeight = { 20.0F, true };
+    spec.maxHeight = { 90.0F, true };
+    ASSERT_EQ(ArkUIConstraintSizeAdapter::SetPercentConstraintSize(content, spec), 0);
+
+    ArkUI_NodeHandle wrapper = ArkUIConstraintSizeAdapter::GetMountNode(content);
+    ASSERT_NE(wrapper, nullptr);
+    ASSERT_NE(wrapper, content);
+    EXPECT_EQ(ArkUIConstraintSizeAdapter::GetMountNode(wrapper), wrapper);
+    EXPECT_EQ(ArkUIConstraintSizeAdapter::GetMountNode(nullptr), nullptr);
+    EXPECT_EQ(ArkUIConstraintSizeAdapter::GetContentNode(wrapper), content);
+    EXPECT_EQ(ArkUIConstraintSizeAdapter::GetContentNode(content), content);
+
+    mockArkUIPtr_->measuredSizes_[content] = { 320, 180 };
+    EXPECT_TRUE(mockArkUIPtr_->DispatchMeasureEvent(wrapper, 1000, 500));
+    EXPECT_TRUE(mockArkUIPtr_->DispatchMeasureEvent(wrapper, 1000, 500));
+    EXPECT_TRUE(mockArkUIPtr_->DispatchLayoutEvent(wrapper, 40, 60));
+
+    EXPECT_EQ(ArkUINodeApiAdapter::SetNodeMargin(content, 5.0F, 6.0F, 7.0F, 8.0F), 0);
+    EXPECT_EQ(ArkUINodeApiAdapter::SetNodeFlexShrink(content, 1.0F), 0);
+    EXPECT_EQ(ArkUINodeApiAdapter::SetNodeLayoutWeight(content, 3U), 0);
+    EXPECT_EQ(owner.ResetNodeMargin(content), 0);
+    EXPECT_EQ(ArkUINodeApiAdapter::ResetNodeFlexShrink(content), 0);
+    EXPECT_EQ(ArkUINodeApiAdapter::ResetNodeLayoutWeight(content), 0);
+
+    ArkUIConstraintSizeAdapter::Clear(content);
+    EXPECT_TRUE(mockArkUIPtr_->DispatchMeasureEvent(wrapper, 1000, 500));
+    ArkUIConstraintSizeAdapter::Dispose(wrapper);
+    EXPECT_EQ(ArkUIConstraintSizeAdapter::GetMountNode(content), content);
+    EXPECT_EQ(ArkUIConstraintSizeAdapter::GetContentNode(wrapper), wrapper);
+}
+
+TEST_F(A2UITest, ConstraintSizeAdapter_RequiredNativeCallbackAndSetupFailureBranches)
+{
+    A2UIConstraintSizeSpec spec;
+    spec.maxWidth = { 80.0F, true };
+    ArkUI_NodeHandle content = reinterpret_cast<ArkUI_NodeHandle>(0xA710);
+    auto& api = MockArkUINativeProvider::mockNodeAPI_;
+    const ArkUI_NativeNodeAPI_1 originalApi = api;
+
+    EXPECT_EQ(ArkUIConstraintSizeAdapter::SetPercentConstraintSize(nullptr, spec), -1);
+    ArkUIConstraintSizeAdapter::Clear(content);
+    ArkUIConstraintSizeAdapter::Dispose(content);
+
+    auto expectMissingCallbackFailure = [&](auto member) {
+        auto savedCallback = api.*member;
+        api.*member = nullptr;
+        int32_t result = ArkUIConstraintSizeAdapter::SetPercentConstraintSize(content, spec);
+        api.*member = savedCallback;
+        EXPECT_EQ(result, -1);
+    };
+    expectMissingCallbackFailure(&ArkUI_NativeNodeAPI_1::createNode);
+    expectMissingCallbackFailure(&ArkUI_NativeNodeAPI_1::disposeNode);
+    expectMissingCallbackFailure(&ArkUI_NativeNodeAPI_1::addChild);
+    expectMissingCallbackFailure(&ArkUI_NativeNodeAPI_1::removeChild);
+    expectMissingCallbackFailure(&ArkUI_NativeNodeAPI_1::insertChildAt);
+    expectMissingCallbackFailure(&ArkUI_NativeNodeAPI_1::getParent);
+    expectMissingCallbackFailure(&ArkUI_NativeNodeAPI_1::getTotalChildCount);
+    expectMissingCallbackFailure(&ArkUI_NativeNodeAPI_1::getChildAt);
+    expectMissingCallbackFailure(&ArkUI_NativeNodeAPI_1::registerNodeCustomEvent);
+    expectMissingCallbackFailure(&ArkUI_NativeNodeAPI_1::unregisterNodeCustomEvent);
+    expectMissingCallbackFailure(&ArkUI_NativeNodeAPI_1::addNodeCustomEventReceiver);
+    expectMissingCallbackFailure(&ArkUI_NativeNodeAPI_1::removeNodeCustomEventReceiver);
+    expectMissingCallbackFailure(&ArkUI_NativeNodeAPI_1::setMeasuredSize);
+    expectMissingCallbackFailure(&ArkUI_NativeNodeAPI_1::setLayoutPosition);
+    expectMissingCallbackFailure(&ArkUI_NativeNodeAPI_1::getMeasuredSize);
+    expectMissingCallbackFailure(&ArkUI_NativeNodeAPI_1::measureNode);
+    expectMissingCallbackFailure(&ArkUI_NativeNodeAPI_1::layoutNode);
+
+    api.createNode = [](ArkUI_NodeType) -> ArkUI_NodeHandle { return nullptr; };
+    EXPECT_EQ(ArkUIConstraintSizeAdapter::SetPercentConstraintSize(content, spec), -1);
+    api = originalApi;
+
+    api.addNodeCustomEventReceiver = [](ArkUI_NodeHandle, ArkUI_NodeCustomEventCallback) { return -1; };
+    EXPECT_EQ(ArkUIConstraintSizeAdapter::SetPercentConstraintSize(content, spec), -1);
+    api = originalApi;
+
+    api.registerNodeCustomEvent = [](ArkUI_NodeHandle, ArkUI_NodeCustomEventType, int32_t, void*) { return -1; };
+    EXPECT_EQ(ArkUIConstraintSizeAdapter::SetPercentConstraintSize(content, spec), -1);
+    api = originalApi;
+
+    api.registerNodeCustomEvent = [](ArkUI_NodeHandle, ArkUI_NodeCustomEventType eventType, int32_t, void*) {
+        return eventType == ARKUI_NODE_CUSTOM_EVENT_ON_MEASURE ? 0 : -1;
+    };
+    EXPECT_EQ(ArkUIConstraintSizeAdapter::SetPercentConstraintSize(content, spec), -1);
+    api = originalApi;
+
+    api.addChild = [](ArkUI_NodeHandle, ArkUI_NodeHandle) { return -1; };
+    EXPECT_EQ(ArkUIConstraintSizeAdapter::SetPercentConstraintSize(content, spec), -1);
+    api = originalApi;
 }

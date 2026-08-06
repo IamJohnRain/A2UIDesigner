@@ -543,7 +543,7 @@ std::unique_ptr<JsonAdapter> JsonAdapter::Parse(const std::string& jsonString)
     LOG_A2UI(LOG_INFO, "Parse success, jsonLength=%{public}zu", jsonString.size());
 
     std::shared_ptr<void> rootHolder(root, [](void* node) { cJSON_Delete(static_cast<cJSON*>(node)); });
-    return std::unique_ptr<JsonAdapter>(new JsonAdapter(std::move(rootHolder), root));
+    return std::make_unique<JsonAdapter>(ConstructionToken {}, std::move(rootHolder), root);
 }
 
 std::string JsonValue::ToString(const std::string& fallback) const
@@ -655,7 +655,7 @@ std::unique_ptr<JsonAdapter> JsonAdapter::Clone(const JsonValue& value)
     }
 
     std::shared_ptr<void> rootHolder(root, [](void* node) { cJSON_Delete(static_cast<cJSON*>(node)); });
-    return std::unique_ptr<JsonAdapter>(new JsonAdapter(std::move(rootHolder), root));
+    return std::make_unique<JsonAdapter>(ConstructionToken {}, std::move(rootHolder), root);
 }
 
 std::unique_ptr<JsonAdapter> JsonAdapter::Adopt(cJSON* root)
@@ -664,7 +664,7 @@ std::unique_ptr<JsonAdapter> JsonAdapter::Adopt(cJSON* root)
         return nullptr;
     }
     std::shared_ptr<void> rootHolder(root, [](void* node) { cJSON_Delete(static_cast<cJSON*>(node)); });
-    return std::unique_ptr<JsonAdapter>(new JsonAdapter(std::move(rootHolder), root));
+    return std::make_unique<JsonAdapter>(ConstructionToken {}, std::move(rootHolder), root);
 }
 
 std::unique_ptr<JsonAdapter> JsonAdapter::CreateNull()
@@ -697,7 +697,7 @@ std::unique_ptr<JsonAdapter> JsonAdapter::CreateArray()
     return Adopt(cJSON_CreateArray());
 }
 
-JsonAdapter::JsonAdapter(std::shared_ptr<void> rootHolder, cJSON* root)
+JsonAdapter::JsonAdapter(ConstructionToken, std::shared_ptr<void> rootHolder, cJSON* root)
     : rootHolder_(std::move(rootHolder)), root_(root)
 {}
 

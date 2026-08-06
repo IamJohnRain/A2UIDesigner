@@ -155,44 +155,138 @@ TEST_F(VariableResolutionTest, should_findInNearestScope_when_noGlobalSet)
 
 TEST_F(VariableResolutionTest, should_evaluateVariableReference_inExpression)
 {
-    auto result = EvalWithGlobalVar("myVar", "myVar", EvalResult::FromNumber(7.0));
+    auto result = EvalWithGlobalVar("$myVar", "myVar", EvalResult::FromNumber(7.0));
     EXPECT_TRUE(result.IsNumber());
     EXPECT_DOUBLE_EQ(7.0, result.AsNumber());
 }
 
 TEST_F(VariableResolutionTest, should_evaluateVariableInBinaryExpr_inExpression)
 {
-    auto result = EvalWithGlobalVar("x + 3", "x", EvalResult::FromNumber(5.0));
+    auto result = EvalWithGlobalVar("$x + 3", "x", EvalResult::FromNumber(5.0));
     EXPECT_TRUE(result.IsNumber());
     EXPECT_DOUBLE_EQ(8.0, result.AsNumber());
 }
 
 TEST_F(VariableResolutionTest, should_evaluateVariableComparison_inExpression)
 {
-    auto result = EvalWithGlobalVar("flag == true", "flag", EvalResult::FromBool(true));
+    auto result = EvalWithGlobalVar("$flag == true", "flag", EvalResult::FromBool(true));
     EXPECT_TRUE(result.IsBoolean());
     EXPECT_TRUE(result.AsBool());
 }
 
-TEST_F(VariableResolutionTest, should_returnUndefined_when_variableNotFoundInExpression)
+TEST_F(VariableResolutionTest, should_returnEmptyString_when_unquotedVariableNotFoundInExpression)
 {
     EvaluationContext context;
     auto result = EvalRawWithContext(context, "unknownVar");
-    EXPECT_TRUE(result.IsUndefined());
+    EXPECT_TRUE(result.IsString());
+    EXPECT_EQ("", result.AsString());
+    EXPECT_EQ(ExpressionError::PARSE_UNEXPECTED_TOKEN, context.lastError);
+    EXPECT_NE(context.errorMessage.find("illegal expression"), std::string::npos);
 }
 
 TEST_F(VariableResolutionTest, should_resolveGlobalVariable_stringType)
 {
-    auto result = EvalWithGlobalVar("name", "name", EvalResult::FromString("test"));
+    auto result = EvalWithGlobalVar("$name", "name", EvalResult::FromString("test"));
     EXPECT_TRUE(result.IsString());
     EXPECT_EQ("test", result.AsString());
 }
 
 TEST_F(VariableResolutionTest, should_resolveLocalVariable_inExpression)
 {
-    auto result = EvalWithLocalVar("val", "val", EvalResult::FromNumber(99.0));
+    auto result = EvalWithLocalVar("$val", "val", EvalResult::FromNumber(99.0));
     EXPECT_TRUE(result.IsNumber());
     EXPECT_DOUBLE_EQ(99.0, result.AsNumber());
+}
+
+TEST_F(VariableResolutionTest, should_reject_bare_identifier_when_variable_is_defined_in_scope)
+{
+    EvaluationContext context;
+    context.PushScope();
+    context.SetLocalVariable("item", EvalResult::FromNumber(42.0));
+
+    auto result = EvalRawWithContext(context, "item");
+    EXPECT_TRUE(result.IsString());
+    EXPECT_EQ("", result.AsString());
+    EXPECT_EQ(ExpressionError::PARSE_UNEXPECTED_TOKEN, context.lastError);
+    EXPECT_NE(context.errorMessage.find("illegal expression"), std::string::npos);
+    EXPECT_NE(context.errorMessage.find("item"), std::string::npos);
+
+    context.PopScope();
+}
+
+TEST_F(VariableResolutionTest, should_reject_bare_identifier_when_variable_is_defined_as_global)
+{
+    auto result = EvalWithGlobalVar("myVar", "myVar", EvalResult::FromNumber(7.0));
+    EXPECT_TRUE(result.IsString());
+    EXPECT_EQ("", result.AsString());
+}
+
+TEST_F(VariableResolutionTest, should_reject_bare_identifier_in_function_argument)
+{
+    EvaluationContext context;
+    context.PushScope();
+    context.SetLocalVariable("arr", EvalResult::FromJson(JsonAdapter::Parse(R"([1,2,3])")->GetRoot()));
+
+    auto result = EvalRawWithContext(context, "size(arr)");
+    ASSERT_TRUE(result.IsNumber());
+    EXPECT_DOUBLE_EQ(0.0, result.AsNumber());
+    EXPECT_EQ(ExpressionError::PARSE_UNEXPECTED_TOKEN, context.lastError);
+    EXPECT_NE(context.errorMessage.find("illegal expression"), std::string::npos);
+
+    context.PopScope();
+}
+
+TEST_F(VariableResolutionTest, should_return_empty_string_when_dollar_prefixed_variable_not_found)
+{
+    EvaluationContext context;
+
+    auto result = EvalRawWithContext(context, "$missingVar");
+    EXPECT_TRUE(result.IsUndefined());
+    EXPECT_EQ(ExpressionError::EVAL_UNDEFINED_VARIABLE, context.lastError);
+    EXPECT_NE(context.errorMessage.find("undefined variable"), std::string::npos);
+    EXPECT_NE(context.errorMessage.find("missingVar"), std::string::npos);
+}
+
+TEST_F(VariableResolutionTest, should_return_empty_string_with_evaluation_error_when_bare_identifier_rejected)
+{
+    EvaluationContext context;
+
+    auto result = EvalRawWithContext(context, "bareName");
+    EXPECT_TRUE(result.IsString());
+    EXPECT_EQ("", result.AsString());
+    EXPECT_EQ(ExpressionError::PARSE_UNEXPECTED_TOKEN, context.lastError);
+}
+
+TEST_F(VariableResolutionTest, should_resolve_dollar_prefixed_variable_in_nested_member_access)
+{
+    auto adapter = JsonAdapter::Parse(R"({"name":"Alice"})");
+    ASSERT_NE(adapter, nullptr);
+
+    EvaluationContext context;
+    context.PushScope();
+    context.SetLocalVariable("user", EvalResult::FromJson(adapter->GetRoot()));
+
+    auto result = EvalRawWithContext(context, "$user.name");
+    ASSERT_TRUE(result.IsString());
+    EXPECT_EQ("Alice", result.AsString());
+
+    context.PopScope();
+}
+
+TEST_F(VariableResolutionTest, should_reject_bare_identifier_in_nested_member_access)
+{
+    auto adapter = JsonAdapter::Parse(R"({"name":"Alice"})");
+    ASSERT_NE(adapter, nullptr);
+
+    EvaluationContext context;
+    context.PushScope();
+    context.SetLocalVariable("user", EvalResult::FromJson(adapter->GetRoot()));
+
+    auto result = EvalRawWithContext(context, "user.name");
+    EXPECT_TRUE(result.IsUndefined());
+    EXPECT_NE(context.lastError, ExpressionError::NONE);
+
+    context.PopScope();
 }
 
 class DependencyCollectorTest : public ::testing::Test {

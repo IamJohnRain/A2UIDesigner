@@ -78,7 +78,6 @@ private:
     ArkUINativeAPI(const ArkUINativeAPI&) = delete;
     ArkUINativeAPI& operator=(const ArkUINativeAPI&) = delete;
 
-    // ArkUI_NativeNodeAPI_1* nativeNodeApi_ = nullptr;
     std::unique_ptr<IArkUINativeProvider> provider_;
 };
 

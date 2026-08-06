@@ -18,6 +18,8 @@
 #undef private
 
 #include "A2UIComponentTddTestHelper.h"
+#include "SchemaErrorCodes.h"
+#include "SchemaWarningTestHelper.h"
 
 using namespace NativeModule;
 
@@ -33,6 +35,11 @@ public:
     void InvokeApplyPrivateAttributes(const JsonValue& descriptor)
     {
         ApplyPrivateAttributes(descriptor);
+    }
+
+    void InvokeApplyRuntimeCurrentIndex(const JsonValue& value)
+    {
+        ApplyRuntimeProperty("currentIndex", value, true);
     }
 
     void InvokeCollectChildListDescriptor(const JsonValue& descriptor)
@@ -102,10 +109,10 @@ TEST_F(NavContainerComponentTddTest, L0_should_create_column_node_and_report_nav
 
 /**
  * @tc.name: NavContainer currentIndex 可见性
- * @tc.desc: 覆盖 currentIndex 解析、上下界夹紧与子节点可见性分支。
+ * @tc.desc: 覆盖 currentIndex 解析、异常值回退与子节点可见性分支。
  * @tc.type: FUNC
  */
-TEST_F(NavContainerComponentTddTest, L0_should_apply_current_index_and_clamp_visibility)
+TEST_F(NavContainerComponentTddTest, L0_should_apply_current_index_and_fallback_invalid_visibility)
 {
     auto nav = std::make_shared<NavContainerComponentProbe>();
     auto descriptor = ParseJson(R"({"id":"nav","component":"NavContainer","currentIndex":1,"children":["a","b"]})");
@@ -126,8 +133,110 @@ TEST_F(NavContainerComponentTddTest, L0_should_apply_current_index_and_clamp_vis
     ExpectI32Attribute(childB->GetNativeView(), NODE_VISIBILITY, ARKUI_VISIBILITY_NONE);
 
     nav->InvokeApplyPrivateAttributes(ParseJson(R"({"currentIndex":99})")->GetRoot());
+    EXPECT_EQ(nav->GetCurrentIndexForTest(), 1);
     ExpectI32Attribute(childA->GetNativeView(), NODE_VISIBILITY, ARKUI_VISIBILITY_NONE);
     ExpectI32Attribute(childB->GetNativeView(), NODE_VISIBILITY, ARKUI_VISIBILITY_VISIBLE);
+}
+
+/**
+ * @tc.name: NavContainer currentIndex 异常值校验
+ * @tc.desc: 覆盖负数、等于 children.length 和大于 children.length 时的不合法参数告警与回退。
+ * @tc.type: FUNC
+ */
+TEST_F(NavContainerComponentTddTest, L0_should_report_invalid_value_when_current_index_is_out_of_bounds)
+{
+    TestHelpers::RegisterWarningDispatchCallback(mockNapiPtr_);
+
+    auto nav = std::make_shared<NavContainerComponentProbe>();
+    nav->SetRenderId(COMPONENT_TDD_RENDER_ID);
+    nav->SetSurfaceId(COMPONENT_TDD_SURFACE_ID);
+    nav->SetComponentId("nav");
+
+    nav->InvokeApplyPrivateAttributes(ParseJson(R"({"currentIndex":-1,"children":["page-a","page-b"]})")->GetRoot());
+    EXPECT_EQ(TestHelpers::CountWarningRequests(mockNapiPtr_, SCHEMA_ERROR_CODE_INVALID_VALUE, "nav.currentIndex"), 1U);
+    EXPECT_EQ(nav->GetCurrentIndexForTest(), 0);
+
+    nav->InvokeApplyPrivateAttributes(ParseJson(R"({"currentIndex":2,"children":["page-a","page-b"]})")->GetRoot());
+    EXPECT_EQ(TestHelpers::CountWarningRequests(mockNapiPtr_, SCHEMA_ERROR_CODE_INVALID_VALUE, "nav.currentIndex"), 2U);
+    EXPECT_EQ(nav->GetCurrentIndexForTest(), 1);
+
+    nav->InvokeApplyPrivateAttributes(ParseJson(R"({"currentIndex":3,"children":["page-a","page-b"]})")->GetRoot());
+    EXPECT_EQ(TestHelpers::CountWarningRequests(mockNapiPtr_, SCHEMA_ERROR_CODE_INVALID_VALUE, "nav.currentIndex"), 3U);
+    EXPECT_EQ(nav->GetCurrentIndexForTest(), 1);
+
+    nav->InvokeApplyPrivateAttributes(ParseJson(R"({"currentIndex":1,"children":["page-a","page-b"]})")->GetRoot());
+    EXPECT_EQ(TestHelpers::CountWarningRequests(mockNapiPtr_, SCHEMA_ERROR_CODE_INVALID_VALUE, "nav.currentIndex"), 3U);
+    EXPECT_EQ(nav->GetCurrentIndexForTest(), 1);
+}
+
+/**
+ * @tc.name: NavContainer currentIndex 正向越界回退
+ * @tc.desc: currentIndex 大于最后一个子节点索引时回退到最后一个子节点。
+ * @tc.type: FUNC
+ */
+TEST_F(NavContainerComponentTddTest, L0_should_clamp_overflow_current_index_to_last_child)
+{
+    auto nav = std::make_shared<NavContainerComponentProbe>();
+    auto descriptor = ParseJson(R"({"currentIndex":4,"children":["page-a","page-b","page-c"]})");
+    ASSERT_NE(descriptor, nullptr);
+
+    nav->InvokeApplyPrivateAttributes(descriptor->GetRoot());
+    EXPECT_EQ(nav->GetCurrentIndexForTest(), 2);
+
+    auto childA = std::make_shared<FakeChildComponent>("page-a", reinterpret_cast<ArkUI_NodeHandle>(0x121));
+    auto childB = std::make_shared<FakeChildComponent>("page-b", reinterpret_cast<ArkUI_NodeHandle>(0x122));
+    auto childC = std::make_shared<FakeChildComponent>("page-c", reinterpret_cast<ArkUI_NodeHandle>(0x123));
+    nav->AddChild(childA);
+    nav->AddChild(childB);
+    nav->AddChild(childC);
+
+    ExpectI32Attribute(childA->GetNativeView(), NODE_VISIBILITY, ARKUI_VISIBILITY_NONE);
+    ExpectI32Attribute(childB->GetNativeView(), NODE_VISIBILITY, ARKUI_VISIBILITY_NONE);
+    ExpectI32Attribute(childC->GetNativeView(), NODE_VISIBILITY, ARKUI_VISIBILITY_VISIBLE);
+}
+
+/**
+ * @tc.name: NavContainer 动态 currentIndex 异常值校验
+ * @tc.desc: 覆盖数据绑定或表达式更新解析后，按实际子节点数量执行边界校验。
+ * @tc.type: FUNC
+ */
+TEST_F(NavContainerComponentTddTest, L0_should_report_invalid_value_for_dynamic_current_index_update)
+{
+    TestHelpers::RegisterWarningDispatchCallback(mockNapiPtr_);
+
+    auto nav = std::make_shared<NavContainerComponentProbe>();
+    nav->SetRenderId(COMPONENT_TDD_RENDER_ID);
+    nav->SetSurfaceId(COMPONENT_TDD_SURFACE_ID);
+    nav->SetComponentId("navDynamic");
+
+    auto childA = std::make_shared<FakeChildComponent>("page-a", reinterpret_cast<ArkUI_NodeHandle>(0x111));
+    auto childB = std::make_shared<FakeChildComponent>("page-b", reinterpret_cast<ArkUI_NodeHandle>(0x112));
+    nav->AddChild(childA);
+    nav->AddChild(childB);
+
+    nav->InvokeApplyRuntimeCurrentIndex(ParseJson(R"(1)")->GetRoot());
+    EXPECT_EQ(nav->GetCurrentIndexForTest(), 1);
+    EXPECT_EQ(
+        TestHelpers::CountWarningRequests(mockNapiPtr_, SCHEMA_ERROR_CODE_INVALID_VALUE, "navDynamic.currentIndex"),
+        0U);
+
+    nav->InvokeApplyRuntimeCurrentIndex(ParseJson(R"(2)")->GetRoot());
+    EXPECT_EQ(nav->GetCurrentIndexForTest(), 1);
+    EXPECT_EQ(
+        TestHelpers::CountWarningRequests(mockNapiPtr_, SCHEMA_ERROR_CODE_INVALID_VALUE, "navDynamic.currentIndex"),
+        1U);
+
+    nav->InvokeApplyRuntimeCurrentIndex(ParseJson(R"(-1)")->GetRoot());
+    EXPECT_EQ(nav->GetCurrentIndexForTest(), 0);
+    EXPECT_EQ(
+        TestHelpers::CountWarningRequests(mockNapiPtr_, SCHEMA_ERROR_CODE_INVALID_VALUE, "navDynamic.currentIndex"),
+        2U);
+
+    nav->InvokeApplyRuntimeCurrentIndex(ParseJson(R"(1.5)")->GetRoot());
+    EXPECT_EQ(nav->GetCurrentIndexForTest(), 0);
+    EXPECT_EQ(
+        TestHelpers::CountWarningRequests(mockNapiPtr_, SCHEMA_ERROR_CODE_INVALID_VALUE, "navDynamic.currentIndex"),
+        3U);
 }
 
 /**

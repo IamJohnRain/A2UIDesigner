@@ -68,6 +68,9 @@ private:
     bool EnsureTextAreaNode();
     void SetInputMode(bool useTextArea);
     void SetTextInputType(A2UITextInputType inputType);
+    PropertyDeclaration CreateStringPropertyDeclaration(
+        const std::string& propertyName, bool allowDynamic, void (TextFieldComponent::*setter)(const std::string&));
+    PropertyDeclaration CreateVariantPropertyDeclaration();
 
     // validationRegexp / value sync
     bool ValidationRegexpCheck();

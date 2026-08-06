@@ -121,6 +121,63 @@ struct AstStats {
     int32_t maxTemplateInterpDepth = 0;
 };
 
+void CollectAstStats(const std::shared_ptr<AstNode>& node, AstStats& stats);
+
+void AccumulateFunctionCallStats(FunctionCall* fc, AstStats& stats)
+{
+    stats.functionCallCount++;
+    int32_t consecutive = 1;
+    for (const auto& arg : fc->arguments) {
+        CollectAstStats(arg, stats);
+        if (arg && arg->type == AstNodeType::FUNCTION_CALL) {
+            ++consecutive;
+            stats.maxConsecutiveCalls = std::max(stats.maxConsecutiveCalls, consecutive);
+        } else {
+            consecutive = 0;
+        }
+    }
+}
+
+void CollectBinaryAstStats(const BinaryExpression* bin, AstStats& stats)
+{
+    CollectAstStats(bin->left, stats);
+    CollectAstStats(bin->right, stats);
+}
+
+void CollectUnaryAstStats(const UnaryExpression* unary, AstStats& stats)
+{
+    CollectAstStats(unary->operand, stats);
+}
+
+void CollectConditionalAstStats(const ConditionalExpression* cond, AstStats& stats)
+{
+    CollectAstStats(cond->condition, stats);
+    CollectAstStats(cond->consequent, stats);
+    CollectAstStats(cond->alternate, stats);
+}
+
+void CollectGroupedAstStats(const GroupedExpression* grp, AstStats& stats)
+{
+    CollectAstStats(grp->expression, stats);
+}
+
+void CollectMemberAccessAstStats(const MemberAccess* ma, AstStats& stats)
+{
+    CollectAstStats(ma->object, stats);
+    if (ma->isBracket) {
+        CollectAstStats(ma->bracketKey, stats);
+    }
+}
+
+void CollectTemplateLiteralAstStats(const TemplateLiteral* tmpl, AstStats& stats)
+{
+    for (const auto& part : tmpl->parts) {
+        if (part.isExpression) {
+            CollectAstStats(part.expression, stats);
+        }
+    }
+}
+
 void CollectAstStats(const std::shared_ptr<AstNode>& node, AstStats& stats)
 {
     if (node == nullptr) {
@@ -130,60 +187,32 @@ void CollectAstStats(const std::shared_ptr<AstNode>& node, AstStats& stats)
 
     switch (node->type) {
         case AstNodeType::BINARY_EXPRESSION: {
-            auto* bin = static_cast<BinaryExpression*>(node.get());
-            CollectAstStats(bin->left, stats);
-            CollectAstStats(bin->right, stats);
+            CollectBinaryAstStats(static_cast<BinaryExpression*>(node.get()), stats);
             break;
         }
         case AstNodeType::UNARY_EXPRESSION: {
-            auto* unary = static_cast<UnaryExpression*>(node.get());
-            CollectAstStats(unary->operand, stats);
+            CollectUnaryAstStats(static_cast<UnaryExpression*>(node.get()), stats);
             break;
         }
         case AstNodeType::CONDITIONAL_EXPRESSION: {
-            auto* cond = static_cast<ConditionalExpression*>(node.get());
-            CollectAstStats(cond->condition, stats);
-            CollectAstStats(cond->consequent, stats);
-            CollectAstStats(cond->alternate, stats);
+            CollectConditionalAstStats(static_cast<ConditionalExpression*>(node.get()), stats);
             break;
         }
         case AstNodeType::GROUPED_EXPRESSION: {
-            auto* grp = static_cast<GroupedExpression*>(node.get());
-            CollectAstStats(grp->expression, stats);
+            CollectGroupedAstStats(static_cast<GroupedExpression*>(node.get()), stats);
             break;
         }
         case AstNodeType::FUNCTION_CALL: {
-            auto* fc = static_cast<FunctionCall*>(node.get());
-            stats.functionCallCount++;
-            int32_t consecutive = 1;
-            for (const auto& arg : fc->arguments) {
-                CollectAstStats(arg, stats);
-                if (arg && arg->type == AstNodeType::FUNCTION_CALL) {
-                    ++consecutive;
-                    stats.maxConsecutiveCalls = std::max(stats.maxConsecutiveCalls, consecutive);
-                } else {
-                    consecutive = 0;
-                }
-            }
+            AccumulateFunctionCallStats(static_cast<FunctionCall*>(node.get()), stats);
             break;
         }
         case AstNodeType::MEMBER_ACCESS: {
-            auto* ma = static_cast<MemberAccess*>(node.get());
-            CollectAstStats(ma->object, stats);
-            if (ma->isBracket) {
-                CollectAstStats(ma->bracketKey, stats);
-            }
+            CollectMemberAccessAstStats(static_cast<MemberAccess*>(node.get()), stats);
             break;
         }
-        case AstNodeType::TEMPLATE_LITERAL: {
-            auto* tl = static_cast<TemplateLiteral*>(node.get());
-            for (const auto& part : tl->parts) {
-                if (part.isExpression) {
-                    CollectAstStats(part.expression, stats);
-                }
-            }
+        case AstNodeType::TEMPLATE_LITERAL:
+            CollectTemplateLiteralAstStats(static_cast<TemplateLiteral*>(node.get()), stats);
             break;
-        }
         default:
             break;
     }

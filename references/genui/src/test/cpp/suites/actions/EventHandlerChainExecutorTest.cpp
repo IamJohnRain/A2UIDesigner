@@ -307,6 +307,40 @@ TEST_F(EventHandlerChainExecutorTest, L0_should_skip_handler_when_condition_is_f
     EXPECT_EQ(callCount.load(), 0);
 }
 
+TEST_F(EventHandlerChainExecutorTest, L0_should_evaluate_condition_with_current_theme_mode)
+{
+    constexpr int32_t renderId = 7201;
+    const std::string surfaceId = "event-theme-surface";
+    CreateSurfaceForTest(renderId, surfaceId);
+    RenderSlot* renderSlot = RenderManager::GetInstance().FindRenderSlot(renderId);
+    ASSERT_NE(renderSlot, nullptr);
+    ASSERT_NE(renderSlot->GetSurfaceManager(), nullptr);
+
+    std::atomic<int> callCount { 0 };
+    NativeActionRegistry::GetInstance().Register(
+        "captureThemeCondition", [&](const JsonValue&, EventHandlerChainExecutor::ExecutionContext&) {
+            ++callCount;
+            return JsonValue();
+        });
+
+    EventHandlerStep step;
+    step.call = "captureThemeCondition";
+    step.condition = "{{ $__colorMode == 'dark' }}";
+
+    EventHandlerChainExecutor::ExecutionContext context;
+    context.renderId = renderId;
+    context.surfaceId = surfaceId;
+    context.componentId = "theme-button";
+
+    renderSlot->GetSurfaceManager()->UpdateThemeMode(ThemeMode::LIGHT);
+    EventHandlerChainExecutor::ExecuteChain({ step }, context);
+    EXPECT_EQ(callCount.load(), 0);
+
+    renderSlot->GetSurfaceManager()->UpdateThemeMode(ThemeMode::DARK);
+    EventHandlerChainExecutor::ExecuteChain({ step }, context);
+    EXPECT_EQ(callCount.load(), 1);
+}
+
 TEST_F(EventHandlerChainExecutorTest, L0_should_evaluate_comparison_condition)
 {
     std::atomic<int> callCount { 0 };

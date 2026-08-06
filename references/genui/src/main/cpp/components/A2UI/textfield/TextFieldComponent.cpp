@@ -88,56 +88,40 @@ void TextFieldComponent::OnAttachToParent()
     AttachNativeSubtree();
 }
 
+PropertyDeclaration TextFieldComponent::CreateStringPropertyDeclaration(
+    const std::string& propertyName, bool allowDynamic, void (TextFieldComponent::*setter)(const std::string&))
+{
+    return PropertyDeclaration { .name = propertyName,
+        .type = PropertyValueType::STRING,
+        .allowDynamic = allowDynamic,
+        .fallbackString = "",
+        .applyValue = [this, setter](const JsonValue& value) { (this->*setter)(value.GetStringValue("")); } };
+}
+
+PropertyDeclaration TextFieldComponent::CreateVariantPropertyDeclaration()
+{
+    return PropertyDeclaration { .name = "variant",
+        .type = PropertyValueType::ENUM_STRING,
+        .allowDynamic = false,
+        .fallbackString = "shortText",
+        .enumAllowed = { "shortText", "number", "obscured", "longText" },
+        .enumFallback = "shortText",
+        .applyValue = [this](const JsonValue& value) { SetVariant(value.GetStringValue("shortText")); } };
+}
+
 PropertyDeclaration TextFieldComponent::GetPrivatePropertyDeclaration(const std::string& propertyName)
 {
-    static const std::map<std::string, std::function<PropertyDeclaration(TextFieldComponent&)>> declarations = {
-        { "label",
-            [](TextFieldComponent& textFieldComponent) {
-                return PropertyDeclaration { .name = "label",
-                    .type = PropertyValueType::STRING,
-                    .allowDynamic = true,
-                    .fallbackString = "",
-                    .applyValue = [&textFieldComponent](const JsonValue& value) {
-                        textFieldComponent.SetLabelText(value.GetStringValue(""));
-                    } };
-            } },
-        { "value",
-            [](TextFieldComponent& textFieldComponent) {
-                return PropertyDeclaration { .name = "value",
-                    .type = PropertyValueType::STRING,
-                    .allowDynamic = true,
-                    .fallbackString = "",
-                    .applyValue = [&textFieldComponent](const JsonValue& value) {
-                        textFieldComponent.SetValueText(value.GetStringValue(""));
-                    } };
-            } },
-        { "variant",
-            [](TextFieldComponent& textFieldComponent) {
-                return PropertyDeclaration { .name = "variant",
-                    .type = PropertyValueType::ENUM_STRING,
-                    .allowDynamic = false,
-                    .fallbackString = "shortText",
-                    .enumAllowed = { "shortText", "number", "obscured", "longText" },
-                    .enumFallback = "shortText",
-                    .applyValue = [&textFieldComponent](const JsonValue& value) {
-                        textFieldComponent.SetVariant(value.GetStringValue("shortText"));
-                    } };
-            } },
-        { "validationRegexp",
-            [](TextFieldComponent& textFieldComponent) {
-                return PropertyDeclaration { .name = "validationRegexp",
-                    .type = PropertyValueType::STRING,
-                    .allowDynamic = false,
-                    .fallbackString = "",
-                    .applyValue = [&textFieldComponent](const JsonValue& value) {
-                        textFieldComponent.SetValidationRegexp(value.GetStringValue(""));
-                    } };
-            } }
-    };
-
-    auto it = declarations.find(propertyName);
-    if (it != declarations.end()) {
-        return it->second(*this);
+    if (propertyName == "label") {
+        return CreateStringPropertyDeclaration("label", true, &TextFieldComponent::SetLabelText);
+    }
+    if (propertyName == "value") {
+        return CreateStringPropertyDeclaration("value", true, &TextFieldComponent::SetValueText);
+    }
+    if (propertyName == "variant") {
+        return CreateVariantPropertyDeclaration();
+    }
+    if (propertyName == "validationRegexp") {
+        return CreateStringPropertyDeclaration("validationRegexp", false, &TextFieldComponent::SetValidationRegexp);
     }
     return {};
 }

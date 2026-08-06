@@ -13,6 +13,8 @@
  * limitations under the License.
  */
 
+#include <algorithm>
+#include <array>
 #include <cfloat>
 #include <cmath>
 #include <cstdint>
@@ -30,6 +32,7 @@
 #include "utils/JsonAdapter.h"
 
 #include "ArkUINodeApiAdapter.h"
+#include "SchemaErrorCodes.h"
 #undef private
 
 #include "TestFixture.h"
@@ -47,6 +50,18 @@ ArkUINodeApiAdapter MakeTestApplier(ArkUI_NodeHandle node, std::function<void()>
     return ArkUINodeApiAdapter([node]() { return node; }, []() { return std::string("test-component"); },
         ArkUINodeApiAdapter::EdgeSetter(), onResetCommonMargin ? onResetCommonMargin : []() {},
         onClickRegistrar ? onClickRegistrar : [](const std::function<void()>&) {});
+}
+
+const MockArkUINativeProvider::SetAttributeRecord* FindLastConstraintRecord(
+    const MockArkUINativeProvider* provider, ArkUI_NodeHandle node)
+{
+    for (auto iterator = provider->setAttributeRecords_.rbegin(); iterator != provider->setAttributeRecords_.rend();
+         ++iterator) {
+        if (iterator->nodeHandle == node && iterator->attribute == NODE_CONSTRAINT_SIZE) {
+            return &(*iterator);
+        }
+    }
+    return nullptr;
 }
 
 class ExtendedStyleResolverTddTest : public A2UITest {
@@ -917,31 +932,41 @@ TEST_F(ExtendedStyleResolverTddTest, ResolveAndApply_AppliesFlexShrink)
     EXPECT_TRUE(found);
 }
 
-TEST_F(ExtendedStyleResolverTddTest, ResolveAndApply_RejectsOutOfRangeFlexShrink)
+TEST_F(ExtendedStyleResolverTddTest, ResolveAndApply_AcceptsFlexShrinkGreaterThanOne)
 {
     ArkUINodeApiAdapter applier = MakeTestApplier(testNode_);
     mockArkUIPtr_->setAttributeRecords_.clear();
-    auto styles = JsonAdapter::Parse(R"({"flexShrink": 1.5})");
+    auto styles = JsonAdapter::Parse(R"({"flexShrink": 2.6})");
     ASSERT_NE(styles, nullptr);
+    ConstraintDispatchContext context;
+    context.parentComponentType = "Column";
     std::vector<DescriptorValidationIssue> issues;
-    ExtendedStyleResolver::ResolveAndApply(styles->GetRoot(), applier, std::nullopt, issues);
-    ASSERT_EQ(issues.size(), 1U);
-    EXPECT_EQ(issues[0].path, "styles.flexShrink");
+    ExtendedStyleResolver::ResolveAndApply(styles->GetRoot(), applier, context, issues);
+    EXPECT_TRUE(issues.empty());
+    bool found = false;
     for (const auto& rec : mockArkUIPtr_->setAttributeRecords_) {
-        EXPECT_NE(rec.attribute, NODE_FLEX_SHRINK);
+        if (rec.attribute == NODE_FLEX_SHRINK && !rec.values.empty()) {
+            found = true;
+            EXPECT_FLOAT_EQ(rec.values[0].f32, 2.6F);
+        }
     }
+    EXPECT_TRUE(found);
 }
 
-TEST_F(ExtendedStyleResolverTddTest, ResolveAndApply_IgnoresInvalidFlexShrink)
+TEST_F(ExtendedStyleResolverTddTest, ResolveAndApply_ResetsInvalidFlexShrinkWithoutParentContext)
 {
     ArkUINodeApiAdapter applier = MakeTestApplier(testNode_);
-    mockArkUIPtr_->setAttributeRecords_.clear();
+    mockArkUIPtr_->resetAttributeRecords_.clear();
     auto styles = JsonAdapter::Parse(R"({"flexShrink": "invalid"})");
     ASSERT_NE(styles, nullptr);
     ExtendedStyleResolver::ResolveAndApply(styles->GetRoot(), applier);
-    for (const auto& rec : mockArkUIPtr_->setAttributeRecords_) {
-        EXPECT_NE(rec.attribute, NODE_FLEX_SHRINK);
+    bool found = false;
+    for (const auto& rec : mockArkUIPtr_->resetAttributeRecords_) {
+        if (rec.attribute == NODE_FLEX_SHRINK) {
+            found = true;
+        }
     }
+    EXPECT_TRUE(found);
 }
 
 TEST_F(ExtendedStyleResolverTddTest, ResolveAndApply_AppliesBackgroundImage)
@@ -1495,15 +1520,26 @@ TEST_F(ExtendedStyleResolverTddTest, Reset_BackgroundImage)
 TEST_F(ExtendedStyleResolverTddTest, Reset_BackgroundImageSize)
 {
     ArkUINodeApiAdapter applier = MakeTestApplier(testNode_);
+    mockArkUIPtr_->resetAttributeRecords_.clear();
+    mockArkUIPtr_->setAttributeRecords_.clear();
     StyleResetProperty prop { "backgroundImageSize", StylePropertyName::BACKGROUND_IMAGE_SIZE };
     ExtendedStyleResolver::Reset(prop, applier);
-    int count = 0;
+    bool resetSize = false;
     for (const auto& rec : mockArkUIPtr_->resetAttributeRecords_) {
-        if (rec.attribute == NODE_BACKGROUND_IMAGE_SIZE || rec.attribute == NODE_BACKGROUND_IMAGE_SIZE_WITH_STYLE) {
-            count++;
+        if (rec.attribute == NODE_BACKGROUND_IMAGE_SIZE) {
+            resetSize = true;
         }
     }
-    EXPECT_GE(count, 2);
+    const MockArkUINativeProvider::SetAttributeRecord* sizeWithStyle = nullptr;
+    for (const auto& rec : mockArkUIPtr_->setAttributeRecords_) {
+        if (rec.attribute == NODE_BACKGROUND_IMAGE_SIZE_WITH_STYLE) {
+            sizeWithStyle = &rec;
+        }
+    }
+    EXPECT_TRUE(resetSize);
+    ASSERT_NE(sizeWithStyle, nullptr);
+    ASSERT_EQ(sizeWithStyle->values.size(), 1u);
+    EXPECT_EQ(sizeWithStyle->values[0].i32, static_cast<int32_t>(A2UIImageSize::AUTO));
 }
 
 TEST_F(ExtendedStyleResolverTddTest, Reset_LinearGradient)
@@ -1963,6 +1999,7 @@ TEST_F(ExtendedStyleResolverTddTest, ResolveAndApply_ConstraintSizePercentDispat
     dispatchCtx.componentId = "test-comp";
     dispatchCtx.nodeUniqueId = 42;
     dispatchCtx.componentType = "Column";
+    dispatchCtx.apiVersion = 20;
 
     auto styles = JsonAdapter::Parse(R"({"constraintSize": {"minWidth": "10%", "maxWidth": "80%"}})");
     ASSERT_NE(styles, nullptr);
@@ -1978,12 +2015,15 @@ TEST_F(ExtendedStyleResolverTddTest, ResolveAndApply_ConstraintSizePercentWithou
     ArkUINodeApiAdapter applier = MakeTestApplier(testNode_);
     auto styles = JsonAdapter::Parse(R"({"constraintSize": {"minWidth": "10%"}})");
     ASSERT_NE(styles, nullptr);
-    // No dispatch context → percent path still parsed but not dispatched
     ExtendedStyleResolver::ResolveAndApply(styles->GetRoot(), applier);
-    // Should not crash, and should not set C++ constraint size
-    for (const auto& rec : mockArkUIPtr_->setAttributeRecords_) {
-        EXPECT_NE(rec.attribute, NODE_CONSTRAINT_SIZE);
-    }
+    ASSERT_FALSE(mockArkUIPtr_->createdNodes_.empty());
+    ArkUI_NodeHandle wrapper = mockArkUIPtr_->createdNodes_.back().nodeHandle;
+    ASSERT_TRUE(mockArkUIPtr_->DispatchMeasureEvent(wrapper, 1000, 500));
+
+    const auto* record = FindLastConstraintRecord(mockArkUIPtr_, testNode_);
+    ASSERT_NE(record, nullptr);
+    ASSERT_EQ(record->values.size(), 4U);
+    EXPECT_FLOAT_EQ(record->values[0].f32, 100.0F);
 }
 
 TEST_F(ExtendedStyleResolverTddTest, ResolveAndApply_ConstraintSizeInvalidDimension)
@@ -2031,17 +2071,29 @@ TEST_F(ExtendedStyleResolverTddTest, ResolveAndApply_BorderWidthFP)
 // =============================================================================
 // BackgroundImageSize - invalid valid value (LOG_WARN path)
 // =============================================================================
-TEST_F(ExtendedStyleResolverTddTest, ResolveAndApply_IgnoresInvalidBackgroundImageSize)
+TEST_F(ExtendedStyleResolverTddTest, ResolveAndApply_RestoresInvalidBackgroundImageSizeToAuto)
 {
     ArkUINodeApiAdapter applier = MakeTestApplier(testNode_);
     mockArkUIPtr_->setAttributeRecords_.clear();
+    mockArkUIPtr_->resetAttributeRecords_.clear();
     auto styles = JsonAdapter::Parse(R"({"backgroundImageSize": 42})");
     ASSERT_NE(styles, nullptr);
     ExtendedStyleResolver::ResolveAndApply(styles->GetRoot(), applier);
-    for (const auto& rec : mockArkUIPtr_->setAttributeRecords_) {
-        EXPECT_NE(rec.attribute, NODE_BACKGROUND_IMAGE_SIZE);
-        EXPECT_NE(rec.attribute, NODE_BACKGROUND_IMAGE_SIZE_WITH_STYLE);
+    bool resetSize = false;
+    bool restoredAuto = false;
+    for (const auto& rec : mockArkUIPtr_->resetAttributeRecords_) {
+        if (rec.attribute == NODE_BACKGROUND_IMAGE_SIZE) {
+            resetSize = true;
+        }
     }
+    for (const auto& rec : mockArkUIPtr_->setAttributeRecords_) {
+        if (rec.attribute == NODE_BACKGROUND_IMAGE_SIZE_WITH_STYLE && !rec.values.empty()) {
+            restoredAuto = true;
+            EXPECT_EQ(rec.values[0].i32, static_cast<int32_t>(A2UIImageSize::AUTO));
+        }
+    }
+    EXPECT_TRUE(resetSize);
+    EXPECT_TRUE(restoredAuto);
 }
 
 // =============================================================================
@@ -2520,13 +2572,96 @@ TEST_F(ExtendedStyleResolverTddTest, InvalidFlexShrink_ResetsToDefault)
     auto styles = JsonAdapter::Parse(R"({"flexShrink": "invalid"})");
     ASSERT_NE(styles, nullptr);
     ExtendedStyleResolver::ResolveAndApply(styles->GetRoot(), applier);
-    bool reset = false;
+    bool found = false;
     for (const auto& rec : mockArkUIPtr_->resetAttributeRecords_) {
         if (rec.attribute == NODE_FLEX_SHRINK) {
-            reset = true;
+            found = true;
         }
     }
-    EXPECT_TRUE(reset);
+    EXPECT_TRUE(found);
+}
+
+TEST_F(ExtendedStyleResolverTddTest, InvalidFlexShrink_UsesColumnParentDefault)
+{
+    ArkUINodeApiAdapter applier = MakeTestApplier(testNode_);
+    auto styles = JsonAdapter::Parse(R"({"flexShrink": -1})");
+    ASSERT_NE(styles, nullptr);
+    ConstraintDispatchContext context;
+    context.parentComponentType = "Column";
+
+    ExtendedStyleResolver::ResolveAndApply(styles->GetRoot(), applier, context);
+
+    bool found = false;
+    for (const auto& rec : mockArkUIPtr_->setAttributeRecords_) {
+        if (rec.attribute == NODE_FLEX_SHRINK && !rec.values.empty()) {
+            found = true;
+            EXPECT_FLOAT_EQ(rec.values[0].f32, 0.0F);
+        }
+    }
+    EXPECT_TRUE(found);
+}
+
+TEST_F(ExtendedStyleResolverTddTest, InvalidFlexShrink_UsesFlexParentDefault)
+{
+    ArkUINodeApiAdapter applier = MakeTestApplier(testNode_);
+    auto styles = JsonAdapter::Parse(R"({"flexShrink": -1})");
+    ASSERT_NE(styles, nullptr);
+    ConstraintDispatchContext context;
+    context.parentComponentType = "Flex";
+
+    ExtendedStyleResolver::ResolveAndApply(styles->GetRoot(), applier, context);
+
+    bool found = false;
+    for (const auto& rec : mockArkUIPtr_->setAttributeRecords_) {
+        if (rec.attribute == NODE_FLEX_SHRINK && !rec.values.empty()) {
+            found = true;
+            EXPECT_FLOAT_EQ(rec.values[0].f32, 1.0F);
+        }
+    }
+    EXPECT_TRUE(found);
+}
+
+TEST_F(ExtendedStyleResolverTddTest, InvalidFlexShrink_UsesRowParentDefault)
+{
+    ArkUINodeApiAdapter applier = MakeTestApplier(testNode_);
+    auto styles = JsonAdapter::Parse(R"({"flexShrink": -1})");
+    ASSERT_NE(styles, nullptr);
+    ConstraintDispatchContext context;
+    context.parentComponentType = "Row";
+
+    ExtendedStyleResolver::ResolveAndApply(styles->GetRoot(), applier, context);
+
+    bool found = false;
+    for (const auto& rec : mockArkUIPtr_->setAttributeRecords_) {
+        if (rec.attribute == NODE_FLEX_SHRINK && !rec.values.empty()) {
+            found = true;
+            EXPECT_FLOAT_EQ(rec.values[0].f32, 0.0F);
+        }
+    }
+    EXPECT_TRUE(found);
+}
+
+TEST_F(ExtendedStyleResolverTddTest, ResetFlexShrink_UsesParentComponentDefault)
+{
+    ArkUINodeApiAdapter applier = MakeTestApplier(testNode_);
+    StyleResetProperty property { "flexShrink", StylePropertyName::FLEX_SHRINK };
+    const std::vector<std::pair<std::string, float>> cases = { { "Column", 0.0F }, { "Row", 0.0F }, { "Flex", 1.0F } };
+
+    for (const auto& [parentType, expected] : cases) {
+        mockArkUIPtr_->setAttributeRecords_.clear();
+        ExtendedStyleResolver::Reset(property, applier, MIN_API_VERSION_LAYOUT_POLICY, parentType);
+
+        ASSERT_FALSE(mockArkUIPtr_->setAttributeRecords_.empty());
+        const auto& record = mockArkUIPtr_->setAttributeRecords_.back();
+        EXPECT_EQ(record.attribute, NODE_FLEX_SHRINK);
+        ASSERT_FALSE(record.values.empty());
+        EXPECT_FLOAT_EQ(record.values[0].f32, expected);
+    }
+
+    mockArkUIPtr_->resetAttributeRecords_.clear();
+    ExtendedStyleResolver::Reset(property, applier);
+    ASSERT_FALSE(mockArkUIPtr_->resetAttributeRecords_.empty());
+    EXPECT_EQ(mockArkUIPtr_->resetAttributeRecords_.back().attribute, NODE_FLEX_SHRINK);
 }
 
 // DFX: 异常值 issue message 含 "reset to default"
@@ -2750,27 +2885,59 @@ TEST_F(ExtendedStyleResolverTddTest, InvalidBackgroundImage_ResetsToDefault)
     EXPECT_TRUE(reset);
 }
 
-// resource 类 (双 reset): backgroundImageSizeWithStyle 异常 → ResetNodeBackgroundImageSize
-//   + ResetNodeBackgroundImageSizeWithStyle
+// backgroundImageSizeWithStyle 异常：清理尺寸对象并显式恢复协议默认 auto。
 TEST_F(ExtendedStyleResolverTddTest, InvalidBackgroundImageSize_ResetsToDefault)
 {
     ArkUINodeApiAdapter applier = MakeTestApplier(testNode_);
     mockArkUIPtr_->resetAttributeRecords_.clear();
+    mockArkUIPtr_->setAttributeRecords_.clear();
     auto styles = JsonAdapter::Parse(R"({"backgroundImageSizeWithStyle": "bogus_value"})");
     ASSERT_NE(styles, nullptr);
     ExtendedStyleResolver::ResolveAndApply(styles->GetRoot(), applier);
     bool resetSize = false;
-    bool resetSizeWithStyle = false;
     for (const auto& rec : mockArkUIPtr_->resetAttributeRecords_) {
         if (rec.attribute == NODE_BACKGROUND_IMAGE_SIZE) {
             resetSize = true;
         }
+    }
+    const MockArkUINativeProvider::SetAttributeRecord* sizeWithStyle = nullptr;
+    for (const auto& rec : mockArkUIPtr_->setAttributeRecords_) {
         if (rec.attribute == NODE_BACKGROUND_IMAGE_SIZE_WITH_STYLE) {
-            resetSizeWithStyle = true;
+            sizeWithStyle = &rec;
         }
     }
     EXPECT_TRUE(resetSize);
-    EXPECT_TRUE(resetSizeWithStyle);
+    ASSERT_NE(sizeWithStyle, nullptr);
+    ASSERT_EQ(sizeWithStyle->values.size(), 1u);
+    EXPECT_EQ(sizeWithStyle->values[0].i32, static_cast<int32_t>(A2UIImageSize::AUTO));
+}
+
+TEST_F(ExtendedStyleResolverTddTest, BackgroundImageSizeFallback_IsAppliedAfterBackgroundImage)
+{
+    ArkUINodeApiAdapter applier = MakeTestApplier(testNode_);
+    mockArkUIPtr_->resetAttributeRecords_.clear();
+    mockArkUIPtr_->setAttributeRecords_.clear();
+    auto styles = JsonAdapter::Parse(R"({"backgroundImageSizeWithStyle":"bogus_value","backgroundImage":"img.png"})");
+    ASSERT_NE(styles, nullptr);
+
+    ExtendedStyleResolver::ResolveAndApply(styles->GetRoot(), applier);
+
+    size_t imageIndex = mockArkUIPtr_->setAttributeRecords_.size();
+    size_t sizeIndex = mockArkUIPtr_->setAttributeRecords_.size();
+    for (size_t index = 0; index < mockArkUIPtr_->setAttributeRecords_.size(); ++index) {
+        const auto& record = mockArkUIPtr_->setAttributeRecords_[index];
+        if (record.attribute == NODE_BACKGROUND_IMAGE) {
+            imageIndex = index;
+        }
+        if (record.attribute == NODE_BACKGROUND_IMAGE_SIZE_WITH_STYLE) {
+            sizeIndex = index;
+            ASSERT_EQ(record.values.size(), 1u);
+            EXPECT_EQ(record.values[0].i32, static_cast<int32_t>(A2UIImageSize::AUTO));
+        }
+    }
+    ASSERT_LT(imageIndex, mockArkUIPtr_->setAttributeRecords_.size());
+    ASSERT_LT(sizeIndex, mockArkUIPtr_->setAttributeRecords_.size());
+    EXPECT_LT(imageIndex, sizeIndex);
 }
 
 // resource 类 (单通道): linearGradient 异常 → ResetNodeLinearGradient
@@ -3471,6 +3638,7 @@ TEST_F(ExtendedStyleResolverTddTest, ResolveAndApply_ConstraintSizeMixedPercentA
     dispatchCtx.componentId = "test-comp";
     dispatchCtx.nodeUniqueId = 42;
     dispatchCtx.componentType = "Column";
+    dispatchCtx.apiVersion = 20;
     auto styles = JsonAdapter::Parse(R"({"constraintSize": {"minWidth": "10%", "maxWidth": "200vp"}})");
     ASSERT_NE(styles, nullptr);
     ExtendedStyleResolver::ResolveAndApply(styles->GetRoot(), applier, dispatchCtx);
@@ -3643,10 +3811,70 @@ TEST_F(ExtendedStyleResolverTddTest, ResolveAndApply_ConstraintSizeAllFourFields
     EXPECT_TRUE(found);
 }
 
+TEST_F(ExtendedStyleResolverTddTest, ResolveAndApply_ConstraintSizeInvalidFieldUsesDefaultWithoutDroppingSiblings)
+{
+    ArkUINodeApiAdapter applier = MakeTestApplier(testNode_);
+    auto styles = JsonAdapter::Parse(
+        R"({"constraintSize": {"minWidth": "", "maxWidth": 260, "minHeight": 40, "maxHeight": 160}})");
+    ASSERT_NE(styles, nullptr);
+
+    ExtendedStyleResolver::ResolveAndApply(styles->GetRoot(), applier);
+
+    bool found = false;
+    for (const auto& rec : mockArkUIPtr_->setAttributeRecords_) {
+        if (rec.attribute != NODE_CONSTRAINT_SIZE) {
+            continue;
+        }
+        found = true;
+        ASSERT_GE(rec.values.size(), 4U);
+        EXPECT_FLOAT_EQ(rec.values[0].f32, 0.0F);
+        EXPECT_FLOAT_EQ(rec.values[1].f32, 260.0F);
+        EXPECT_FLOAT_EQ(rec.values[2].f32, 40.0F);
+        EXPECT_FLOAT_EQ(rec.values[3].f32, 160.0F);
+    }
+    EXPECT_TRUE(found);
+}
+
+TEST_F(ExtendedStyleResolverTddTest, ResolveAndApply_ConstraintSizeNegativeFieldUsesItsDefault)
+{
+    struct TestCase {
+        const char* styles;
+        std::array<float, 4> expected;
+    };
+    const std::array<TestCase, 4> cases = { {
+        { R"({"constraintSize":{"minWidth":-1,"maxWidth":260,"minHeight":40,"maxHeight":160}})",
+            { 0.0F, 260.0F, 40.0F, 160.0F } },
+        { R"({"constraintSize":{"minWidth":10,"maxWidth":-1,"minHeight":40,"maxHeight":160}})",
+            { 10.0F, FLT_MAX, 40.0F, 160.0F } },
+        { R"({"constraintSize":{"minWidth":10,"maxWidth":260,"minHeight":-1,"maxHeight":160}})",
+            { 10.0F, 260.0F, 0.0F, 160.0F } },
+        { R"({"constraintSize":{"minWidth":10,"maxWidth":260,"minHeight":40,"maxHeight":-1}})",
+            { 10.0F, 260.0F, 40.0F, FLT_MAX } },
+    } };
+
+    for (const auto& testCase : cases) {
+        mockArkUIPtr_->setAttributeRecords_.clear();
+        ArkUINodeApiAdapter applier = MakeTestApplier(testNode_);
+        auto styles = JsonAdapter::Parse(testCase.styles);
+        ASSERT_NE(styles, nullptr);
+
+        ExtendedStyleResolver::ResolveAndApply(styles->GetRoot(), applier);
+
+        auto record =
+            std::find_if(mockArkUIPtr_->setAttributeRecords_.begin(), mockArkUIPtr_->setAttributeRecords_.end(),
+                [](const auto& item) { return item.attribute == NODE_CONSTRAINT_SIZE; });
+        ASSERT_NE(record, mockArkUIPtr_->setAttributeRecords_.end());
+        ASSERT_GE(record->values.size(), testCase.expected.size());
+        for (size_t index = 0; index < testCase.expected.size(); ++index) {
+            EXPECT_FLOAT_EQ(record->values[index].f32, testCase.expected[index]);
+        }
+    }
+}
+
 // =============================================================================
 // ConstraintSize — all 4 fields with percent values
 // =============================================================================
-TEST_F(ExtendedStyleResolverTddTest, ResolveAndApply_ConstraintSizeAllFourFieldsPercent_Dispatches)
+TEST_F(ExtendedStyleResolverTddTest, ResolveAndApply_ConstraintSizeAllFourFieldsPercent_UsesNativePath)
 {
     ArkUINodeApiAdapter applier = MakeTestApplier(testNode_);
     ConstraintDispatchContext dispatchCtx;
@@ -3654,13 +3882,22 @@ TEST_F(ExtendedStyleResolverTddTest, ResolveAndApply_ConstraintSizeAllFourFields
     dispatchCtx.componentId = "test-comp";
     dispatchCtx.nodeUniqueId = 42;
     dispatchCtx.componentType = "Column";
+    dispatchCtx.apiVersion = 23;
     auto styles = JsonAdapter::Parse(
         R"({"constraintSize": {"minWidth": "10%", "maxWidth": "90%", "minHeight": "5%", "maxHeight": "95%"}})");
     ASSERT_NE(styles, nullptr);
     ExtendedStyleResolver::ResolveAndApply(styles->GetRoot(), applier, dispatchCtx);
-    for (const auto& rec : mockArkUIPtr_->setAttributeRecords_) {
-        EXPECT_NE(rec.attribute, NODE_CONSTRAINT_SIZE);
-    }
+    ASSERT_FALSE(mockArkUIPtr_->createdNodes_.empty());
+    ArkUI_NodeHandle wrapper = mockArkUIPtr_->createdNodes_.back().nodeHandle;
+    ASSERT_TRUE(mockArkUIPtr_->DispatchMeasureEvent(wrapper, 1000, 500));
+
+    const auto* record = FindLastConstraintRecord(mockArkUIPtr_, testNode_);
+    ASSERT_NE(record, nullptr);
+    ASSERT_EQ(record->values.size(), 4U);
+    EXPECT_FLOAT_EQ(record->values[0].f32, 100.0F);
+    EXPECT_FLOAT_EQ(record->values[1].f32, 900.0F);
+    EXPECT_FLOAT_EQ(record->values[2].f32, 25.0F);
+    EXPECT_FLOAT_EQ(record->values[3].f32, 475.0F);
 }
 
 // =============================================================================
@@ -3893,12 +4130,12 @@ TEST_F(ExtendedStyleResolverTddTest, ResolveAndApply_BackgroundimageSizeLowerCas
 }
 
 // =============================================================================
-// ApplyBackgroundImageSize — backgroundimageSizeWithStyle (lowercase 'i') object valid
+// ApplyBackgroundImageSize — backgroundImageSizeWithStyle (lowercase 'i') object valid
 // =============================================================================
 TEST_F(ExtendedStyleResolverTddTest, ResolveAndApply_BackgroundimageSizeWithStyle_ObjectVP)
 {
     ArkUINodeApiAdapter applier = MakeTestApplier(testNode_);
-    auto styles = JsonAdapter::Parse(R"({"backgroundimageSizeWithStyle": {"width": 50, "height": 60}})");
+    auto styles = JsonAdapter::Parse(R"({"backgroundImageSizeWithStyle": {"width": 50, "height": 60}})");
     ASSERT_NE(styles, nullptr);
     ExtendedStyleResolver::ResolveAndApply(styles->GetRoot(), applier);
     bool found = false;
@@ -3911,12 +4148,12 @@ TEST_F(ExtendedStyleResolverTddTest, ResolveAndApply_BackgroundimageSizeWithStyl
 }
 
 // =============================================================================
-// ApplyBackgroundImage — backgroundimage (lowercase 'i') valid
+// ApplyBackgroundImage — backgroundImage (lowercase 'i') valid
 // =============================================================================
 TEST_F(ExtendedStyleResolverTddTest, ResolveAndApply_BackgroundimageLowerCaseI_Valid)
 {
     ArkUINodeApiAdapter applier = MakeTestApplier(testNode_);
-    auto styles = JsonAdapter::Parse(R"({"backgroundimage": "test.png"})");
+    auto styles = JsonAdapter::Parse(R"({"backgroundImage": "test.png"})");
     ASSERT_NE(styles, nullptr);
     ExtendedStyleResolver::ResolveAndApply(styles->GetRoot(), applier);
     bool found = false;
@@ -4113,6 +4350,7 @@ TEST_F(ExtendedStyleResolverTddTest, ResolveAndApply_ConstraintSizeSinglePercent
     dispatchCtx.componentId = "test-comp";
     dispatchCtx.nodeUniqueId = 42;
     dispatchCtx.componentType = "Column";
+    dispatchCtx.apiVersion = 20;
     auto styles = JsonAdapter::Parse(R"({"constraintSize": {"maxHeight": "80%"}})");
     ASSERT_NE(styles, nullptr);
     ExtendedStyleResolver::ResolveAndApply(styles->GetRoot(), applier, dispatchCtx);
@@ -4130,11 +4368,15 @@ TEST_F(ExtendedStyleResolverTddTest, ResolveAndApply_ConstraintSizePercentNoDisp
     ArkUINodeApiAdapter applier = MakeTestApplier(testNode_);
     auto styles = JsonAdapter::Parse(R"({"constraintSize": {"maxHeight": "80%"}})");
     ASSERT_NE(styles, nullptr);
-    // std::nullopt dispatch context
     ExtendedStyleResolver::ResolveAndApply(styles->GetRoot(), applier, std::nullopt);
-    for (const auto& rec : mockArkUIPtr_->setAttributeRecords_) {
-        EXPECT_NE(rec.attribute, NODE_CONSTRAINT_SIZE);
-    }
+    ASSERT_FALSE(mockArkUIPtr_->createdNodes_.empty());
+    ArkUI_NodeHandle wrapper = mockArkUIPtr_->createdNodes_.back().nodeHandle;
+    ASSERT_TRUE(mockArkUIPtr_->DispatchMeasureEvent(wrapper, 1000, 500));
+
+    const auto* record = FindLastConstraintRecord(mockArkUIPtr_, testNode_);
+    ASSERT_NE(record, nullptr);
+    ASSERT_EQ(record->values.size(), 4U);
+    EXPECT_FLOAT_EQ(record->values[3].f32, 400.0F);
 }
 
 // =============================================================================
@@ -4779,15 +5021,18 @@ TEST_F(ExtendedStyleResolverTddTest, ResolveAndApply_ConstraintSizeNegativeFP_Ig
 TEST_F(ExtendedStyleResolverTddTest, ResolveAndApply_ConstraintSizeInfinitePercent_Ignored)
 {
     ArkUINodeApiAdapter applier = MakeTestApplier(testNode_);
-    // Very large percent value
     auto styles = JsonAdapter::Parse(R"({"constraintSize": {"minWidth": "1e38%"}})");
     ASSERT_NE(styles, nullptr);
     std::vector<DescriptorValidationIssue> issues;
     ExtendedStyleResolver::ResolveAndApply(styles->GetRoot(), applier, std::nullopt, issues);
-    // May be infinite → ignored
-    for (const auto& rec : mockArkUIPtr_->setAttributeRecords_) {
-        EXPECT_NE(rec.attribute, NODE_CONSTRAINT_SIZE);
-    }
+    ASSERT_FALSE(mockArkUIPtr_->createdNodes_.empty());
+    ArkUI_NodeHandle wrapper = mockArkUIPtr_->createdNodes_.back().nodeHandle;
+    ASSERT_TRUE(mockArkUIPtr_->DispatchMeasureEvent(wrapper, std::numeric_limits<int32_t>::max(), 500));
+
+    const auto* record = FindLastConstraintRecord(mockArkUIPtr_, testNode_);
+    ASSERT_NE(record, nullptr);
+    ASSERT_EQ(record->values.size(), 4U);
+    EXPECT_FLOAT_EQ(record->values[0].f32, 0.0F);
 }
 
 // =============================================================================
@@ -5101,13 +5346,13 @@ TEST_F(ExtendedStyleResolverTddTest, ResolveAndApply_BackgroundImageBool_LogsWar
 }
 
 // =============================================================================
-// COVERAGE GAP: ApplyBackgroundImage — backgroundimage (lowercase i) empty string
+// COVERAGE GAP: ApplyBackgroundImage — backgroundImage (lowercase i) empty string
 // Exercises the empty string reset path with lowercase property name
 // =============================================================================
-TEST_F(ExtendedStyleResolverTddTest, ResolveAndApply_BackgroundimageEmpty_Resets)
+TEST_F(ExtendedStyleResolverTddTest, ResolveAndApply_BackgroundImageEmpty_Resets)
 {
     ArkUINodeApiAdapter applier = MakeTestApplier(testNode_);
-    auto styles = JsonAdapter::Parse(R"({"backgroundimage": ""})");
+    auto styles = JsonAdapter::Parse(R"({"backgroundImage": ""})");
     ASSERT_NE(styles, nullptr);
     ExtendedStyleResolver::ResolveAndApply(styles->GetRoot(), applier);
     bool found = false;
@@ -5188,6 +5433,7 @@ TEST_F(ExtendedStyleResolverTddTest, ResolveAndApply_ConstraintSizeOnlyMinWidthP
     dispatchCtx.componentId = "test-comp";
     dispatchCtx.nodeUniqueId = 42;
     dispatchCtx.componentType = "Column";
+    dispatchCtx.apiVersion = 20;
     auto styles = JsonAdapter::Parse(R"({"constraintSize": {"minWidth": "30%"}})");
     ASSERT_NE(styles, nullptr);
     ExtendedStyleResolver::ResolveAndApply(styles->GetRoot(), applier, dispatchCtx);
@@ -5208,6 +5454,7 @@ TEST_F(ExtendedStyleResolverTddTest, ResolveAndApply_ConstraintSizeMixedFPPercen
     dispatchCtx.componentId = "test-comp";
     dispatchCtx.nodeUniqueId = 42;
     dispatchCtx.componentType = "Column";
+    dispatchCtx.apiVersion = 20;
     auto styles = JsonAdapter::Parse(R"({"constraintSize": {"minWidth": "16fp", "maxWidth": "80%"}})");
     ASSERT_NE(styles, nullptr);
     ExtendedStyleResolver::ResolveAndApply(styles->GetRoot(), applier, dispatchCtx);
@@ -5532,6 +5779,219 @@ TEST_F(ExtendedStyleResolverTddTest, ResolveAndApply_BackgroundImageSizeEmptyObj
         }
     }
     EXPECT_TRUE(found);
+}
+
+// =============================================================================
+// aspectRatio common style — AC-1~AC-7, AC-11
+// =============================================================================
+
+namespace {
+float LastAspectRatioValue(const MockArkUINativeProvider* mock, ArkUI_NodeHandle node)
+{
+    for (auto iter = mock->setAttributeRecords_.rbegin(); iter != mock->setAttributeRecords_.rend(); ++iter) {
+        if (iter->nodeHandle == node && iter->attribute == NODE_ASPECT_RATIO) {
+            if (!iter->values.empty()) {
+                return iter->values[0].f32;
+            }
+        }
+    }
+    return -1.0F;
+}
+
+int32_t CountAspectRatioCalls(const MockArkUINativeProvider* mock, ArkUI_NodeHandle node)
+{
+    int32_t count = 0;
+    for (const auto& rec : mock->setAttributeRecords_) {
+        if (rec.nodeHandle == node && rec.attribute == NODE_ASPECT_RATIO) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+bool HasIssue(const std::vector<DescriptorValidationIssue>& issues, const std::string& code, const std::string& path,
+    const std::string& messageFragment)
+{
+    for (const auto& issue : issues) {
+        if (issue.code == code && issue.path == path && issue.message.find(messageFragment) != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
+
+TEST_F(ExtendedStyleResolverTddTest, L0_should_fallback_aspect_ratio_for_overflow_infinity)
+{
+    ArkUINodeApiAdapter applier = MakeTestApplier(testNode_);
+    auto styles = JsonAdapter::Parse(R"({"aspectRatio": 1e309})");
+    ASSERT_NE(styles, nullptr);
+    std::vector<DescriptorValidationIssue> issues;
+    ExtendedStyleResolver::ResolveAndApply(styles->GetRoot(), applier, std::nullopt, issues);
+    EXPECT_FLOAT_EQ(LastAspectRatioValue(mockArkUIPtr_, testNode_), 1.0F);
+    EXPECT_TRUE(HasIssue(issues, SCHEMA_ERROR_CODE_INVALID_VALUE, "styles.aspectRatio", "invalid number value"));
+}
+} // namespace
+
+TEST_F(ExtendedStyleResolverTddTest, L0_should_apply_aspect_ratio_for_common_component)
+{
+    ArkUINodeApiAdapter applier = MakeTestApplier(testNode_);
+    auto styles = JsonAdapter::Parse(R"({"aspectRatio": 1.5})");
+    ASSERT_NE(styles, nullptr);
+    std::vector<DescriptorValidationIssue> issues;
+    ExtendedStyleResolver::ResolveAndApply(styles->GetRoot(), applier, std::nullopt, issues);
+    EXPECT_TRUE(issues.empty());
+    EXPECT_EQ(CountAspectRatioCalls(mockArkUIPtr_, testNode_), 1);
+    EXPECT_FLOAT_EQ(LastAspectRatioValue(mockArkUIPtr_, testNode_), 1.5F);
+}
+
+TEST_F(ExtendedStyleResolverTddTest, L0_should_fallback_aspect_ratio_for_negative_value)
+{
+    ArkUINodeApiAdapter applier = MakeTestApplier(testNode_);
+    auto styles = JsonAdapter::Parse(R"({"aspectRatio": -1})");
+    ASSERT_NE(styles, nullptr);
+    std::vector<DescriptorValidationIssue> issues;
+    ExtendedStyleResolver::ResolveAndApply(styles->GetRoot(), applier, std::nullopt, issues);
+    EXPECT_FLOAT_EQ(LastAspectRatioValue(mockArkUIPtr_, testNode_), 1.0F);
+    EXPECT_TRUE(HasIssue(issues, SCHEMA_ERROR_CODE_INVALID_VALUE, "styles.aspectRatio", "invalid number value"));
+}
+
+TEST_F(ExtendedStyleResolverTddTest, L0_should_fallback_aspect_ratio_for_zero)
+{
+    ArkUINodeApiAdapter applier = MakeTestApplier(testNode_);
+    auto styles = JsonAdapter::Parse(R"({"aspectRatio": 0})");
+    ASSERT_NE(styles, nullptr);
+    std::vector<DescriptorValidationIssue> issues;
+    ExtendedStyleResolver::ResolveAndApply(styles->GetRoot(), applier, std::nullopt, issues);
+    EXPECT_FLOAT_EQ(LastAspectRatioValue(mockArkUIPtr_, testNode_), 1.0F);
+    EXPECT_TRUE(HasIssue(issues, SCHEMA_ERROR_CODE_INVALID_VALUE, "styles.aspectRatio", "invalid number value"));
+}
+
+TEST_F(ExtendedStyleResolverTddTest, L0_should_fallback_aspect_ratio_for_nan)
+{
+    ArkUINodeApiAdapter applier = MakeTestApplier(testNode_);
+    auto nanAdapter = JsonAdapter::CreateObject();
+    ASSERT_NE(nanAdapter, nullptr);
+    JsonValue nanRoot = nanAdapter->GetRoot();
+    ASSERT_TRUE(nanRoot.PutNumber("aspectRatio", std::numeric_limits<double>::quiet_NaN()));
+    std::vector<DescriptorValidationIssue> issues;
+    ExtendedStyleResolver::ResolveAndApply(nanRoot, applier, std::nullopt, issues);
+    EXPECT_FLOAT_EQ(LastAspectRatioValue(mockArkUIPtr_, testNode_), 1.0F);
+    EXPECT_TRUE(HasIssue(issues, SCHEMA_ERROR_CODE_INVALID_VALUE, "styles.aspectRatio", "invalid number value"));
+}
+
+TEST_F(ExtendedStyleResolverTddTest, L0_should_fallback_aspect_ratio_for_non_number_type)
+{
+    ArkUINodeApiAdapter applier = MakeTestApplier(testNode_);
+    auto styles = JsonAdapter::Parse(R"({"aspectRatio": "2.5"})");
+    ASSERT_NE(styles, nullptr);
+    std::vector<DescriptorValidationIssue> issues;
+    ExtendedStyleResolver::ResolveAndApply(styles->GetRoot(), applier, std::nullopt, issues);
+    EXPECT_FLOAT_EQ(LastAspectRatioValue(mockArkUIPtr_, testNode_), 1.0F);
+    EXPECT_TRUE(HasIssue(issues, SCHEMA_ERROR_CODE_TYPE_MISMATCH, "styles.aspectRatio", "got type"));
+}
+
+TEST_F(ExtendedStyleResolverTddTest, L0_should_fallback_aspect_ratio_for_null)
+{
+    ArkUINodeApiAdapter applier = MakeTestApplier(testNode_);
+    auto styles = JsonAdapter::Parse(R"({"aspectRatio": null})");
+    ASSERT_NE(styles, nullptr);
+    std::vector<DescriptorValidationIssue> issues;
+    ExtendedStyleResolver::ResolveAndApply(styles->GetRoot(), applier, std::nullopt, issues);
+    EXPECT_FLOAT_EQ(LastAspectRatioValue(mockArkUIPtr_, testNode_), 1.0F);
+    EXPECT_TRUE(HasIssue(issues, SCHEMA_ERROR_CODE_TYPE_MISMATCH, "styles.aspectRatio", "got type 'null'"));
+}
+
+TEST_F(ExtendedStyleResolverTddTest, L0_should_not_apply_aspect_ratio_when_not_set)
+{
+    ArkUINodeApiAdapter applier = MakeTestApplier(testNode_);
+    auto styles = JsonAdapter::Parse(R"({"width": "100vp"})");
+    ASSERT_NE(styles, nullptr);
+    std::vector<DescriptorValidationIssue> issues;
+    ExtendedStyleResolver::ResolveAndApply(styles->GetRoot(), applier, std::nullopt, issues);
+    EXPECT_EQ(CountAspectRatioCalls(mockArkUIPtr_, testNode_), 0);
+}
+
+TEST_F(ExtendedStyleResolverTddTest, L0_should_reset_aspect_ratio_when_previously_applied_then_removed)
+{
+    ArkUINodeApiAdapter applier = MakeTestApplier(testNode_);
+    auto first = JsonAdapter::Parse(R"({"aspectRatio": 2.0})");
+    ASSERT_NE(first, nullptr);
+    std::vector<DescriptorValidationIssue> issues;
+    ExtendedStyleResolver::ResolveAndApply(first->GetRoot(), applier, std::nullopt, issues);
+    EXPECT_FLOAT_EQ(LastAspectRatioValue(mockArkUIPtr_, testNode_), 2.0F);
+
+    StyleResetProperty resetProp { .rawName = "aspectRatio", .name = StylePropertyName::ASPECT_RATIO };
+    ExtendedStyleResolver::Reset(resetProp, applier);
+    EXPECT_FLOAT_EQ(LastAspectRatioValue(mockArkUIPtr_, testNode_), 1.0F);
+}
+
+TEST_F(ExtendedStyleResolverTddTest, L0_should_skip_aspect_ratio_when_node_is_null)
+{
+    ArkUINodeApiAdapter applier = MakeTestApplier(nullptr);
+    auto styles = JsonAdapter::Parse(R"({"aspectRatio": 2.0})");
+    ASSERT_NE(styles, nullptr);
+    std::vector<DescriptorValidationIssue> issues;
+    ExtendedStyleResolver::ResolveAndApply(styles->GetRoot(), applier, std::nullopt, issues);
+    EXPECT_EQ(CountAspectRatioCalls(mockArkUIPtr_, testNode_), 0);
+}
+
+TEST_F(ExtendedStyleResolverTddTest, L0_should_fallback_aspect_ratio_for_infinity)
+{
+    ArkUINodeApiAdapter applier = MakeTestApplier(testNode_);
+    auto infAdapter = JsonAdapter::CreateObject();
+    ASSERT_NE(infAdapter, nullptr);
+    JsonValue infRoot = infAdapter->GetRoot();
+    ASSERT_TRUE(infRoot.PutNumber("aspectRatio", std::numeric_limits<double>::infinity()));
+    std::vector<DescriptorValidationIssue> issues;
+    ExtendedStyleResolver::ResolveAndApply(infRoot, applier, std::nullopt, issues);
+    EXPECT_FLOAT_EQ(LastAspectRatioValue(mockArkUIPtr_, testNode_), 1.0F);
+    EXPECT_TRUE(HasIssue(issues, SCHEMA_ERROR_CODE_INVALID_VALUE, "styles.aspectRatio", "invalid number value"));
+}
+
+TEST_F(ExtendedStyleResolverTddTest, L0_should_fallback_aspect_ratio_for_negative_infinity)
+{
+    ArkUINodeApiAdapter applier = MakeTestApplier(testNode_);
+    auto negInfAdapter = JsonAdapter::CreateObject();
+    ASSERT_NE(negInfAdapter, nullptr);
+    JsonValue negInfRoot = negInfAdapter->GetRoot();
+    ASSERT_TRUE(negInfRoot.PutNumber("aspectRatio", -std::numeric_limits<double>::infinity()));
+    std::vector<DescriptorValidationIssue> issues;
+    ExtendedStyleResolver::ResolveAndApply(negInfRoot, applier, std::nullopt, issues);
+    EXPECT_FLOAT_EQ(LastAspectRatioValue(mockArkUIPtr_, testNode_), 1.0F);
+    EXPECT_TRUE(HasIssue(issues, SCHEMA_ERROR_CODE_INVALID_VALUE, "styles.aspectRatio", "invalid number value"));
+}
+
+TEST_F(ExtendedStyleResolverTddTest, L0_should_fallback_aspect_ratio_for_boolean_type)
+{
+    ArkUINodeApiAdapter applier = MakeTestApplier(testNode_);
+    auto styles = JsonAdapter::Parse(R"({"aspectRatio": true})");
+    ASSERT_NE(styles, nullptr);
+    std::vector<DescriptorValidationIssue> issues;
+    ExtendedStyleResolver::ResolveAndApply(styles->GetRoot(), applier, std::nullopt, issues);
+    EXPECT_FLOAT_EQ(LastAspectRatioValue(mockArkUIPtr_, testNode_), 1.0F);
+    EXPECT_TRUE(HasIssue(issues, SCHEMA_ERROR_CODE_TYPE_MISMATCH, "styles.aspectRatio", "got type"));
+}
+
+TEST_F(ExtendedStyleResolverTddTest, L0_should_fallback_aspect_ratio_for_object_type)
+{
+    ArkUINodeApiAdapter applier = MakeTestApplier(testNode_);
+    auto styles = JsonAdapter::Parse(R"({"aspectRatio": {"nested": 1}})");
+    ASSERT_NE(styles, nullptr);
+    std::vector<DescriptorValidationIssue> issues;
+    ExtendedStyleResolver::ResolveAndApply(styles->GetRoot(), applier, std::nullopt, issues);
+    EXPECT_FLOAT_EQ(LastAspectRatioValue(mockArkUIPtr_, testNode_), 1.0F);
+    EXPECT_TRUE(HasIssue(issues, SCHEMA_ERROR_CODE_TYPE_MISMATCH, "styles.aspectRatio", "got type"));
+}
+
+TEST_F(ExtendedStyleResolverTddTest, L0_should_fallback_aspect_ratio_for_array_type)
+{
+    ArkUINodeApiAdapter applier = MakeTestApplier(testNode_);
+    auto styles = JsonAdapter::Parse(R"({"aspectRatio": [1, 2]})");
+    ASSERT_NE(styles, nullptr);
+    std::vector<DescriptorValidationIssue> issues;
+    ExtendedStyleResolver::ResolveAndApply(styles->GetRoot(), applier, std::nullopt, issues);
+    EXPECT_FLOAT_EQ(LastAspectRatioValue(mockArkUIPtr_, testNode_), 1.0F);
+    EXPECT_TRUE(HasIssue(issues, SCHEMA_ERROR_CODE_TYPE_MISMATCH, "styles.aspectRatio", "got type"));
 }
 
 } // namespace

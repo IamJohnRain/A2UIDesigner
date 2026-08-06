@@ -73,6 +73,11 @@ private:
     bool EvaluateCondition(const std::string& expression, bool& evalSucceeded, bool isInitialEvaluation);
     void SyncConditionExpressionBinding(const std::string& expression);
     void InjectGlobalVariables(EvaluationContext& context);
+#ifdef ENABLE_EXPRESSION_ENGINE
+    void SetupConditionEvaluationContext(EvaluationContext& context);
+    bool EvaluateConditionWithExpressionEngine(
+        const std::string& expression, bool& evalSucceeded, bool isInitialEvaluation);
+#endif
     SurfaceSlot* GetRuntimeSurfaceSlot() const;
     Component* FindAncestorWithNativeView();
     void ReportMissingBranchChildren(const std::map<std::string, std::shared_ptr<Component>>& allComponents);

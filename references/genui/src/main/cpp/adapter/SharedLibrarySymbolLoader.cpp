@@ -80,7 +80,7 @@ SharedLibraryEntry* SharedLibrarySymbolLoaderImpl::FindLibraryEntry(SharedLibrar
     return it == libraries_.end() ? nullptr : &(*it);
 }
 
-void* SharedLibrarySymbolLoaderImpl::OpenLibrary(SharedLibraryEntry& libraryEntry)
+void* SharedLibrarySymbolLoaderImpl::OpenLibrary(SharedLibraryEntry& libraryEntry) const
 {
     if (!IsSupported(libraryEntry.spec.minRomApiVersion)) {
         return nullptr;

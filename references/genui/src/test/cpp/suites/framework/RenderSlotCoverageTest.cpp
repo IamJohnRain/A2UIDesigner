@@ -17,6 +17,7 @@
 
 #include "RenderSlot.h"
 #include "SurfaceManager.h"
+#include "SurfaceSlot.h"
 #include "TestFixture.h"
 
 using namespace NativeModule;
@@ -42,4 +43,24 @@ TEST_F(RenderSlotCoverageTest, should_return_null_when_surface_manager_is_reset)
     slot.Dispose();
     EXPECT_EQ(slot.GetSurfaceManager(), nullptr);
     EXPECT_EQ(slot.GetContentHandle(), nullptr);
+}
+
+TEST_F(RenderSlotCoverageTest, should_share_api_version_through_system_properties_singleton)
+{
+    SystemProperties::GetInstance().SetApiVersion(0);
+    SystemProperties::GetInstance().SetApiVersion(27);
+
+    RenderSlot slot(820102);
+    SurfaceManager manager;
+    SurfaceSlot surface;
+
+    EXPECT_EQ(slot.GetApiVersion(), 27);
+    EXPECT_EQ(manager.GetApiVersion(), 27);
+    EXPECT_EQ(surface.GetApiVersion(), 27);
+
+    SystemProperties::GetInstance().SetApiVersion(0);
+    slot.SetApiVersion(31);
+    EXPECT_EQ(SystemProperties::GetInstance().GetApiVersion(), 27);
+    EXPECT_EQ(manager.GetApiVersion(), 27);
+    EXPECT_EQ(surface.GetApiVersion(), 27);
 }

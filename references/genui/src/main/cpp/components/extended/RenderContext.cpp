@@ -22,25 +22,25 @@
 
 namespace NativeModule {
 
-RenderContext RenderContext::Create(int32_t renderId, const std::string& surfaceId,
-    const std::shared_ptr<BindingEngine>& bindingEngine, const std::shared_ptr<Catalog>& catalog, float fontSizeScale,
-    int32_t apiVersion, ThemeMode colorMode)
+RenderContext RenderContext::Create(int32_t renderIdVal, const std::string& surfaceIdVal,
+    const std::shared_ptr<BindingEngine>& bindingEngineVal, const std::shared_ptr<Catalog>& catalogVal,
+    float fontSizeScaleVal, int32_t apiVersionVal, ThemeMode colorModeVal)
 {
     LOG_A2UI(LOG_DEBUG,
         "RenderContext::Create - renderId=%{public}d, surfaceId=%{public}s, hasBindingEngine=%{public}s, "
         "hasCatalog=%{public}s",
-        renderId, surfaceId.c_str(), bindingEngine != nullptr ? "true" : "false",
-        catalog != nullptr ? "true" : "false");
+        renderIdVal, surfaceIdVal.c_str(), bindingEngineVal != nullptr ? "true" : "false",
+        catalogVal != nullptr ? "true" : "false");
     RenderContext context;
-    context.renderId = renderId;
-    context.surfaceId = surfaceId;
-    context.bindingEngine = bindingEngine;
-    context.catalog = catalog;
-    context.fontSizeScale = fontSizeScale > 0.0F ? fontSizeScale : 1.0F;
-    context.apiVersion = apiVersion;
-    context.colorMode = colorMode;
-    if (bindingEngine != nullptr && !surfaceId.empty()) {
-        context.dataModel = bindingEngine->GetOrCreateDataModel(surfaceId);
+    context.renderId = renderIdVal;
+    context.surfaceId = surfaceIdVal;
+    context.bindingEngine = bindingEngineVal;
+    context.catalog = catalogVal;
+    context.fontSizeScale = fontSizeScaleVal > 0.0F ? fontSizeScaleVal : 1.0F;
+    context.apiVersion = apiVersionVal;
+    context.colorMode = colorModeVal;
+    if (bindingEngineVal != nullptr && !surfaceIdVal.empty()) {
+        context.dataModel = bindingEngineVal->GetOrCreateDataModel(surfaceIdVal);
     }
     LOG_A2UI(LOG_DEBUG, "RenderContext::Create - completed, valid=%{public}s, hasDataModel=%{public}s",
         context.IsValid() ? "true" : "false", context.dataModel != nullptr ? "true" : "false");

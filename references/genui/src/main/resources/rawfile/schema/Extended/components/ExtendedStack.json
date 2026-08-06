@@ -39,21 +39,7 @@
                   "default": "center"
                 },
                 {
-                  "$ref": "../common_types.json#/$defs/DataBinding"
-                },
-                {
-                  "allOf": [
-                    {
-                      "$ref": "../common_types.json#/$defs/FunctionCall"
-                    },
-                    {
-                      "properties": {
-                        "returnType": {
-                          "const": "string"
-                        }
-                      }
-                    }
-                  ]
+                  "$ref": "../common_types.json#/$defs/ExtendedDynamicValueRef"
                 }
               ]
             }

@@ -21,6 +21,15 @@
       ],
       "additionalProperties": false
     },
+    "Expression": {
+      "type": "string",
+      "pattern": "^\\{\\{[\\s\\S]*\\}\\}$",
+      "description": "Expression string wrapped in {{...}}."
+    },
+    "PathBinding": {
+      "$ref": "#/$defs/DataBinding",
+      "description": "Reads a value from the current Surface DataModel through a JSON Pointer path."
+    },
     "FunctionCall": {
       "type": "object",
       "description": "Invokes a named function on the client.",
@@ -129,9 +138,56 @@
         }
       ]
     },
-    "DynamicValue": {
-      "description": "A value that can be a literal, a path, or a function call returning any type.",
+    "ExtendedDynamicValueRef": {
+      "description": "A runtime-resolved expression, path binding, or function call used by extended component schemas.",
       "oneOf": [
+        {
+          "$ref": "#/$defs/Expression"
+        },
+        {
+          "$ref": "#/$defs/PathBinding"
+        },
+        {
+          "$ref": "#/$defs/FunctionCall"
+        }
+      ]
+    },
+    "ExtendedDynamicString": {
+      "description": "A string literal or an extended dynamic value reference.",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "$ref": "#/$defs/ExtendedDynamicValueRef"
+        }
+      ]
+    },
+    "ExtendedDynamicNumber": {
+      "description": "A number literal or an extended dynamic value reference.",
+      "oneOf": [
+        {
+          "type": "number"
+        },
+        {
+          "$ref": "#/$defs/ExtendedDynamicValueRef"
+        }
+      ]
+    },
+    "ExtendedDynamicBoolean": {
+      "description": "A boolean literal or an extended dynamic value reference.",
+      "oneOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "$ref": "#/$defs/ExtendedDynamicValueRef"
+        }
+      ]
+    },
+    "DynamicValue": {
+      "description": "A value that can be a literal, expression, path binding, or function call returning any type.",
+      "anyOf": [
         {
           "type": "string"
         },
@@ -145,7 +201,10 @@
           "type": "array"
         },
         {
-          "$ref": "#/$defs/DataBinding"
+          "$ref": "#/$defs/Expression"
+        },
+        {
+          "$ref": "#/$defs/PathBinding"
         },
         {
           "$ref": "#/$defs/FunctionCall"
@@ -153,13 +212,16 @@
       ]
     },
     "DynamicString": {
-      "description": "Represents a string",
-      "oneOf": [
+      "description": "Represents a string literal, expression, path binding, or function call returning a string.",
+      "anyOf": [
         {
           "type": "string"
         },
         {
-          "$ref": "#/$defs/DataBinding"
+          "$ref": "#/$defs/Expression"
+        },
+        {
+          "$ref": "#/$defs/PathBinding"
         },
         {
           "allOf": [
@@ -178,13 +240,16 @@
       ]
     },
     "DynamicNumber": {
-      "description": "Represents a value that can be either a literal number, a path to a number in the data model, or a function call returning a number.",
+      "description": "Represents a number literal, expression, path binding, or function call returning a number.",
       "oneOf": [
         {
           "type": "number"
         },
         {
-          "$ref": "#/$defs/DataBinding"
+          "$ref": "#/$defs/Expression"
+        },
+        {
+          "$ref": "#/$defs/PathBinding"
         },
         {
           "allOf": [
@@ -203,13 +268,16 @@
       ]
     },
     "DynamicBoolean": {
-      "description": "A boolean value that can be a literal, a path, or a function call returning a boolean.",
+      "description": "A boolean literal, expression, path binding, or function call returning a boolean.",
       "oneOf": [
         {
           "type": "boolean"
         },
         {
-          "$ref": "#/$defs/DataBinding"
+          "$ref": "#/$defs/Expression"
+        },
+        {
+          "$ref": "#/$defs/PathBinding"
         },
         {
           "allOf": [
@@ -228,7 +296,7 @@
       ]
     },
     "DynamicStringList": {
-      "description": "Represents a value that can be either a literal array of strings, a path to a string array in the data model, or a function call returning a string array.",
+      "description": "Represents a string array literal, expression, path binding, or function call returning an array.",
       "oneOf": [
         {
           "type": "array",
@@ -237,7 +305,10 @@
           }
         },
         {
-          "$ref": "#/$defs/DataBinding"
+          "$ref": "#/$defs/Expression"
+        },
+        {
+          "$ref": "#/$defs/PathBinding"
         },
         {
           "allOf": [
@@ -397,13 +468,7 @@
           "$ref": "#/$defs/NumericLike"
         },
         {
-          "$ref": "#/$defs/DataBinding"
-        },
-        {
-          "$ref": "#/$defs/FunctionCallString"
-        },
-        {
-          "$ref": "#/$defs/FunctionCallNumber"
+          "$ref": "#/$defs/ExtendedDynamicValueRef"
         }
       ]
     },
@@ -413,13 +478,7 @@
           "$ref": "#/$defs/BooleanLike"
         },
         {
-          "$ref": "#/$defs/DataBinding"
-        },
-        {
-          "$ref": "#/$defs/FunctionCallString"
-        },
-        {
-          "$ref": "#/$defs/FunctionCallBoolean"
+          "$ref": "#/$defs/ExtendedDynamicValueRef"
         }
       ]
     },
@@ -429,13 +488,7 @@
           "$ref": "#/$defs/ColorLike"
         },
         {
-          "$ref": "#/$defs/DataBinding"
-        },
-        {
-          "$ref": "#/$defs/FunctionCallString"
-        },
-        {
-          "$ref": "#/$defs/FunctionCallNumber"
+          "$ref": "#/$defs/ExtendedDynamicValueRef"
         }
       ]
     },
@@ -445,13 +498,7 @@
           "$ref": "#/$defs/LengthValue"
         },
         {
-          "$ref": "#/$defs/DataBinding"
-        },
-        {
-          "$ref": "#/$defs/FunctionCallString"
-        },
-        {
-          "$ref": "#/$defs/FunctionCallNumber"
+          "$ref": "#/$defs/ExtendedDynamicValueRef"
         }
       ]
     },
@@ -461,13 +508,7 @@
           "$ref": "#/$defs/LengthOrPolicy"
         },
         {
-          "$ref": "#/$defs/DataBinding"
-        },
-        {
-          "$ref": "#/$defs/FunctionCallString"
-        },
-        {
-          "$ref": "#/$defs/FunctionCallNumber"
+          "$ref": "#/$defs/ExtendedDynamicValueRef"
         }
       ]
     },
@@ -579,16 +620,7 @@
           "$ref": "#/$defs/EdgeLengthStyle"
         },
         {
-          "$ref": "#/$defs/DataBinding"
-        },
-        {
-          "$ref": "#/$defs/FunctionCallString"
-        },
-        {
-          "$ref": "#/$defs/FunctionCallNumber"
-        },
-        {
-          "$ref": "#/$defs/FunctionCallObject"
+          "$ref": "#/$defs/ExtendedDynamicValueRef"
         }
       ]
     },
@@ -598,16 +630,7 @@
           "$ref": "#/$defs/BorderRadiusStyle"
         },
         {
-          "$ref": "#/$defs/DataBinding"
-        },
-        {
-          "$ref": "#/$defs/FunctionCallString"
-        },
-        {
-          "$ref": "#/$defs/FunctionCallNumber"
-        },
-        {
-          "$ref": "#/$defs/FunctionCallObject"
+          "$ref": "#/$defs/ExtendedDynamicValueRef"
         }
       ]
     },
@@ -617,10 +640,7 @@
           "$ref": "#/$defs/ConstraintSizeObject"
         },
         {
-          "$ref": "#/$defs/DataBinding"
-        },
-        {
-          "$ref": "#/$defs/FunctionCallObject"
+          "$ref": "#/$defs/ExtendedDynamicValueRef"
         }
       ]
     },
@@ -630,16 +650,7 @@
           "$ref": "#/$defs/EdgeColorStyle"
         },
         {
-          "$ref": "#/$defs/DataBinding"
-        },
-        {
-          "$ref": "#/$defs/FunctionCallString"
-        },
-        {
-          "$ref": "#/$defs/FunctionCallNumber"
-        },
-        {
-          "$ref": "#/$defs/FunctionCallObject"
+          "$ref": "#/$defs/ExtendedDynamicValueRef"
         }
       ]
     },
@@ -677,13 +688,7 @@
           "$ref": "#/$defs/BackgroundImageSizeObject"
         },
         {
-          "$ref": "#/$defs/DataBinding"
-        },
-        {
-          "$ref": "#/$defs/FunctionCallString"
-        },
-        {
-          "$ref": "#/$defs/FunctionCallObject"
+          "$ref": "#/$defs/ExtendedDynamicValueRef"
         }
       ]
     },
@@ -701,10 +706,7 @@
           "$ref": "#/$defs/VisibilityLiteral"
         },
         {
-          "$ref": "#/$defs/DataBinding"
-        },
-        {
-          "$ref": "#/$defs/FunctionCallString"
+          "$ref": "#/$defs/ExtendedDynamicValueRef"
         }
       ]
     },
@@ -757,13 +759,7 @@
           "$ref": "#/$defs/ShadowStyleLiteral"
         },
         {
-          "$ref": "#/$defs/DataBinding"
-        },
-        {
-          "$ref": "#/$defs/FunctionCallString"
-        },
-        {
-          "$ref": "#/$defs/FunctionCallNumber"
+          "$ref": "#/$defs/ExtendedDynamicValueRef"
         }
       ]
     },
@@ -773,13 +769,7 @@
           "$ref": "#/$defs/ShadowTypeLiteral"
         },
         {
-          "$ref": "#/$defs/DataBinding"
-        },
-        {
-          "$ref": "#/$defs/FunctionCallString"
-        },
-        {
-          "$ref": "#/$defs/FunctionCallNumber"
+          "$ref": "#/$defs/ExtendedDynamicValueRef"
         }
       ]
     },
@@ -819,16 +809,7 @@
           "$ref": "#/$defs/ShadowOptionsObject"
         },
         {
-          "$ref": "#/$defs/DataBinding"
-        },
-        {
-          "$ref": "#/$defs/FunctionCallString"
-        },
-        {
-          "$ref": "#/$defs/FunctionCallNumber"
-        },
-        {
-          "$ref": "#/$defs/FunctionCallObject"
+          "$ref": "#/$defs/ExtendedDynamicValueRef"
         }
       ]
     },
@@ -870,18 +851,12 @@
           "$ref": "#/$defs/GradientDirectionLiteral"
         },
         {
-          "$ref": "#/$defs/DataBinding"
-        },
-        {
-          "$ref": "#/$defs/FunctionCallString"
-        },
-        {
-          "$ref": "#/$defs/FunctionCallNumber"
+          "$ref": "#/$defs/ExtendedDynamicValueRef"
         }
       ]
     },
     "DynamicGradientAngle": {
-      "oneOf": [
+      "anyOf": [
         {
           "type": "number"
         },
@@ -890,13 +865,7 @@
           "minLength": 1
         },
         {
-          "$ref": "#/$defs/DataBinding"
-        },
-        {
-          "$ref": "#/$defs/FunctionCallString"
-        },
-        {
-          "$ref": "#/$defs/FunctionCallNumber"
+          "$ref": "#/$defs/ExtendedDynamicValueRef"
         }
       ]
     },
@@ -911,13 +880,7 @@
             "$ref": "#/$defs/NumericLike"
           },
           {
-            "$ref": "#/$defs/DataBinding"
-          },
-          {
-            "$ref": "#/$defs/FunctionCallString"
-          },
-          {
-            "$ref": "#/$defs/FunctionCallNumber"
+            "$ref": "#/$defs/ExtendedDynamicValueRef"
           }
         ]
       },
@@ -962,10 +925,7 @@
           "minItems": 1
         },
         {
-          "$ref": "#/$defs/DataBinding"
-        },
-        {
-          "$ref": "#/$defs/FunctionCallArray"
+          "$ref": "#/$defs/ExtendedDynamicValueRef"
         }
       ]
     },
@@ -978,10 +938,7 @@
           }
         },
         {
-          "$ref": "#/$defs/DataBinding"
-        },
-        {
-          "$ref": "#/$defs/FunctionCallArray"
+          "$ref": "#/$defs/ExtendedDynamicValueRef"
         }
       ]
     },
@@ -1012,10 +969,7 @@
           "additionalProperties": false
         },
         {
-          "$ref": "#/$defs/DataBinding"
-        },
-        {
-          "$ref": "#/$defs/FunctionCallObject"
+          "$ref": "#/$defs/ExtendedDynamicValueRef"
         }
       ]
     },
@@ -1078,6 +1032,9 @@
         },
         "linearGradient": {
           "$ref": "#/$defs/DynamicLinearGradient"
+        },
+        "aspectRatio": {
+          "$ref": "#/$defs/DynamicNumericLike"
         }
       },
       "additionalProperties": true

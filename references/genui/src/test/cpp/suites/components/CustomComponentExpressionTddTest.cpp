@@ -17,7 +17,11 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <vector>
 
+#include "catalog/Catalog.h"
+#include "catalog/CatalogConstants.h"
+#include "catalog/CatalogItem.h"
 #include "functions/RuntimeErrorDispatchBridge.h"
 
 #include "TestFixture.h"
@@ -33,6 +37,11 @@
 #include "components/Component.h"
 #include "components/custom/CustomComponentExpressionBinding.h"
 #include "utils/JsonAdapter.h"
+
+#include "RenderManager.h"
+#include "RenderSlot.h"
+#include "SurfaceManager.h"
+#include "SurfaceSlot.h"
 
 using namespace NativeModule;
 
@@ -60,6 +69,30 @@ JsonValue MakeBool(bool value)
     std::unique_ptr<JsonAdapter> adapter = JsonAdapter::CreateBool(value);
     return adapter != nullptr ? adapter->GetRoot() : JsonValue();
 }
+
+std::shared_ptr<Catalog> CreateExtendedCatalog(const std::vector<std::string>& componentTypes)
+{
+    auto catalog = std::make_shared<Catalog>(A2UI_EXTENDED_CATALOG_ID);
+    for (const std::string& componentType : componentTypes) {
+        auto item = std::make_shared<CatalogItem>(componentType, CatalogItemType::COMPONENT);
+        item->SetCategory(CatalogCategory::OHOS_EXTENDS);
+        catalog->AddComponent(item);
+    }
+    return catalog;
+}
+
+class RenderSlotCleanupGuard {
+public:
+    explicit RenderSlotCleanupGuard(int32_t renderId) : renderId_(renderId) {}
+
+    ~RenderSlotCleanupGuard()
+    {
+        RenderManager::GetInstance().RemoveRenderSlot(renderId_);
+    }
+
+private:
+    int32_t renderId_ = -1;
+};
 
 std::set<std::string> CollectBindingPaths(const CustomComponent& component, const std::string& propertyName)
 {
@@ -151,6 +184,26 @@ TEST_F(CustomComponentExpressionTddTest, EvaluateCustomExpression_returns_resolv
 }
 
 /**
+ * @tc.name: should_resolve_item_member_expression_when_component_has_template_local_variables
+ * @tc.desc: 验证模板实例的局部 item 变量可用于自定义组件表达式求值
+ * @tc.type: FUNC
+ */
+TEST_F(
+    CustomComponentExpressionTddTest, should_resolve_item_member_expression_when_component_has_template_local_variables)
+{
+    auto probe = MakeDispatchProbe("TabContent");
+    std::unique_ptr<JsonAdapter> item = ParseJson(R"({"title":"推荐"})");
+    ASSERT_NE(item, nullptr);
+    probe->SetLocalVariables({ { "item", item->GetRoot() } });
+
+    JsonValue result = probe->EvaluateCustomExpression("{{ $item.title }}");
+
+    ASSERT_TRUE(result.IsString());
+    EXPECT_EQ(result.GetStringValue(""), "推荐");
+    EXPECT_EQ(DispatchCount(), 0U);
+}
+
+/**
  * @tc.name: EvaluateCustomExpression_dispatches_for_soft_error
  * @tc.desc: A soft error (PARSE_UNEXPECTED_TOKEN from an empty "{{}}") with an invalid value
  *           triggers the runtime-error dispatch (IsSoftExpressionContextError == true branch).
@@ -206,19 +259,22 @@ TEST_F(CustomComponentExpressionTddTest, EvaluateCustomExpression_skips_dispatch
  *           scope set against accidental edits.
  * @tc.type: FUNC
  */
-TEST_F(CustomComponentExpressionTddTest, IsExtendedEtsExpressionScope_is_true_only_for_scoped_extended_types)
+TEST_F(CustomComponentExpressionTddTest, IsExtendedEtsExpressionScope_excludes_arkts_resolver_owned_types)
 {
     CustomComponentExpressionProbe tabsProbe("Tabs");
-    EXPECT_TRUE(tabsProbe.IsExtendedEtsExpressionScope());
+    EXPECT_FALSE(tabsProbe.IsExtendedEtsExpressionScope());
 
     CustomComponentExpressionProbe webProbe("Web");
     EXPECT_TRUE(webProbe.IsExtendedEtsExpressionScope());
 
     CustomComponentExpressionProbe tabContentProbe("TabContent");
-    EXPECT_TRUE(tabContentProbe.IsExtendedEtsExpressionScope());
+    EXPECT_FALSE(tabContentProbe.IsExtendedEtsExpressionScope());
 
     CustomComponentExpressionProbe selectProbe("Select");
     EXPECT_TRUE(selectProbe.IsExtendedEtsExpressionScope());
+
+    CustomComponentExpressionProbe rowProbe("Row");
+    EXPECT_FALSE(rowProbe.IsExtendedEtsExpressionScope());
 
     CustomComponentExpressionProbe baseProbe("Icon");
     EXPECT_FALSE(baseProbe.IsExtendedEtsExpressionScope());
@@ -435,13 +491,172 @@ TEST_F(CustomComponentExpressionTddTest, ResolveExpressionsInValue_resolves_nest
  */
 TEST_F(CustomComponentExpressionTddTest, BuildCustomProps_resolves_expressions_for_scoped_extended_type)
 {
-    CustomComponentExpressionProbe probe("Tabs");
+    CustomComponentExpressionProbe probe("Select");
     probe.customPropertyNames_.insert("title");
     probe.properties_["title"] = MakeString("{{ 1 + 4 }}");
 
     JsonValue customProps = probe.BuildCustomProps();
     ASSERT_TRUE(customProps.IsObject());
     EXPECT_DOUBLE_EQ(customProps.GetItem("title").GetNumberValue(0.0), 5.0);
+}
+
+/**
+ * @tc.name: should_resolve_item_title_in_custom_props_when_tab_content_is_a_template_instance
+ * @tc.desc: 验证模板 TabContent 构建 customProps 时可解析 item.title
+ * @tc.type: FUNC
+ */
+TEST_F(
+    CustomComponentExpressionTddTest, should_resolve_item_title_in_custom_props_when_tab_content_is_a_template_instance)
+{
+    CustomComponentExpressionProbe probe("TabContent");
+    std::unique_ptr<JsonAdapter> item = ParseJson(R"({"title":"科技"})");
+    ASSERT_NE(item, nullptr);
+    probe.SetLocalVariables({ { "item", item->GetRoot() } });
+    probe.customPropertyNames_.insert("title");
+    probe.properties_["title"] = MakeString("{{ $item.title }}");
+
+    JsonValue customProps = probe.BuildCustomProps();
+
+    ASSERT_TRUE(customProps.IsObject());
+    ASSERT_TRUE(customProps.GetItem("title").IsString());
+    EXPECT_EQ(customProps.GetString("title", ""), "科技");
+}
+
+/**
+ * @tc.name: should_keep_literal_title_when_tab_content_is_a_template_instance
+ * @tc.desc: 验证模板 TabContent 进入表达式求值范围后仍保留静态标题
+ * @tc.type: FUNC
+ */
+TEST_F(CustomComponentExpressionTddTest, should_keep_literal_title_when_tab_content_is_a_template_instance)
+{
+    CustomComponentExpressionProbe probe("TabContent");
+    std::unique_ptr<JsonAdapter> item = ParseJson(R"({"title":"ignored"})");
+    ASSERT_NE(item, nullptr);
+    probe.SetLocalVariables({ { "item", item->GetRoot() } });
+    probe.customPropertyNames_.insert("title");
+    probe.properties_["title"] = MakeString("CONST");
+
+    JsonValue customProps = probe.BuildCustomProps();
+
+    ASSERT_TRUE(customProps.IsObject());
+    EXPECT_EQ(customProps.GetString("title", ""), "CONST");
+}
+
+/**
+ * @tc.name: should_resolve_absolute_data_model_title_when_tab_content_is_a_template_instance
+ * @tc.desc: 验证模板 TabContent 可继续解析绝对数据模型表达式
+ * @tc.type: FUNC
+ */
+TEST_F(
+    CustomComponentExpressionTddTest, should_resolve_absolute_data_model_title_when_tab_content_is_a_template_instance)
+{
+    constexpr int32_t renderId = 2118;
+    const std::string surfaceId = "template-tab-content-absolute-expression";
+    RenderSlotCleanupGuard cleanupGuard(renderId);
+    RenderSlot& renderSlot = RenderManager::GetInstance().CreateRenderSlot(renderId);
+    std::shared_ptr<SurfaceManager> surfaceManager = renderSlot.GetSurfaceManager();
+    ASSERT_NE(surfaceManager, nullptr);
+    SurfaceSlot& surfaceSlot = surfaceManager->CreateSurface(surfaceId, nullptr);
+    std::unique_ptr<JsonAdapter> dataModel = ParseJson(R"({"value":{"globalTitle":"全局标题"}})");
+    ASSERT_NE(dataModel, nullptr);
+    ASSERT_TRUE(surfaceSlot.UpdateDataModel(dataModel->GetRoot()));
+
+    CustomComponentExpressionProbe probe("TabContent");
+    probe.SetRenderId(renderId);
+    probe.SetSurfaceId(surfaceId);
+    probe.SetComponentId("absolute-expression-tab");
+    std::unique_ptr<JsonAdapter> item = ParseJson(R"({"title":"ignored"})");
+    ASSERT_NE(item, nullptr);
+    probe.SetLocalVariables({ { "item", item->GetRoot() } });
+    probe.customPropertyNames_.insert("title");
+    probe.properties_["title"] = MakeString("{{ $__dataModel.globalTitle }}");
+
+    JsonValue customProps = probe.BuildCustomProps();
+
+    ASSERT_TRUE(customProps.IsObject());
+    EXPECT_EQ(customProps.GetString("title", ""), "全局标题");
+}
+
+/**
+ * @tc.name: should_resolve_item_title_expression_when_surface_builds_template_tab_content_instances
+ * @tc.desc: 验证 SurfaceSlot 构建多个模板 TabContent 实例时分别解析各自的 item.title
+ * @tc.type: FUNC
+ */
+TEST_F(CustomComponentExpressionTddTest,
+    should_resolve_item_title_expression_when_surface_builds_template_tab_content_instances)
+{
+    constexpr int32_t renderId = 2117;
+    const std::string surfaceId = "template-tab-content-expression";
+    RenderSlotCleanupGuard cleanupGuard(renderId);
+    RenderSlot& renderSlot = RenderManager::GetInstance().CreateRenderSlot(renderId);
+    std::shared_ptr<SurfaceManager> surfaceManager = renderSlot.GetSurfaceManager();
+    ASSERT_NE(surfaceManager, nullptr);
+    SurfaceSlot& surfaceSlot = surfaceManager->CreateSurface(surfaceId, nullptr);
+    surfaceSlot.SetCatalog(CreateExtendedCatalog({ "Tabs", "TabContent", "Text" }));
+
+    std::unique_ptr<JsonAdapter> dataModel = ParseJson(R"({
+        "value": {
+            "categories": [
+                { "title": "推荐" },
+                { "title": "科技" }
+            ]
+        }
+    })");
+    ASSERT_NE(dataModel, nullptr);
+    ASSERT_TRUE(surfaceSlot.UpdateDataModel(dataModel->GetRoot()));
+
+    std::unique_ptr<JsonAdapter> message = ParseJson(R"({
+        "components": [
+            {
+                "id": "root",
+                "component": "Tabs",
+                "children": {
+                    "componentId": "tabTemplate",
+                    "path": "/categories"
+                }
+            },
+            {
+                "id": "tabTemplate",
+                "component": "TabContent",
+                "title": "{{ $item.title }}",
+                "children": ["content"]
+            },
+            {
+                "id": "content",
+                "component": "Text",
+                "content": "{{ $item.title }}"
+            }
+        ]
+    })");
+    ASSERT_NE(message, nullptr);
+    ASSERT_TRUE(surfaceSlot.UpdateComponents(message->GetRoot()));
+
+    auto firstTab = std::dynamic_pointer_cast<CustomComponent>(
+        surfaceSlot.FindComponentById("/categoriestabTemplate:0:tabTemplate"));
+    auto secondTab = std::dynamic_pointer_cast<CustomComponent>(
+        surfaceSlot.FindComponentById("/categoriestabTemplate:1:tabTemplate"));
+    ASSERT_NE(firstTab, nullptr);
+    ASSERT_NE(secondTab, nullptr);
+    ASSERT_TRUE(firstTab->descriptor_.customProps.IsObject());
+    ASSERT_TRUE(secondTab->descriptor_.customProps.IsObject());
+    EXPECT_EQ(firstTab->descriptor_.customProps.GetString("title", ""), "推荐");
+    EXPECT_EQ(secondTab->descriptor_.customProps.GetString("title", ""), "科技");
+}
+
+TEST_F(CustomComponentExpressionTddTest, BuildCustomProps_keeps_expressions_for_arkts_resolver_owned_types)
+{
+    const std::vector<std::pair<std::string, std::string>> cases = { { "Tabs", "barPosition" },
+        { "TabContent", "title" }, { "Row", "wrap" } };
+    for (const auto& testCase : cases) {
+        CustomComponentExpressionProbe probe(testCase.first);
+        probe.customPropertyNames_.insert(testCase.second);
+        probe.properties_[testCase.second] = MakeString("{{ $__dataModel.runtime.value }}");
+
+        JsonValue customProps = probe.BuildCustomProps();
+        ASSERT_TRUE(customProps.IsObject());
+        ASSERT_TRUE(customProps.GetItem(testCase.second.c_str()).IsString());
+        EXPECT_EQ(customProps.GetString(testCase.second.c_str(), ""), "{{ $__dataModel.runtime.value }}");
+    }
 }
 
 /**

@@ -33,7 +33,7 @@
       "maxButtons": 2,
       "maxImages": 3,
       "maxProgress": 2,
-      "maxCheckbox": 1,
+      "maxCheckbox": 3,
       "maxLists": 1,
       "maxVisibleTextUnits": 72,
       "maxVisibleListItems": 3
@@ -65,7 +65,18 @@
       "error",
       "metric",
       "action"
-    ]
+    ],
+    "fontAdaptation": {
+      "title": {"minSize": 12, "step": 2},
+      "primary": {"minSize": 16, "step": 2},
+      "status": {"minSize": 12, "step": 2},
+      "warning": {"minSize": 12, "step": 2},
+      "error": {"minSize": 12, "step": 2},
+      "metric": {"minSize": 14, "step": 2},
+      "support": {"minSize": 10, "step": 1},
+      "meta": {"minSize": 8, "step": 1},
+      "action": {"minSize": 12, "step": 2}
+    }
   },
   "typography": {
     "regular": {
@@ -91,39 +102,6 @@
       "meta": [10, 400],
       "action": [14, 500],
       "default": [12, 400]
-    }
-  },
-  "components": {
-    "button": {
-      "paddingVertical": 8,
-      "paddingHorizontal": 12,
-      "minimumHeight": 32,
-      "minimumWidth": 48,
-      "widthSafety": 4
-    },
-    "checkbox": {
-      "outerHeight": 48,
-      "controlSize": 20,
-      "controlMargin": 2,
-      "labelGap": 12,
-      "labelFontSize": 16
-    },
-    "image": {
-      "meta": 18,
-      "support": 20,
-      "action": 20,
-      "asset": 24,
-      "primary2x2": 48,
-      "primary2x4": 56
-    },
-    "progress": {
-      "ring2x2": 56,
-      "ring2x4": 64,
-      "linearHeight": 8,
-      "linearMinimumWidth": 64
-    },
-    "divider": {
-      "stroke": "1px"
     }
   }
 }

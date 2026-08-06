@@ -15,41 +15,10 @@
 
 #include "components/actions/EventHandlerParser.h"
 
-#include <cctype>
-
+#include "utils/LocalVariableNameUtils.h"
 #include "utils/LogA2UI.h"
 
 namespace NativeModule {
-
-namespace {
-
-bool IsIdentifierStart(char ch)
-{
-    return std::isalpha(static_cast<unsigned char>(ch)) != 0 || ch == '_';
-}
-
-bool IsIdentifierChar(char ch)
-{
-    return std::isalnum(static_cast<unsigned char>(ch)) != 0 || ch == '_';
-}
-
-bool IsValidLocalVariableName(const std::string& name)
-{
-    if (name.empty() || !IsIdentifierStart(name[0])) {
-        return false;
-    }
-    if (name.size() >= 2 && name[0] == '_' && name[1] == '_') {
-        return false;
-    }
-    for (size_t index = 1; index < name.size(); ++index) {
-        if (!IsIdentifierChar(name[index])) {
-            return false;
-        }
-    }
-    return true;
-}
-
-} // namespace
 
 const std::set<std::string> EventHandlerParser::KNOWN_EVENT_NAMES = { "onClick", "onAppear", "onChange", "onSelect",
     "onReachStart", "onReachEnd" };

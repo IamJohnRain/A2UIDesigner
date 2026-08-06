@@ -662,7 +662,7 @@ export class SurfaceControllerImpl implements SurfaceController, BackGestureObse
 
     private reportSurfacePolicyFailure(code: SurfaceErrorCode, message: string): void {
       this.logSurfaceLifecycle('policy rejected message', `code=${code}, message=${message}`);
-      this.onError?.(SurfaceErrorCode.NO_SURFACE_MATCHED, message || 'surface policy rejected message');
+      this.onError?.(code, message || 'surface policy rejected message');
     }
 
     private createNativeProcessOptions(): NativeProcessOptions {
@@ -839,6 +839,17 @@ export class SurfaceControllerImpl implements SurfaceController, BackGestureObse
                   `reason=catalogId missing, dslPreview=${this.createDslPreviewForLog(dsl)}`
                 );
                 this.onError?.(SurfaceErrorCode.SCHEMA_CATALOG_ID_MISSING, errorMessage);
+                return;
+            }
+            if (nativeErrorCode === 'SURFACE_NOT_FOUND' ||
+                processResult.surfaceResultCode === SurfaceErrorCode.NO_SURFACE_MATCHED) {
+                this.lastSurfaceCode = this.recordSurfaceResult(SurfaceErrorCode.NO_SURFACE_MATCHED, errorMessage);
+                this.logSurfaceLifecycle(
+                  'handleMessage failed',
+                  `reason=surface not found, dslPreview=${this.createDslPreviewForLog(dsl)}`
+                );
+                this.emitSchemaWarningsIfNeeded();
+                this.onError?.(SurfaceErrorCode.NO_SURFACE_MATCHED, errorMessage);
                 return;
             }
             if (this.isSurfacePolicyCode(processResult.surfaceResultCode)) {
@@ -1080,20 +1091,20 @@ export class SurfaceControllerImpl implements SurfaceController, BackGestureObse
         }
 
         switch (messageType) {
-            case A2UIMessageType.CREATE_SURFACE:
-                this.onSurfaceEvent?.(SurfaceEventType.SURFACE_CREATED, this, surfaceId);
-                return;
-            case A2UIMessageType.UPDATE_COMPONENTS:
-                this.onSurfaceEvent?.(SurfaceEventType.SURFACE_COMPONENTS_UPDATED, this, surfaceId);
-                return;
-            case A2UIMessageType.UPDATE_DATA_MODEL:
-                this.onSurfaceEvent?.(SurfaceEventType.SURFACE_DATA_MODEL_UPDATED, this, surfaceId);
-                return;
-            case A2UIMessageType.DELETE_SURFACE:
-                this.onSurfaceEvent?.(SurfaceEventType.SURFACE_DELETED, this, surfaceId);
-                return;
-            default:
-                return;
+          case A2UIMessageType.CREATE_SURFACE:
+            this.onSurfaceEvent?.(SurfaceEventType.SURFACE_CREATED, this, surfaceId);
+            return;
+          case A2UIMessageType.UPDATE_COMPONENTS:
+            this.onSurfaceEvent?.(SurfaceEventType.SURFACE_COMPONENTS_UPDATED, this, surfaceId);
+            return;
+          case A2UIMessageType.UPDATE_DATA_MODEL:
+            this.onSurfaceEvent?.(SurfaceEventType.SURFACE_DATA_MODEL_UPDATED, this, surfaceId);
+            return;
+          case A2UIMessageType.DELETE_SURFACE:
+            this.onSurfaceEvent?.(SurfaceEventType.SURFACE_DELETED, this, surfaceId);
+            return;
+          default:
+            return;
         }
     }
 

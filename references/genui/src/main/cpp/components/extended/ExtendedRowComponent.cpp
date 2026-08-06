@@ -89,59 +89,94 @@ std::string ExtendedRowComponent::GetType() const
 
 void ExtendedRowComponent::ApplyPrivateAttributes(const JsonValue& descriptor)
 {
-    alignItems_ = DEFAULT_ALIGN_ITEMS;
-    justifyContent_ = DEFAULT_JUSTIFY_CONTENT;
-    wrap_ = DEFAULT_WRAP;
-    itemMarginDisabledByJustify_ = false;
-    ApplyFlexOptions();
-    if (descriptor.IsObject() && descriptor.Has("itemMargin")) {
-        JsonValue itemMarginValue = descriptor.GetItem("itemMargin");
-        if (!IsDynamicValueDescriptor(itemMarginValue) && itemMarginValue.IsNumber() &&
-            itemMarginValue.GetNumberValue(DEFAULT_ITEM_MARGIN) < 0.0) {
-            ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
-                "Property itemMargin has invalid value and has been reset to default", "itemMargin");
-        }
-    }
+    topLevelAlignItems_ = DEFAULT_ALIGN_ITEMS;
+    topLevelJustifyContent_ = DEFAULT_JUSTIFY_CONTENT;
+    topLevelWrap_ = DEFAULT_WRAP;
+    hasStyleAlignItems_ = false;
+    hasStyleJustifyContent_ = false;
+    hasStyleWrap_ = false;
+    ApplyEffectiveLayout();
     ApplyDeclaredPropertyOrFallback(descriptor, "itemMargin");
+    ApplyDeclaredPropertyOrFallback(descriptor, "justifyContent");
+    ApplyDeclaredPropertyOrFallback(descriptor, "alignItems");
     ApplyDeclaredPropertyOrFallback(descriptor, "wrap");
 }
 
 PropertyDeclaration ExtendedRowComponent::GetPrivatePropertyDeclaration(const std::string& propertyName)
 {
-    static const std::map<std::string, std::function<PropertyDeclaration(ExtendedRowComponent&)>> declarations = {
-        { "itemMargin",
-            [](ExtendedRowComponent& component) {
-                return PropertyDeclaration { .name = "itemMargin",
-                    .type = PropertyValueType::NUMBER,
-                    .allowDynamic = true,
-                    .allowExpression = true,
-                    .fallbackNumber = DEFAULT_ITEM_MARGIN,
-                    .applyValue = [&component](const JsonValue& value) {
-                        component.SetItemMargin(static_cast<float>(value.GetNumberValue(DEFAULT_ITEM_MARGIN)));
-                    } };
-            } },
-        { "wrap",
-            [](ExtendedRowComponent& component) {
-                PropertyDeclaration declaration;
-                declaration.name = "wrap";
-                declaration.type = PropertyValueType::ENUM_STRING;
-                declaration.allowDynamic = true;
-                declaration.allowExpression = true;
-                declaration.fallbackString = "noWrap";
-                declaration.enumFallback = "noWrap";
-                declaration.enumAllowed = { "noWrap", "wrap" };
-                declaration.applyValue = [&component](const JsonValue& value) {
-                    component.SetWrap(ResolveRowWrap(value.GetStringValue("noWrap")));
-                };
-                return declaration;
-            } }
-    };
-
-    auto it = declarations.find(propertyName);
-    if (it != declarations.end()) {
-        return it->second(*this);
+    if (propertyName == "itemMargin") {
+        return CreateItemMarginPropertyDeclaration();
+    }
+    if (propertyName == "justifyContent") {
+        return CreateJustifyContentPropertyDeclaration();
+    }
+    if (propertyName == "alignItems") {
+        return CreateAlignItemsPropertyDeclaration();
+    }
+    if (propertyName == "wrap") {
+        return CreateWrapPropertyDeclaration();
     }
     return ExtendedComponent::GetPrivatePropertyDeclaration(propertyName);
+}
+
+PropertyDeclaration ExtendedRowComponent::CreateItemMarginPropertyDeclaration()
+{
+    return PropertyDeclaration { .name = "itemMargin",
+        .type = PropertyValueType::NUMBER,
+        .allowDynamic = true,
+        .allowExpression = true,
+        .fallbackNumber = DEFAULT_ITEM_MARGIN,
+        .applyValue = [this](const JsonValue& value) {
+            SetItemMargin(static_cast<float>(value.GetNumberValue(DEFAULT_ITEM_MARGIN)));
+        } };
+}
+
+PropertyDeclaration ExtendedRowComponent::CreateJustifyContentPropertyDeclaration()
+{
+    PropertyDeclaration declaration;
+    declaration.name = "justifyContent";
+    declaration.type = PropertyValueType::ENUM_STRING;
+    declaration.allowDynamic = true;
+    declaration.allowExpression = true;
+    declaration.fallbackString = "start";
+    declaration.enumFallback = "start";
+    declaration.enumAllowed = { "start", "center", "end", "spaceAround", "spaceBetween", "spaceEvenly" };
+    declaration.applyValue = [this](const JsonValue& value) {
+        SetTopLevelJustifyContent(ResolveRowJustify(value.GetStringValue("start")));
+    };
+    return declaration;
+}
+
+PropertyDeclaration ExtendedRowComponent::CreateAlignItemsPropertyDeclaration()
+{
+    PropertyDeclaration declaration;
+    declaration.name = "alignItems";
+    declaration.type = PropertyValueType::ENUM_STRING;
+    declaration.allowDynamic = true;
+    declaration.allowExpression = true;
+    declaration.fallbackString = "center";
+    declaration.enumFallback = "center";
+    declaration.enumAllowed = { "top", "center", "bottom" };
+    declaration.applyValue = [this](const JsonValue& value) {
+        SetTopLevelAlignItems(ResolveRowAlign(value.GetStringValue("center")));
+    };
+    return declaration;
+}
+
+PropertyDeclaration ExtendedRowComponent::CreateWrapPropertyDeclaration()
+{
+    PropertyDeclaration declaration;
+    declaration.name = "wrap";
+    declaration.type = PropertyValueType::ENUM_STRING;
+    declaration.allowDynamic = true;
+    declaration.allowExpression = true;
+    declaration.fallbackString = "noWrap";
+    declaration.enumFallback = "noWrap";
+    declaration.enumAllowed = { "noWrap", "wrap" };
+    declaration.applyValue = [this](const JsonValue& value) {
+        SetTopLevelWrap(ResolveRowWrap(value.GetStringValue("noWrap")));
+    };
+    return declaration;
 }
 
 void ExtendedRowComponent::ValidateComponentDescriptorSchema(const JsonValue& descriptor)
@@ -156,6 +191,7 @@ void ExtendedRowComponent::ValidateComponentSpecificStylesSchema(const JsonValue
     ValidateStyleEnumProperty(
         styles, "justifyContent", { "start", "center", "end", "spaceAround", "spaceBetween", "spaceEvenly" });
     ValidateStyleEnumProperty(styles, "alignItems", { "top", "center", "bottom" });
+    ValidateStyleEnumProperty(styles, "wrap", { "noWrap", "wrap" });
 }
 
 void ExtendedRowComponent::ValidateComponentSpecificDynamicStylesDfx(
@@ -164,6 +200,7 @@ void ExtendedRowComponent::ValidateComponentSpecificDynamicStylesDfx(
     ValidateDynamicStyleEnumProperty(styles, dynamicStyleKeys, "justifyContent",
         { "start", "center", "end", "spaceAround", "spaceBetween", "spaceEvenly" });
     ValidateDynamicStyleEnumProperty(styles, dynamicStyleKeys, "alignItems", { "top", "center", "bottom" });
+    ValidateDynamicStyleEnumProperty(styles, dynamicStyleKeys, "wrap", { "noWrap", "wrap" });
 }
 
 void ExtendedRowComponent::ApplyComponentSpecificStyles(const JsonValue& styles, ArkUINodeApiAdapter& applier)
@@ -173,41 +210,61 @@ void ExtendedRowComponent::ApplyComponentSpecificStyles(const JsonValue& styles,
         return;
     }
     bool isDeltaUpdate = IsApplyingStyleDeltaUpdate();
+    if (!isDeltaUpdate) {
+        hasStyleAlignItems_ = false;
+        hasStyleJustifyContent_ = false;
+        hasStyleWrap_ = false;
+    }
     if (styles.Has("alignItems")) {
-        SetAlignItems(ResolveRowAlign(styles.GetItem("alignItems").GetStringValue("center")));
-    } else if (!isDeltaUpdate) {
-        SetAlignItems(DEFAULT_ALIGN_ITEMS);
+        styleAlignItems_ = ResolveRowAlign(styles.GetItem("alignItems").GetStringValue("center"));
+        hasStyleAlignItems_ = true;
     }
     if (styles.Has("justifyContent")) {
-        SetJustifyContent(ResolveRowJustify(styles.GetItem("justifyContent").GetStringValue("start")));
-    } else if (!isDeltaUpdate) {
-        SetJustifyContent(DEFAULT_JUSTIFY_CONTENT);
+        styleJustifyContent_ = ResolveRowJustify(styles.GetItem("justifyContent").GetStringValue("start"));
+        hasStyleJustifyContent_ = true;
     }
+    if (styles.Has("wrap")) {
+        styleWrap_ = ResolveRowWrap(styles.GetItem("wrap").GetStringValue("noWrap"));
+        hasStyleWrap_ = true;
+    }
+    ApplyEffectiveLayout();
 }
 
-void ExtendedRowComponent::SetAlignItems(A2UIItemAlignment alignment)
+void ExtendedRowComponent::SetTopLevelAlignItems(A2UIItemAlignment alignment)
 {
-    alignItems_ = alignment;
-    ApplyFlexOptions();
+    topLevelAlignItems_ = alignment;
+    ApplyEffectiveLayout();
 }
 
-void ExtendedRowComponent::SetJustifyContent(A2UIFlexAlignment alignment)
+void ExtendedRowComponent::SetTopLevelJustifyContent(A2UIFlexAlignment alignment)
 {
-    justifyContent_ = alignment;
-    itemMarginDisabledByJustify_ = IsItemMarginDisabledByJustify(alignment);
-    ApplyFlexOptions();
-    ApplyItemMarginSpace();
+    topLevelJustifyContent_ = alignment;
+    ApplyEffectiveLayout();
 }
 
-void ExtendedRowComponent::SetWrap(A2UIFlexWrap wrap)
+void ExtendedRowComponent::SetTopLevelWrap(A2UIFlexWrap wrap)
 {
-    wrap_ = wrap;
-    ApplyFlexOptions();
+    topLevelWrap_ = wrap;
+    ApplyEffectiveLayout();
 }
 
 void ExtendedRowComponent::SetItemMargin(float itemMargin)
 {
+    if (!std::isfinite(itemMargin) || itemMargin < 0.0F) {
+        ReportExtendedSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
+            "Property itemMargin must be greater than or equal to 0 and has been reset to default", "itemMargin");
+    }
     itemMargin_ = NormalizeItemMargin(itemMargin, DEFAULT_ITEM_MARGIN);
+    ApplyItemMarginSpace();
+}
+
+void ExtendedRowComponent::ApplyEffectiveLayout()
+{
+    alignItems_ = hasStyleAlignItems_ ? styleAlignItems_ : topLevelAlignItems_;
+    justifyContent_ = hasStyleJustifyContent_ ? styleJustifyContent_ : topLevelJustifyContent_;
+    wrap_ = hasStyleWrap_ ? styleWrap_ : topLevelWrap_;
+    itemMarginDisabledByJustify_ = IsItemMarginDisabledByJustify(justifyContent_);
+    ApplyFlexOptions();
     ApplyItemMarginSpace();
 }
 

@@ -40,9 +40,11 @@ namespace {
 std::shared_ptr<Catalog> BuildCheckboxGroupCatalog()
 {
     auto catalog = std::make_shared<Catalog>(A2UI_EXTENDED_CATALOG_ID);
-    auto item = std::make_shared<CatalogItem>("CheckboxGroup", CatalogItemType::COMPONENT);
-    item->SetCategory(CatalogCategory::OHOS_EXTENDS);
-    catalog->AddComponent(item);
+    for (const char* componentName : { "CheckboxGroup", "Checkbox" }) {
+        auto item = std::make_shared<CatalogItem>(componentName, CatalogItemType::COMPONENT);
+        item->SetCategory(CatalogCategory::OHOS_EXTENDS);
+        catalog->AddComponent(item);
+    }
     return catalog;
 }
 
@@ -389,6 +391,30 @@ TEST_F(ExtendedCheckboxGroupComponentTest, L0_should_apply_style_colors)
     ASSERT_NE(cbg, nullptr);
     EXPECT_EQ(cbg->GetSelectedColorForTest(), 0xFFCCAABBu);
     EXPECT_EQ(cbg->GetUnselectedColorForTest(), 0xFFDDCCBBu);
+}
+
+TEST_F(ExtendedCheckboxGroupComponentTest, L0_should_fallback_when_style_colors_are_numbers)
+{
+    slot_.SetCatalog(BuildCheckboxGroupCatalog());
+    auto message = JsonAdapter::Parse(R"({
+        "components": [{
+            "id": "root",
+            "component": "CheckboxGroup",
+            "styles": {
+                "selectedColor": 4278255360,
+                "unSelectedColor": 4294901760,
+                "mark": { "strokeColor": 4278190335 }
+            }
+        }]
+    })");
+    ASSERT_NE(message, nullptr);
+    ASSERT_TRUE(slot_.UpdateComponents(message->GetRoot()));
+
+    auto cbg = std::dynamic_pointer_cast<ExtendedCheckboxGroupComponent>(slot_.FindComponentById("root"));
+    ASSERT_NE(cbg, nullptr);
+    EXPECT_EQ(cbg->GetSelectedColorForTest(), 0xFF007DFFu);
+    EXPECT_EQ(cbg->GetUnselectedColorForTest(), 0x66182431u);
+    EXPECT_EQ(cbg->GetMarkStrokeColorForTest(), 0xFFFFFFFFu);
 }
 
 TEST_F(ExtendedCheckboxGroupComponentTest, L0_should_ignore_legacy_style_names_without_alias)
@@ -1146,8 +1172,8 @@ TEST_F(ExtendedCheckboxGroupComponentTest, L0_should_apply_negative_mark_values_
 
     auto cbg = std::dynamic_pointer_cast<ExtendedCheckboxGroupComponent>(slot_.FindComponentById("root"));
     ASSERT_NE(cbg, nullptr);
-    EXPECT_FLOAT_EQ(cbg->GetMarkSizeForTest(), -5.0f);
-    EXPECT_FLOAT_EQ(cbg->GetMarkStrokeWidthForTest(), -2.5f);
+    EXPECT_FLOAT_EQ(cbg->GetMarkSizeForTest(), 20.0f);
+    EXPECT_FLOAT_EQ(cbg->GetMarkStrokeWidthForTest(), 2.0f);
 }
 
 TEST_F(ExtendedCheckboxGroupComponentTest, L0_should_reset_group_on_property_removed)
@@ -2104,4 +2130,24 @@ TEST_F(ExtendedCheckboxGroupComponentTest, L0_should_update_names_on_subsequent_
     ASSERT_EQ(names.size(), 1u);
     EXPECT_EQ(names[0], "cb1");
     EXPECT_EQ(cbg->GetSelectAllStatusForTest(), 1);
+}
+
+TEST_F(ExtendedCheckboxGroupComponentTest, L0_should_use_default_mark_size_when_negative)
+{
+    slot_.SetCatalog(BuildCheckboxGroupCatalog());
+    auto message = JsonAdapter::Parse(R"({
+        "components": [{
+            "id": "root",
+            "component": "CheckboxGroup",
+            "styles": {
+                "mark": { "size": -1 }
+            }
+        }]
+    })");
+    ASSERT_NE(message, nullptr);
+    ASSERT_TRUE(slot_.UpdateComponents(message->GetRoot()));
+
+    auto cbg = std::dynamic_pointer_cast<ExtendedCheckboxGroupComponent>(slot_.FindComponentById("root"));
+    ASSERT_NE(cbg, nullptr);
+    EXPECT_FLOAT_EQ(cbg->GetMarkSizeForTest(), 20.0f);
 }

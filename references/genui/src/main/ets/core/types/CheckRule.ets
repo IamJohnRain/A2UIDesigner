@@ -16,8 +16,8 @@
 import { DynamicValue } from './DynamicValue'
 
 export class A2UICheckRule {
-  condition: Object = new Object()
-  message: string = ''
+  public condition: Record<string, object> = {};
+  public message: string = ''
 
   static schema(): string {
     return `{

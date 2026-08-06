@@ -18,7 +18,6 @@
 #include <cctype>
 #include <cmath>
 #include <cstdint>
-#include <functional>
 #include <map>
 
 #include "components/extended/ExtendedStyleResolver.h"
@@ -273,48 +272,322 @@ void ExtendedTextComponent::ReportStyleWarning(
 
 void ExtendedTextComponent::ApplyPrivateAttributes(const JsonValue& descriptor)
 {
-    JsonValue contentValue = descriptor.GetItem("content");
     bool hasContent = descriptor.IsObject() && descriptor.Has("content");
-    if (!hasContent) {
+    bool hasTextAlias = descriptor.IsObject() && descriptor.Has("text");
+    if (!hasContent && !hasTextAlias) {
         ReportSchemaWarning(
             SCHEMA_ERROR_CODE_INVALID_VALUE, "Property content is missing, fallback to empty string", "content");
         ApplyRuntimeProperty("content", JsonValue(), false);
         return;
     }
 
+    const std::string descriptorKey = hasContent ? "content" : "text";
+    JsonValue contentValue = descriptor.GetItem(descriptorKey.c_str());
     if (contentValue.IsString() || IsBindingDescriptorValue(contentValue)) {
-        ApplyDeclaredPropertyOrFallback(descriptor, "content");
+        if (hasContent) {
+            ApplyDeclaredPropertyOrFallback(descriptor, "content");
+        } else {
+            SetPropertyFromDescriptor("text", descriptor, "content");
+        }
         return;
     }
 
     ReportSchemaWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH,
-        std::string("Property content expects string value, got type '") + contentValue.GetTypeName() +
+        std::string("Property ") + descriptorKey + " expects string value, got type '" + contentValue.GetTypeName() +
             "', fallback to empty string",
-        "content");
+        descriptorKey);
     RemoveBindingsForProperty("content");
     ApplyRuntimeProperty("content", JsonValue(), false);
 }
 
 PropertyDeclaration ExtendedTextComponent::GetPrivatePropertyDeclaration(const std::string& propertyName)
 {
-    static const std::map<std::string, std::function<PropertyDeclaration(ExtendedTextComponent&)>> declarations = {
-        { "content",
-            [](ExtendedTextComponent& component) {
-                return PropertyDeclaration { .name = "content",
-                    .type = PropertyValueType::STRING,
-                    .allowDynamic = true,
-                    .allowExpression = true,
-                    .fallbackString = "",
-                    .applyValue = [&component](
-                                      const JsonValue& value) { component.SetText(value.GetStringValue("")); } };
-            } }
-    };
-
-    auto it = declarations.find(propertyName);
-    if (it != declarations.end()) {
-        return it->second(*this);
+    if (propertyName != "content" && propertyName != "text") {
+        return {};
     }
-    return {};
+
+    return PropertyDeclaration { .name = propertyName,
+        .type = PropertyValueType::STRING,
+        .allowDynamic = true,
+        .allowExpression = true,
+        .fallbackString = "",
+        .applyValue = [this](const JsonValue& value) { SetText(value.GetStringValue("")); } };
+}
+
+void ExtendedTextComponent::ApplyFontWeightAndColorStyle(const JsonValue& styles, bool isDeltaUpdate)
+{
+    JsonValue fontWeightValue = styles.GetItem("fontWeight");
+    if (fontWeightValue.IsValid()) {
+        int32_t parsedFontWeight = static_cast<int32_t>(DEFAULT_TEXT_FONT_WEIGHT);
+        bool isValidFontWeight = TryParseTextFontWeight(fontWeightValue, parsedFontWeight);
+        if (!isValidFontWeight) {
+            if (!fontWeightValue.IsString() && !fontWeightValue.IsNumber()) {
+                ReportStyleWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH, "fontWeight",
+                    std::string("Property fontWeight expects string or number, got type '") +
+                        fontWeightValue.GetTypeName() + "', " + DescribeStyleResolution(isDeltaUpdate));
+            } else {
+                ReportStyleWarning(SCHEMA_ERROR_CODE_INVALID_VALUE, "fontWeight",
+                    "Property fontWeight got invalid value, " + std::string(DescribeStyleResolution(isDeltaUpdate)));
+            }
+            SetFontWeight(DEFAULT_TEXT_FONT_WEIGHT);
+        } else {
+            SetFontWeight(static_cast<A2UIFontWeight>(parsedFontWeight));
+        }
+    }
+    uint32_t parsedColor = 0;
+    JsonValue fontColorValue = styles.GetItem("fontColor");
+    if (TryParseHexColorStringStyleValue(fontColorValue, parsedColor)) {
+        useDefaultFontColor_ = false;
+        SetFontColor(parsedColor);
+    } else {
+        if (fontColorValue.IsValid()) {
+            if (fontColorValue.IsString()) {
+                ReportStyleWarning(SCHEMA_ERROR_CODE_INVALID_VALUE, "fontColor",
+                    "Property fontColor got invalid color value, " +
+                        std::string(DescribeStyleResolution(isDeltaUpdate)));
+            } else {
+                ReportStyleWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH, "fontColor",
+                    std::string("Property fontColor expects string value, got type '") + fontColorValue.GetTypeName() +
+                        "', " + DescribeStyleResolution(isDeltaUpdate));
+            }
+        }
+        useDefaultFontColor_ = true;
+        SetFontColor(ResolveDefaultFontColor());
+    }
+}
+
+void ExtendedTextComponent::ApplyFontScaleRangeStyle(const JsonValue& styles, bool isDeltaUpdate)
+{
+    JsonValue minFontScaleValue = styles.GetItem("minFontScale");
+    float minFontScale = 0.0F;
+    bool minFontScaleClamped = false;
+    if (TryParseValidMinFontScale(minFontScaleValue, minFontScale, &minFontScaleClamped)) {
+        SetMinFontScale(minFontScale);
+        if (minFontScaleClamped) {
+            ReportStyleWarning(SCHEMA_ERROR_CODE_INVALID_VALUE, "minFontScale",
+                "Property minFontScale got out-of-range number value, clamped to supported range");
+        }
+    } else if (minFontScaleValue.IsValid()) {
+        if (minFontScaleValue.IsNumber()) {
+            ReportStyleWarning(SCHEMA_ERROR_CODE_INVALID_VALUE, "minFontScale",
+                "Property minFontScale got invalid number value, " +
+                    std::string(DescribeStyleResolution(isDeltaUpdate)));
+        } else {
+            ReportStyleWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH, "minFontScale",
+                std::string("Property minFontScale expects number value, got type '") +
+                    minFontScaleValue.GetTypeName() + "', " + DescribeStyleResolution(isDeltaUpdate));
+        }
+        SetMinFontScale(0.0F);
+    } else if (!isDeltaUpdate) {
+        SetMinFontScale(0.0F);
+    }
+    JsonValue maxFontScaleValue = styles.GetItem("maxFontScale");
+    float maxFontScale = 0.0F;
+    bool maxFontScaleClamped = false;
+    if (TryParseValidMaxFontScale(maxFontScaleValue, maxFontScale, &maxFontScaleClamped)) {
+        SetMaxFontScale(maxFontScale);
+        if (maxFontScaleClamped) {
+            ReportStyleWarning(SCHEMA_ERROR_CODE_INVALID_VALUE, "maxFontScale",
+                "Property maxFontScale got out-of-range number value, clamped to supported range");
+        }
+    } else if (maxFontScaleValue.IsValid()) {
+        if (maxFontScaleValue.IsNumber()) {
+            ReportStyleWarning(SCHEMA_ERROR_CODE_INVALID_VALUE, "maxFontScale",
+                "Property maxFontScale got invalid number value, " +
+                    std::string(DescribeStyleResolution(isDeltaUpdate)));
+        } else {
+            ReportStyleWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH, "maxFontScale",
+                std::string("Property maxFontScale expects number value, got type '") +
+                    maxFontScaleValue.GetTypeName() + "', " + DescribeStyleResolution(isDeltaUpdate));
+        }
+        SetMaxFontScale(0.0F);
+    } else if (!isDeltaUpdate) {
+        SetMaxFontScale(0.0F);
+    }
+}
+
+void ExtendedTextComponent::ApplyFontScaleModeAndSizeStyle(const JsonValue& styles, bool isDeltaUpdate)
+{
+    JsonValue fontScaleModeValue = styles.GetItem("fontScaleMode");
+    if (fontScaleModeValue.IsString()) {
+        std::string mode = StyleApplyUtils::TrimToken(fontScaleModeValue.GetStringValue(""));
+        if (mode == "custom" || mode == DEFAULT_FONT_SCALE_MODE) {
+            SetFontScaleMode(mode);
+        } else {
+            ReportStyleWarning(SCHEMA_ERROR_CODE_INVALID_VALUE, "fontScaleMode",
+                "Property fontScaleMode got invalid enum value '" + mode + "', " +
+                    DescribeStyleResolution(isDeltaUpdate));
+            SetFontScaleMode(DEFAULT_FONT_SCALE_MODE);
+        }
+    } else if (fontScaleModeValue.IsValid()) {
+        ReportStyleWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH, "fontScaleMode",
+            std::string("Property fontScaleMode expects string enum value, got type '") +
+                fontScaleModeValue.GetTypeName() + "', " + DescribeStyleResolution(isDeltaUpdate));
+        SetFontScaleMode(DEFAULT_FONT_SCALE_MODE);
+    } else if (!isDeltaUpdate) {
+        SetFontScaleMode(DEFAULT_FONT_SCALE_MODE);
+    }
+    float fontSize = 0.0F;
+    JsonValue fontSizeValue = styles.GetItem("fontSize");
+    if (TryParsePositiveFiniteStyleScalar(fontSizeValue, fontSize)) {
+        SetFontSize(fontSize);
+    } else if (fontSizeValue.IsValid()) {
+        if (fontSizeValue.IsNumber()) {
+            ReportStyleWarning(SCHEMA_ERROR_CODE_INVALID_VALUE, "fontSize",
+                "Property fontSize got invalid number value, " + std::string(DescribeStyleResolution(isDeltaUpdate)));
+        } else {
+            ReportStyleWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH, "fontSize",
+                std::string("Property fontSize expects number value, got type '") + fontSizeValue.GetTypeName() +
+                    "', " + DescribeStyleResolution(isDeltaUpdate));
+        }
+        SetFontSize(DEFAULT_TEXT_FONT_SIZE);
+    } else if (!isDeltaUpdate) {
+        SetFontSize(DEFAULT_TEXT_FONT_SIZE);
+    }
+}
+
+void ExtendedTextComponent::ApplyMaxLinesAndOverflowStyle(const JsonValue& styles, bool isDeltaUpdate)
+{
+    JsonValue maxLinesValue = styles.GetItem("maxLines");
+    if (maxLinesValue.IsValid()) {
+        int32_t maxLines = 0;
+        if (!TryParseMaxLinesNumber(maxLinesValue, maxLines)) {
+            if (maxLinesValue.IsNumber()) {
+                ReportStyleWarning(SCHEMA_ERROR_CODE_INVALID_VALUE, "maxLines",
+                    "Property maxLines got invalid number value, " +
+                        std::string(DescribeStyleResolution(isDeltaUpdate)));
+            } else {
+                ReportStyleWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH, "maxLines",
+                    std::string("Property maxLines expects number value, got type '") + maxLinesValue.GetTypeName() +
+                        "', " + DescribeStyleResolution(isDeltaUpdate));
+            }
+            SetMaxLines(DEFAULT_TEXT_MAX_LINES);
+        }
+    }
+    JsonValue textOverflowValue = styles.GetItem("textOverflow");
+    if (textOverflowValue.IsValid()) {
+        int32_t textOverflow = 0;
+        if (!StyleApplyUtils::ParseTextOverflow(textOverflowValue, textOverflow)) {
+            if (textOverflowValue.IsString()) {
+                ReportStyleWarning(SCHEMA_ERROR_CODE_INVALID_VALUE, "textOverflow",
+                    "Property textOverflow got invalid enum value '" +
+                        StyleApplyUtils::TrimToken(textOverflowValue.GetStringValue("")) + "', " +
+                        DescribeStyleResolution(isDeltaUpdate));
+            } else {
+                ReportStyleWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH, "textOverflow",
+                    std::string("Property textOverflow expects string enum value, got type '") +
+                        textOverflowValue.GetTypeName() + "', " + DescribeStyleResolution(isDeltaUpdate));
+            }
+            SetTextOverflow(DEFAULT_TEXT_OVERFLOW);
+        }
+    }
+    if (ShouldWarnTextOverflowWithoutMaxLines(textOverflowValue, maxLinesValue)) {
+        ReportSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
+            "Property textOverflow is set but maxLines is not configured; "
+            "textOverflow effect may not be visible without a finite maxLines value",
+            "styles.textOverflow");
+    }
+}
+
+void ExtendedTextComponent::ApplyTextAlignAndBreakStyle(const JsonValue& styles, bool isDeltaUpdate)
+{
+    JsonValue textAlignValue = styles.GetItem("textAlign");
+    if (textAlignValue.IsValid()) {
+        int32_t textAlign = 0;
+        if (!StyleApplyUtils::ParseTextAlign(textAlignValue, textAlign)) {
+            if (textAlignValue.IsString()) {
+                ReportStyleWarning(SCHEMA_ERROR_CODE_INVALID_VALUE, "textAlign",
+                    "Property textAlign got invalid enum value '" +
+                        StyleApplyUtils::TrimToken(textAlignValue.GetStringValue("")) + "', " +
+                        DescribeStyleResolution(isDeltaUpdate));
+            } else {
+                ReportStyleWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH, "textAlign",
+                    std::string("Property textAlign expects string enum value, got type '") +
+                        textAlignValue.GetTypeName() + "', " + DescribeStyleResolution(isDeltaUpdate));
+            }
+            SetTextAlign(DEFAULT_TEXT_ALIGN);
+        }
+    }
+    JsonValue wordBreakValue = styles.GetItem("wordBreak");
+    if (wordBreakValue.IsValid()) {
+        int32_t wordBreak = 0;
+        if (!StyleApplyUtils::ParseWordBreak(wordBreakValue, wordBreak)) {
+            if (wordBreakValue.IsString()) {
+                ReportStyleWarning(SCHEMA_ERROR_CODE_INVALID_VALUE, "wordBreak",
+                    "Property wordBreak got invalid enum value '" +
+                        StyleApplyUtils::TrimToken(wordBreakValue.GetStringValue("")) + "', " +
+                        DescribeStyleResolution(isDeltaUpdate));
+            } else {
+                ReportStyleWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH, "wordBreak",
+                    std::string("Property wordBreak expects string enum value, got type '") +
+                        wordBreakValue.GetTypeName() + "', " + DescribeStyleResolution(isDeltaUpdate));
+            }
+            SetWordBreak(DEFAULT_TEXT_WORD_BREAK);
+        }
+    }
+}
+
+void ExtendedTextComponent::ApplyMinFontSizeStyle(const JsonValue& styles, bool isDeltaUpdate, float& minFontSize)
+{
+    minFontSize = -1.0F;
+    JsonValue minFontSizeValue = styles.GetItem("minFontSize");
+    if (minFontSizeValue.IsValid()) {
+        if (TryParsePositiveFiniteStyleScalar(minFontSizeValue, minFontSize)) {
+            // valid, applied by ExtendedStyleResolver above
+        } else if (minFontSizeValue.IsNumber()) {
+            ReportStyleWarning(SCHEMA_ERROR_CODE_INVALID_VALUE, "minFontSize",
+                "Property minFontSize got invalid number value, " +
+                    std::string(DescribeStyleResolution(isDeltaUpdate)));
+            if (nativeView_ != nullptr) {
+                ArkUINodeApiAdapter::ResetNodeTextMinFontSize(nativeView_);
+            }
+        } else {
+            ReportStyleWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH, "minFontSize",
+                std::string("Property minFontSize expects number value, got type '") + minFontSizeValue.GetTypeName() +
+                    "', " + DescribeStyleResolution(isDeltaUpdate));
+            minFontSize = -1.0F;
+            if (nativeView_ != nullptr) {
+                ArkUINodeApiAdapter::ResetNodeTextMinFontSize(nativeView_);
+            }
+        }
+    } else if (!isDeltaUpdate && nativeView_ != nullptr) {
+        ArkUINodeApiAdapter::ResetNodeTextMinFontSize(nativeView_);
+    }
+}
+
+void ExtendedTextComponent::ApplyMaxFontSizeStyle(const JsonValue& styles, bool isDeltaUpdate, float minFontSize)
+{
+    float maxFontSize = -1.0F;
+    JsonValue maxFontSizeValue = styles.GetItem("maxFontSize");
+    JsonValue minFontSizeValue = styles.GetItem("minFontSize");
+    if (maxFontSizeValue.IsValid()) {
+        if (TryParsePositiveFiniteStyleScalar(maxFontSizeValue, maxFontSize)) {
+            // valid, applied by ExtendedStyleResolver above
+        } else if (maxFontSizeValue.IsNumber()) {
+            ReportStyleWarning(SCHEMA_ERROR_CODE_INVALID_VALUE, "maxFontSize",
+                "Property maxFontSize got invalid number value, " +
+                    std::string(DescribeStyleResolution(isDeltaUpdate)));
+            if (nativeView_ != nullptr) {
+                ArkUINodeApiAdapter::ResetNodeTextMaxFontSize(nativeView_);
+            }
+        } else {
+            ReportStyleWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH, "maxFontSize",
+                std::string("Property maxFontSize expects number value, got type '") + maxFontSizeValue.GetTypeName() +
+                    "', " + DescribeStyleResolution(isDeltaUpdate));
+            maxFontSize = -1.0F;
+            if (nativeView_ != nullptr) {
+                ArkUINodeApiAdapter::ResetNodeTextMaxFontSize(nativeView_);
+            }
+        }
+    } else if (!isDeltaUpdate && nativeView_ != nullptr) {
+        ArkUINodeApiAdapter::ResetNodeTextMaxFontSize(nativeView_);
+    }
+    if (HasConflictingAdaptiveFontSizes(minFontSizeValue, maxFontSizeValue, minFontSize, maxFontSize)) {
+        ReportSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
+            "Property minFontSize (" + std::to_string(minFontSize) + ") must be less than maxFontSize (" +
+                std::to_string(maxFontSize) + "); adaptive font sizing has been ignored",
+            "styles.minFontSize");
+    }
 }
 
 void ExtendedTextComponent::ApplyComponentSpecificStyles(const JsonValue& styles, ArkUINodeApiAdapter& applier)
@@ -352,266 +625,14 @@ void ExtendedTextComponent::ApplyComponentSpecificStyles(const JsonValue& styles
         return;
     }
 
-    JsonValue fontWeightValue = styles.GetItem("fontWeight");
-    if (fontWeightValue.IsValid()) {
-        int32_t parsedFontWeight = static_cast<int32_t>(DEFAULT_TEXT_FONT_WEIGHT);
-        bool isValidFontWeight = TryParseTextFontWeight(fontWeightValue, parsedFontWeight);
-        if (!isValidFontWeight) {
-            if (!fontWeightValue.IsString() && !fontWeightValue.IsNumber()) {
-                ReportStyleWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH, "fontWeight",
-                    std::string("Property fontWeight expects string or number, got type '") +
-                        fontWeightValue.GetTypeName() + "', " + DescribeStyleResolution(isDeltaUpdate));
-            } else {
-                ReportStyleWarning(SCHEMA_ERROR_CODE_INVALID_VALUE, "fontWeight",
-                    "Property fontWeight got invalid value, " + std::string(DescribeStyleResolution(isDeltaUpdate)));
-            }
-            SetFontWeight(DEFAULT_TEXT_FONT_WEIGHT);
-        } else {
-            SetFontWeight(static_cast<A2UIFontWeight>(parsedFontWeight));
-        }
-    }
-
-    uint32_t parsedColor = 0;
-    JsonValue fontColorValue = styles.GetItem("fontColor");
-    if (TryParseHexColorStringStyleValue(fontColorValue, parsedColor)) {
-        useDefaultFontColor_ = false;
-        SetFontColor(parsedColor);
-    } else {
-        if (fontColorValue.IsValid()) {
-            if (fontColorValue.IsString()) {
-                ReportStyleWarning(SCHEMA_ERROR_CODE_INVALID_VALUE, "fontColor",
-                    "Property fontColor got invalid color value, " +
-                        std::string(DescribeStyleResolution(isDeltaUpdate)));
-            } else {
-                ReportStyleWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH, "fontColor",
-                    std::string("Property fontColor expects string value, got type '") + fontColorValue.GetTypeName() +
-                        "', " + DescribeStyleResolution(isDeltaUpdate));
-            }
-        }
-        useDefaultFontColor_ = true;
-        SetFontColor(ResolveDefaultFontColor());
-    }
-
-    JsonValue minFontScaleValue = styles.GetItem("minFontScale");
-    float minFontScale = 0.0F;
-    bool minFontScaleClamped = false;
-    if (TryParseValidMinFontScale(minFontScaleValue, minFontScale, &minFontScaleClamped)) {
-        SetMinFontScale(minFontScale);
-        if (minFontScaleClamped) {
-            ReportStyleWarning(SCHEMA_ERROR_CODE_INVALID_VALUE, "minFontScale",
-                "Property minFontScale got out-of-range number value, clamped to supported range");
-        }
-    } else if (minFontScaleValue.IsValid()) {
-        if (minFontScaleValue.IsNumber()) {
-            ReportStyleWarning(SCHEMA_ERROR_CODE_INVALID_VALUE, "minFontScale",
-                "Property minFontScale got invalid number value, " +
-                    std::string(DescribeStyleResolution(isDeltaUpdate)));
-        } else {
-            ReportStyleWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH, "minFontScale",
-                std::string("Property minFontScale expects number value, got type '") +
-                    minFontScaleValue.GetTypeName() + "', " + DescribeStyleResolution(isDeltaUpdate));
-        }
-        SetMinFontScale(0.0F);
-    } else if (!isDeltaUpdate) {
-        SetMinFontScale(0.0F);
-    }
-
-    JsonValue maxFontScaleValue = styles.GetItem("maxFontScale");
-    float maxFontScale = 0.0F;
-    bool maxFontScaleClamped = false;
-    if (TryParseValidMaxFontScale(maxFontScaleValue, maxFontScale, &maxFontScaleClamped)) {
-        SetMaxFontScale(maxFontScale);
-        if (maxFontScaleClamped) {
-            ReportStyleWarning(SCHEMA_ERROR_CODE_INVALID_VALUE, "maxFontScale",
-                "Property maxFontScale got out-of-range number value, clamped to supported range");
-        }
-    } else if (maxFontScaleValue.IsValid()) {
-        if (maxFontScaleValue.IsNumber()) {
-            ReportStyleWarning(SCHEMA_ERROR_CODE_INVALID_VALUE, "maxFontScale",
-                "Property maxFontScale got invalid number value, " +
-                    std::string(DescribeStyleResolution(isDeltaUpdate)));
-        } else {
-            ReportStyleWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH, "maxFontScale",
-                std::string("Property maxFontScale expects number value, got type '") +
-                    maxFontScaleValue.GetTypeName() + "', " + DescribeStyleResolution(isDeltaUpdate));
-        }
-        SetMaxFontScale(0.0F);
-    } else if (!isDeltaUpdate) {
-        SetMaxFontScale(0.0F);
-    }
-
-    JsonValue fontScaleModeValue = styles.GetItem("fontScaleMode");
-    if (fontScaleModeValue.IsString()) {
-        std::string mode = StyleApplyUtils::TrimToken(fontScaleModeValue.GetStringValue(""));
-        if (mode == "custom" || mode == DEFAULT_FONT_SCALE_MODE) {
-            SetFontScaleMode(mode);
-        } else {
-            ReportStyleWarning(SCHEMA_ERROR_CODE_INVALID_VALUE, "fontScaleMode",
-                "Property fontScaleMode got invalid enum value '" + mode + "', " +
-                    DescribeStyleResolution(isDeltaUpdate));
-            SetFontScaleMode(DEFAULT_FONT_SCALE_MODE);
-        }
-    } else if (fontScaleModeValue.IsValid()) {
-        ReportStyleWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH, "fontScaleMode",
-            std::string("Property fontScaleMode expects string enum value, got type '") +
-                fontScaleModeValue.GetTypeName() + "', " + DescribeStyleResolution(isDeltaUpdate));
-        SetFontScaleMode(DEFAULT_FONT_SCALE_MODE);
-    } else if (!isDeltaUpdate) {
-        SetFontScaleMode(DEFAULT_FONT_SCALE_MODE);
-    }
-
-    float fontSize = 0.0F;
-    JsonValue fontSizeValue = styles.GetItem("fontSize");
-    if (TryParsePositiveFiniteStyleScalar(fontSizeValue, fontSize)) {
-        SetFontSize(fontSize);
-    } else if (fontSizeValue.IsValid()) {
-        if (fontSizeValue.IsNumber()) {
-            ReportStyleWarning(SCHEMA_ERROR_CODE_INVALID_VALUE, "fontSize",
-                "Property fontSize got invalid number value, " + std::string(DescribeStyleResolution(isDeltaUpdate)));
-        } else {
-            ReportStyleWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH, "fontSize",
-                std::string("Property fontSize expects number value, got type '") + fontSizeValue.GetTypeName() +
-                    "', " + DescribeStyleResolution(isDeltaUpdate));
-        }
-        SetFontSize(DEFAULT_TEXT_FONT_SIZE);
-    } else if (!isDeltaUpdate) {
-        SetFontSize(DEFAULT_TEXT_FONT_SIZE);
-    }
-
-    JsonValue maxLinesValue = styles.GetItem("maxLines");
-    if (maxLinesValue.IsValid()) {
-        int32_t maxLines = 0;
-        if (!TryParseMaxLinesNumber(maxLinesValue, maxLines)) {
-            if (maxLinesValue.IsNumber()) {
-                ReportStyleWarning(SCHEMA_ERROR_CODE_INVALID_VALUE, "maxLines",
-                    "Property maxLines got invalid number value, " +
-                        std::string(DescribeStyleResolution(isDeltaUpdate)));
-            } else {
-                ReportStyleWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH, "maxLines",
-                    std::string("Property maxLines expects number value, got type '") + maxLinesValue.GetTypeName() +
-                        "', " + DescribeStyleResolution(isDeltaUpdate));
-            }
-            SetMaxLines(DEFAULT_TEXT_MAX_LINES);
-        }
-    }
-
-    JsonValue textOverflowValue = styles.GetItem("textOverflow");
-    if (textOverflowValue.IsValid()) {
-        int32_t textOverflow = 0;
-        if (!StyleApplyUtils::ParseTextOverflow(textOverflowValue, textOverflow)) {
-            if (textOverflowValue.IsString()) {
-                ReportStyleWarning(SCHEMA_ERROR_CODE_INVALID_VALUE, "textOverflow",
-                    "Property textOverflow got invalid enum value '" +
-                        StyleApplyUtils::TrimToken(textOverflowValue.GetStringValue("")) + "', " +
-                        DescribeStyleResolution(isDeltaUpdate));
-            } else {
-                ReportStyleWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH, "textOverflow",
-                    std::string("Property textOverflow expects string enum value, got type '") +
-                        textOverflowValue.GetTypeName() + "', " + DescribeStyleResolution(isDeltaUpdate));
-            }
-            SetTextOverflow(DEFAULT_TEXT_OVERFLOW);
-        }
-    }
-
-    JsonValue textAlignValue = styles.GetItem("textAlign");
-    if (textAlignValue.IsValid()) {
-        int32_t textAlign = 0;
-        if (!StyleApplyUtils::ParseTextAlign(textAlignValue, textAlign)) {
-            if (textAlignValue.IsString()) {
-                ReportStyleWarning(SCHEMA_ERROR_CODE_INVALID_VALUE, "textAlign",
-                    "Property textAlign got invalid enum value '" +
-                        StyleApplyUtils::TrimToken(textAlignValue.GetStringValue("")) + "', " +
-                        DescribeStyleResolution(isDeltaUpdate));
-            } else {
-                ReportStyleWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH, "textAlign",
-                    std::string("Property textAlign expects string enum value, got type '") +
-                        textAlignValue.GetTypeName() + "', " + DescribeStyleResolution(isDeltaUpdate));
-            }
-            SetTextAlign(DEFAULT_TEXT_ALIGN);
-        }
-    }
-
-    JsonValue wordBreakValue = styles.GetItem("wordBreak");
-    if (wordBreakValue.IsValid()) {
-        int32_t wordBreak = 0;
-        if (!StyleApplyUtils::ParseWordBreak(wordBreakValue, wordBreak)) {
-            if (wordBreakValue.IsString()) {
-                ReportStyleWarning(SCHEMA_ERROR_CODE_INVALID_VALUE, "wordBreak",
-                    "Property wordBreak got invalid enum value '" +
-                        StyleApplyUtils::TrimToken(wordBreakValue.GetStringValue("")) + "', " +
-                        DescribeStyleResolution(isDeltaUpdate));
-            } else {
-                ReportStyleWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH, "wordBreak",
-                    std::string("Property wordBreak expects string enum value, got type '") +
-                        wordBreakValue.GetTypeName() + "', " + DescribeStyleResolution(isDeltaUpdate));
-            }
-            SetWordBreak(DEFAULT_TEXT_WORD_BREAK);
-        }
-    }
-
-    if (ShouldWarnTextOverflowWithoutMaxLines(textOverflowValue, maxLinesValue)) {
-        ReportSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
-            "Property textOverflow is set but maxLines is not configured; "
-            "textOverflow effect may not be visible without a finite maxLines value",
-            "styles.textOverflow");
-    }
-
+    ApplyFontWeightAndColorStyle(styles, isDeltaUpdate);
+    ApplyFontScaleRangeStyle(styles, isDeltaUpdate);
+    ApplyFontScaleModeAndSizeStyle(styles, isDeltaUpdate);
+    ApplyMaxLinesAndOverflowStyle(styles, isDeltaUpdate);
+    ApplyTextAlignAndBreakStyle(styles, isDeltaUpdate);
     float minFontSize = -1.0F;
-    JsonValue minFontSizeValue = styles.GetItem("minFontSize");
-    if (minFontSizeValue.IsValid()) {
-        if (TryParsePositiveFiniteStyleScalar(minFontSizeValue, minFontSize)) {
-            // valid, applied by ExtendedStyleResolver above
-        } else if (minFontSizeValue.IsNumber()) {
-            ReportStyleWarning(SCHEMA_ERROR_CODE_INVALID_VALUE, "minFontSize",
-                "Property minFontSize got invalid number value, " +
-                    std::string(DescribeStyleResolution(isDeltaUpdate)));
-            if (nativeView_ != nullptr) {
-                ArkUINodeApiAdapter::ResetNodeTextMinFontSize(nativeView_);
-            }
-        } else {
-            ReportStyleWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH, "minFontSize",
-                std::string("Property minFontSize expects number value, got type '") + minFontSizeValue.GetTypeName() +
-                    "', " + DescribeStyleResolution(isDeltaUpdate));
-            minFontSize = -1.0F;
-            if (nativeView_ != nullptr) {
-                ArkUINodeApiAdapter::ResetNodeTextMinFontSize(nativeView_);
-            }
-        }
-    } else if (!isDeltaUpdate && nativeView_ != nullptr) {
-        ArkUINodeApiAdapter::ResetNodeTextMinFontSize(nativeView_);
-    }
-
-    float maxFontSize = -1.0F;
-    JsonValue maxFontSizeValue = styles.GetItem("maxFontSize");
-    if (maxFontSizeValue.IsValid()) {
-        if (TryParsePositiveFiniteStyleScalar(maxFontSizeValue, maxFontSize)) {
-            // valid, applied by ExtendedStyleResolver above
-        } else if (maxFontSizeValue.IsNumber()) {
-            ReportStyleWarning(SCHEMA_ERROR_CODE_INVALID_VALUE, "maxFontSize",
-                "Property maxFontSize got invalid number value, " +
-                    std::string(DescribeStyleResolution(isDeltaUpdate)));
-            if (nativeView_ != nullptr) {
-                ArkUINodeApiAdapter::ResetNodeTextMaxFontSize(nativeView_);
-            }
-        } else {
-            ReportStyleWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH, "maxFontSize",
-                std::string("Property maxFontSize expects number value, got type '") + maxFontSizeValue.GetTypeName() +
-                    "', " + DescribeStyleResolution(isDeltaUpdate));
-            maxFontSize = -1.0F;
-            if (nativeView_ != nullptr) {
-                ArkUINodeApiAdapter::ResetNodeTextMaxFontSize(nativeView_);
-            }
-        }
-    } else if (!isDeltaUpdate && nativeView_ != nullptr) {
-        ArkUINodeApiAdapter::ResetNodeTextMaxFontSize(nativeView_);
-    }
-
-    if (HasConflictingAdaptiveFontSizes(minFontSizeValue, maxFontSizeValue, minFontSize, maxFontSize)) {
-        ReportSchemaWarning(SCHEMA_ERROR_CODE_INVALID_VALUE,
-            "Property minFontSize (" + std::to_string(minFontSize) + ") must be less than maxFontSize (" +
-                std::to_string(maxFontSize) + "); adaptive font sizing has been ignored",
-            "styles.minFontSize");
-    }
+    ApplyMinFontSizeStyle(styles, isDeltaUpdate, minFontSize);
+    ApplyMaxFontSizeStyle(styles, isDeltaUpdate, minFontSize);
 
     ApplyDecorationStyleWithFallback(styles);
 #ifdef TDD_BUILD
@@ -718,6 +739,50 @@ bool ExtendedTextComponent::ResolveDecorationWithFallback(
     return true;
 }
 
+void ExtendedTextComponent::ValidateDecorationFields(const JsonValue& styles, bool isDeltaUpdate)
+{
+    JsonValue decorationValue = styles.GetItem("decoration");
+    JsonValue typeValue = decorationValue.GetItem("type");
+    if (typeValue.IsValid()) {
+        int32_t parsedType = 0;
+        if (!typeValue.IsString()) {
+            ReportStyleWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH, "decoration.type",
+                std::string("Property decoration.type expects string enum value, got type '") +
+                    typeValue.GetTypeName() + "', " + DescribeStyleResolution(isDeltaUpdate));
+        } else if (!ParseDecorationTypeToken(typeValue.GetStringValue(""), parsedType)) {
+            ReportStyleWarning(SCHEMA_ERROR_CODE_INVALID_VALUE, "decoration.type",
+                "Property decoration.type got invalid enum value '" +
+                    StyleApplyUtils::TrimToken(typeValue.GetStringValue("")) + "', " +
+                    std::string(DescribeStyleResolution(isDeltaUpdate)));
+        }
+    }
+    JsonValue colorValue = decorationValue.GetItem("color");
+    uint32_t parsedColor = 0;
+    if (colorValue.IsValid() && !TryParseHexColorStringStyleValue(colorValue, parsedColor)) {
+        if (colorValue.IsString()) {
+            ReportStyleWarning(SCHEMA_ERROR_CODE_INVALID_VALUE, "decoration.color",
+                "Property decoration.color got invalid color value, " +
+                    std::string(DescribeStyleResolution(isDeltaUpdate)));
+        } else {
+            ReportStyleWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH, "decoration.color",
+                std::string("Property decoration.color expects string value, got type '") + colorValue.GetTypeName() +
+                    "', " + DescribeStyleResolution(isDeltaUpdate));
+        }
+    }
+    JsonValue styleValue = decorationValue.GetItem("style");
+    if (styleValue.IsValid()) {
+        int32_t parsedStyle = 0;
+        if (!styleValue.IsString()) {
+            ReportStyleWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH, "decoration.style",
+                std::string("Property decoration.style expects string enum value, got type '") +
+                    styleValue.GetTypeName() + "', " + DescribeStyleResolution(isDeltaUpdate));
+        } else if (!ParseDecorationStyleToken(styleValue.GetStringValue(""), parsedStyle)) {
+            ReportStyleWarning(SCHEMA_ERROR_CODE_INVALID_VALUE, "decoration.style",
+                "Property decoration.style has invalid value, " + std::string(DescribeStyleResolution(isDeltaUpdate)));
+        }
+    }
+}
+
 void ExtendedTextComponent::ApplyDecorationStyleWithFallback(const JsonValue& styles)
 {
     bool isDeltaUpdate = IsApplyingStyleDeltaUpdate();
@@ -742,47 +807,7 @@ void ExtendedTextComponent::ApplyDecorationStyleWithFallback(const JsonValue& st
         return;
     }
 
-    JsonValue typeValue = decorationValue.GetItem("type");
-    if (typeValue.IsValid()) {
-        int32_t parsedType = 0;
-        if (!typeValue.IsString()) {
-            ReportStyleWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH, "decoration.type",
-                std::string("Property decoration.type expects string enum value, got type '") +
-                    typeValue.GetTypeName() + "', " + DescribeStyleResolution(isDeltaUpdate));
-        } else if (!ParseDecorationTypeToken(typeValue.GetStringValue(""), parsedType)) {
-            ReportStyleWarning(SCHEMA_ERROR_CODE_INVALID_VALUE, "decoration.type",
-                "Property decoration.type got invalid enum value '" +
-                    StyleApplyUtils::TrimToken(typeValue.GetStringValue("")) + "', " +
-                    std::string(DescribeStyleResolution(isDeltaUpdate)));
-        }
-    }
-
-    JsonValue colorValue = decorationValue.GetItem("color");
-    uint32_t parsedColor = 0;
-    if (colorValue.IsValid() && !TryParseHexColorStringStyleValue(colorValue, parsedColor)) {
-        if (colorValue.IsString()) {
-            ReportStyleWarning(SCHEMA_ERROR_CODE_INVALID_VALUE, "decoration.color",
-                "Property decoration.color got invalid color value, " +
-                    std::string(DescribeStyleResolution(isDeltaUpdate)));
-        } else {
-            ReportStyleWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH, "decoration.color",
-                std::string("Property decoration.color expects string value, got type '") + colorValue.GetTypeName() +
-                    "', " + DescribeStyleResolution(isDeltaUpdate));
-        }
-    }
-
-    JsonValue styleValue = decorationValue.GetItem("style");
-    if (styleValue.IsValid()) {
-        int32_t parsedStyle = 0;
-        if (!styleValue.IsString()) {
-            ReportStyleWarning(SCHEMA_ERROR_CODE_TYPE_MISMATCH, "decoration.style",
-                std::string("Property decoration.style expects string enum value, got type '") +
-                    styleValue.GetTypeName() + "', " + DescribeStyleResolution(isDeltaUpdate));
-        } else if (!ParseDecorationStyleToken(styleValue.GetStringValue(""), parsedStyle)) {
-            ReportStyleWarning(SCHEMA_ERROR_CODE_INVALID_VALUE, "decoration.style",
-                "Property decoration.style has invalid value, " + std::string(DescribeStyleResolution(isDeltaUpdate)));
-        }
-    }
+    ValidateDecorationFields(styles, isDeltaUpdate);
 
     JsonValue thicknessScaleValue = decorationValue.GetItem("thicknessScale");
     float parsedThicknessScale = 0.0F;
@@ -911,6 +936,132 @@ void ExtendedTextComponent::SetWordBreak(A2UIWordBreak wordBreak)
     ArkUINodeApiAdapter::SetNodeTextWordBreak(nativeView_, static_cast<int32_t>(wordBreak));
 }
 #ifdef TDD_BUILD
+void ExtendedTextComponent::ApplyFontColorFontSizeWeightForTest(const JsonValue& styles, bool isDeltaUpdate)
+{
+    uint32_t parsedColor = 0;
+    JsonValue fontColorValue = styles.GetItem("fontColor");
+    if (TryParseHexColorStringStyleValue(fontColorValue, parsedColor)) {
+        fontColor_ = parsedColor;
+    } else if (fontColorValue.IsValid()) {
+        fontColor_ = ResolveDefaultFontColor();
+    } else if (!isDeltaUpdate) {
+        fontColor_ = ResolveDefaultFontColor();
+    }
+    float parsedFontSize = 0.0F;
+    JsonValue fontSizeValue = styles.GetItem("fontSize");
+    if (TryParsePositiveFiniteStyleScalar(fontSizeValue, parsedFontSize)) {
+        fontSize_ = parsedFontSize;
+    } else if (fontSizeValue.IsValid()) {
+        fontSize_ = DEFAULT_TEXT_FONT_SIZE;
+    } else if (!isDeltaUpdate) {
+        fontSize_ = DEFAULT_TEXT_FONT_SIZE;
+    }
+    int32_t parsedFontWeight = static_cast<int32_t>(A2UIFontWeight::NORMAL);
+    JsonValue fontWeightValue = styles.GetItem("fontWeight");
+    if (TryParseTextFontWeight(fontWeightValue, parsedFontWeight)) {
+        fontWeight_ = static_cast<A2UIFontWeight>(parsedFontWeight);
+    } else if (fontWeightValue.IsValid()) {
+        fontWeight_ = DEFAULT_TEXT_FONT_WEIGHT;
+    } else if (!isDeltaUpdate) {
+        fontWeight_ = DEFAULT_TEXT_FONT_WEIGHT;
+    }
+}
+
+void ExtendedTextComponent::ApplyFontScaleRangeAndModeForTest(const JsonValue& styles, bool isDeltaUpdate)
+{
+    float parsedMinFontScale = 0.0F;
+    JsonValue minFontScaleValue = styles.GetItem("minFontScale");
+    if (TryParseValidMinFontScale(minFontScaleValue, parsedMinFontScale)) {
+        minFontScale_ = parsedMinFontScale;
+    } else if (minFontScaleValue.IsValid()) {
+        minFontScale_ = 0.0F;
+    } else if (!isDeltaUpdate) {
+        minFontScale_ = 0.0F;
+    }
+    float parsedMaxFontScale = 0.0F;
+    JsonValue maxFontScaleValue = styles.GetItem("maxFontScale");
+    if (TryParseValidMaxFontScale(maxFontScaleValue, parsedMaxFontScale)) {
+        maxFontScale_ = parsedMaxFontScale;
+    } else if (maxFontScaleValue.IsValid()) {
+        maxFontScale_ = 0.0F;
+    } else if (!isDeltaUpdate) {
+        maxFontScale_ = 0.0F;
+    }
+    JsonValue fontScaleModeValue = styles.GetItem("fontScaleMode");
+    if (fontScaleModeValue.IsString()) {
+        std::string mode = StyleApplyUtils::TrimToken(fontScaleModeValue.GetStringValue(""));
+        if (mode == "custom" || mode == DEFAULT_FONT_SCALE_MODE) {
+            fontScaleMode_ = mode;
+        } else {
+            fontScaleMode_ = DEFAULT_FONT_SCALE_MODE;
+        }
+    } else if (fontScaleModeValue.IsValid()) {
+        fontScaleMode_ = DEFAULT_FONT_SCALE_MODE;
+    } else if (!isDeltaUpdate) {
+        fontScaleMode_ = DEFAULT_FONT_SCALE_MODE;
+    }
+}
+
+void ExtendedTextComponent::ApplyMaxLinesAndAdaptiveFontForTest(const JsonValue& styles, bool isDeltaUpdate)
+{
+    int32_t parsedInt = 0;
+    JsonValue maxLinesValue = styles.GetItem("maxLines");
+    if (TryParseMaxLinesNumber(maxLinesValue, parsedInt)) {
+        maxLines_ = parsedInt;
+    } else if (maxLinesValue.IsValid()) {
+        maxLines_ = -1;
+    } else if (!isDeltaUpdate) {
+        maxLines_ = -1;
+    }
+    float parsedMinFontSize = 0.0F;
+    JsonValue minFontSizeValue = styles.GetItem("minFontSize");
+    if (TryParsePositiveFiniteStyleScalar(minFontSizeValue, parsedMinFontSize)) {
+        minFontSize_ = parsedMinFontSize;
+    } else if (minFontSizeValue.IsValid()) {
+        minFontSize_ = -1.0F;
+    } else if (!isDeltaUpdate) {
+        minFontSize_ = -1.0F;
+    }
+    float parsedMaxFontSize = 0.0F;
+    JsonValue maxFontSizeValue = styles.GetItem("maxFontSize");
+    if (TryParsePositiveFiniteStyleScalar(maxFontSizeValue, parsedMaxFontSize)) {
+        maxFontSize_ = parsedMaxFontSize;
+    } else if (maxFontSizeValue.IsValid()) {
+        maxFontSize_ = -1.0F;
+    } else if (!isDeltaUpdate) {
+        maxFontSize_ = -1.0F;
+    }
+}
+
+void ExtendedTextComponent::ApplyOverflowAlignBreakForTest(const JsonValue& styles, bool isDeltaUpdate)
+{
+    int32_t parsedInt = 0;
+    JsonValue textOverflowValue = styles.GetItem("textOverflow");
+    if (StyleApplyUtils::ParseTextOverflow(textOverflowValue, parsedInt)) {
+        textOverflow_ = parsedInt;
+    } else if (textOverflowValue.IsValid()) {
+        textOverflow_ = DEFAULT_TEXT_OVERFLOW;
+    } else if (!isDeltaUpdate) {
+        textOverflow_ = DEFAULT_TEXT_OVERFLOW;
+    }
+    JsonValue textAlignValue = styles.GetItem("textAlign");
+    if (StyleApplyUtils::ParseTextAlign(textAlignValue, parsedInt)) {
+        textAlign_ = parsedInt;
+    } else if (textAlignValue.IsValid()) {
+        textAlign_ = DEFAULT_TEXT_ALIGN;
+    } else if (!isDeltaUpdate) {
+        textAlign_ = DEFAULT_TEXT_ALIGN;
+    }
+    JsonValue wordBreakValue = styles.GetItem("wordBreak");
+    if (StyleApplyUtils::ParseWordBreak(wordBreakValue, parsedInt)) {
+        wordBreak_ = static_cast<A2UIWordBreak>(parsedInt);
+    } else if (wordBreakValue.IsValid()) {
+        wordBreak_ = DEFAULT_TEXT_WORD_BREAK;
+    } else if (!isDeltaUpdate) {
+        wordBreak_ = DEFAULT_TEXT_WORD_BREAK;
+    }
+}
+
 void ExtendedTextComponent::ApplyTextStyleStateForTest(const JsonValue& styles)
 {
     bool isDeltaUpdate = IsApplyingStyleDeltaUpdate();
@@ -946,124 +1097,10 @@ void ExtendedTextComponent::ApplyTextStyleStateForTest(const JsonValue& styles)
         decoration_ = TextDecorationState();
     }
 
-    uint32_t parsedColor = 0;
-    JsonValue fontColorValue = styles.GetItem("fontColor");
-    if (TryParseHexColorStringStyleValue(fontColorValue, parsedColor)) {
-        fontColor_ = parsedColor;
-    } else if (fontColorValue.IsValid()) {
-        fontColor_ = ResolveDefaultFontColor();
-    } else if (!isDeltaUpdate) {
-        fontColor_ = ResolveDefaultFontColor();
-    }
-
-    float parsedFontSize = 0.0F;
-    JsonValue fontSizeValue = styles.GetItem("fontSize");
-    if (TryParsePositiveFiniteStyleScalar(fontSizeValue, parsedFontSize)) {
-        fontSize_ = parsedFontSize;
-    } else if (fontSizeValue.IsValid()) {
-        fontSize_ = DEFAULT_TEXT_FONT_SIZE;
-    } else if (!isDeltaUpdate) {
-        fontSize_ = DEFAULT_TEXT_FONT_SIZE;
-    }
-
-    int32_t parsedFontWeight = static_cast<int32_t>(A2UIFontWeight::NORMAL);
-    JsonValue fontWeightValue = styles.GetItem("fontWeight");
-    if (TryParseTextFontWeight(fontWeightValue, parsedFontWeight)) {
-        fontWeight_ = static_cast<A2UIFontWeight>(parsedFontWeight);
-    } else if (fontWeightValue.IsValid()) {
-        fontWeight_ = DEFAULT_TEXT_FONT_WEIGHT;
-    } else if (!isDeltaUpdate) {
-        fontWeight_ = DEFAULT_TEXT_FONT_WEIGHT;
-    }
-
-    float parsedMinFontScale = 0.0F;
-    JsonValue minFontScaleValue = styles.GetItem("minFontScale");
-    if (TryParseValidMinFontScale(minFontScaleValue, parsedMinFontScale)) {
-        minFontScale_ = parsedMinFontScale;
-    } else if (minFontScaleValue.IsValid()) {
-        minFontScale_ = 0.0F;
-    } else if (!isDeltaUpdate) {
-        minFontScale_ = 0.0F;
-    }
-
-    float parsedMaxFontScale = 0.0F;
-    JsonValue maxFontScaleValue = styles.GetItem("maxFontScale");
-    if (TryParseValidMaxFontScale(maxFontScaleValue, parsedMaxFontScale)) {
-        maxFontScale_ = parsedMaxFontScale;
-    } else if (maxFontScaleValue.IsValid()) {
-        maxFontScale_ = 0.0F;
-    } else if (!isDeltaUpdate) {
-        maxFontScale_ = 0.0F;
-    }
-
-    JsonValue fontScaleModeValue = styles.GetItem("fontScaleMode");
-    if (fontScaleModeValue.IsString()) {
-        std::string mode = StyleApplyUtils::TrimToken(fontScaleModeValue.GetStringValue(""));
-        if (mode == "custom" || mode == DEFAULT_FONT_SCALE_MODE) {
-            fontScaleMode_ = mode;
-        } else {
-            fontScaleMode_ = DEFAULT_FONT_SCALE_MODE;
-        }
-    } else if (fontScaleModeValue.IsValid()) {
-        fontScaleMode_ = DEFAULT_FONT_SCALE_MODE;
-    } else if (!isDeltaUpdate) {
-        fontScaleMode_ = DEFAULT_FONT_SCALE_MODE;
-    }
-
-    int32_t parsedInt = 0;
-    JsonValue maxLinesValue = styles.GetItem("maxLines");
-    if (TryParseMaxLinesNumber(maxLinesValue, parsedInt)) {
-        maxLines_ = parsedInt;
-    } else if (maxLinesValue.IsValid()) {
-        maxLines_ = -1;
-    } else if (!isDeltaUpdate) {
-        maxLines_ = -1;
-    }
-
-    float parsedMinFontSize = 0.0F;
-    JsonValue minFontSizeValue = styles.GetItem("minFontSize");
-    if (TryParsePositiveFiniteStyleScalar(minFontSizeValue, parsedMinFontSize)) {
-        minFontSize_ = parsedMinFontSize;
-    } else if (minFontSizeValue.IsValid()) {
-        minFontSize_ = -1.0F;
-    } else if (!isDeltaUpdate) {
-        minFontSize_ = -1.0F;
-    }
-
-    float parsedMaxFontSize = 0.0F;
-    JsonValue maxFontSizeValue = styles.GetItem("maxFontSize");
-    if (TryParsePositiveFiniteStyleScalar(maxFontSizeValue, parsedMaxFontSize)) {
-        maxFontSize_ = parsedMaxFontSize;
-    } else if (maxFontSizeValue.IsValid()) {
-        maxFontSize_ = -1.0F;
-    } else if (!isDeltaUpdate) {
-        maxFontSize_ = -1.0F;
-    }
-
-    JsonValue textOverflowValue = styles.GetItem("textOverflow");
-    if (StyleApplyUtils::ParseTextOverflow(textOverflowValue, parsedInt)) {
-        textOverflow_ = parsedInt;
-    } else if (textOverflowValue.IsValid()) {
-        textOverflow_ = DEFAULT_TEXT_OVERFLOW;
-    } else if (!isDeltaUpdate) {
-        textOverflow_ = DEFAULT_TEXT_OVERFLOW;
-    }
-    JsonValue textAlignValue = styles.GetItem("textAlign");
-    if (StyleApplyUtils::ParseTextAlign(textAlignValue, parsedInt)) {
-        textAlign_ = parsedInt;
-    } else if (textAlignValue.IsValid()) {
-        textAlign_ = DEFAULT_TEXT_ALIGN;
-    } else if (!isDeltaUpdate) {
-        textAlign_ = DEFAULT_TEXT_ALIGN;
-    }
-    JsonValue wordBreakValue = styles.GetItem("wordBreak");
-    if (StyleApplyUtils::ParseWordBreak(wordBreakValue, parsedInt)) {
-        wordBreak_ = static_cast<A2UIWordBreak>(parsedInt);
-    } else if (wordBreakValue.IsValid()) {
-        wordBreak_ = DEFAULT_TEXT_WORD_BREAK;
-    } else if (!isDeltaUpdate) {
-        wordBreak_ = DEFAULT_TEXT_WORD_BREAK;
-    }
+    ApplyFontColorFontSizeWeightForTest(styles, isDeltaUpdate);
+    ApplyFontScaleRangeAndModeForTest(styles, isDeltaUpdate);
+    ApplyMaxLinesAndAdaptiveFontForTest(styles, isDeltaUpdate);
+    ApplyOverflowAlignBreakForTest(styles, isDeltaUpdate);
 
     TextDecorationState decoration;
     JsonValue decorationValue = styles.GetItem("decoration");

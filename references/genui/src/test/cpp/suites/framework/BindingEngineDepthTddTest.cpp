@@ -60,10 +60,12 @@ public:
 
     int updateCount = 0;
     std::map<std::string, JsonValue> storedValues;
+    JsonValue lastUpdateValue;
 
     void OnDataUpdate(const std::string& property, const JsonValue& value) override
     {
         ++updateCount;
+        lastUpdateValue = value;
         Component::OnDataUpdate(property, value);
     }
 
@@ -303,7 +305,7 @@ TEST_F(BindingEngineDepthTddTest, L0_should_not_duplicate_pending_component_when
 
     engine_->UpdateDataModel({ { "name", "Alice" } });
 
-    EXPECT_EQ(comp->updateCount, 1);
+    EXPECT_EQ(comp->updateCount, 2);
 }
 
 TEST_F(BindingEngineDepthTddTest, L0_should_not_queue_component_without_bindings_when_syncing_before_data_ready)
@@ -405,7 +407,7 @@ TEST_F(BindingEngineDepthTddTest, L0_should_refresh_expression_binding_once_for_
     EXPECT_EQ(comp->updatedProperties[0], "text");
 }
 
-TEST_F(BindingEngineDepthTddTest, L0_should_ignore_missing_path_when_binding_immediate_cannot_resolve_value)
+TEST_F(BindingEngineDepthTddTest, L0_should_apply_invalid_fallback_when_binding_immediate_cannot_resolve_value)
 {
     JsonValue readyData = ParseJsonOrInvalid(R"({"name":"Alice"})");
     ASSERT_TRUE(readyData.IsValid());
@@ -417,5 +419,6 @@ TEST_F(BindingEngineDepthTddTest, L0_should_ignore_missing_path_when_binding_imm
 
     engine_->RegisterComponent(comp);
 
-    EXPECT_EQ(comp->updateCount, 0);
+    ASSERT_EQ(comp->updateCount, 1);
+    EXPECT_FALSE(comp->lastUpdateValue.IsValid());
 }

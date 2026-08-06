@@ -38,6 +38,8 @@ typedef int32_t ArkUI_NodeAttributeType;
 typedef int32_t ArkUI_ScrollBarDisplayMode;
 typedef int32_t ArkUI_ScrollNestedMode;
 typedef int32_t ArkUI_NodeEventType;
+typedef int32_t ArkUI_NodeCustomEventType;
+typedef int32_t ArkUI_NodeDirtyFlag;
 typedef int32_t ArkUI_CancelButtonStyle;
 
 struct ArkUI_NodeAdapter {
@@ -49,6 +51,13 @@ struct ArkUI_NodeAdapterEvent {
 };
 struct ArkUI_NodeEvent {
     int dummy;
+};
+struct ArkUI_NodeCustomEvent {
+    ArkUI_NodeHandle node;
+    ArkUI_NodeCustomEventType eventType;
+    void* userData;
+    ArkUI_LayoutConstraint* layoutConstraint;
+    ArkUI_IntOffset layoutPosition;
 };
 struct ArkUI_StringAsyncEvent {
     char* pStr;
@@ -80,6 +89,7 @@ typedef struct {
 } ArkUI_AttributeItem;
 
 typedef void (*ArkUI_NodeEventCallback)(ArkUI_NodeEvent* event);
+typedef void (*ArkUI_NodeCustomEventCallback)(ArkUI_NodeCustomEvent* event);
 typedef void (*ArkUI_NodeAdapterEventCallback)(ArkUI_NodeAdapterEvent* event);
 
 typedef struct {
@@ -89,6 +99,7 @@ typedef struct {
     int32_t (*removeChild)(ArkUI_NodeHandle parent, ArkUI_NodeHandle child);
     int32_t (*insertChildAt)(ArkUI_NodeHandle parent, ArkUI_NodeHandle child, int32_t index);
     int32_t (*setAttribute)(ArkUI_NodeHandle node, int32_t attribute, ArkUI_AttributeItem* item);
+    const ArkUI_AttributeItem* (*getAttribute)(ArkUI_NodeHandle node, int32_t attribute);
     int32_t (*resetAttribute)(ArkUI_NodeHandle node, int32_t attribute);
     int32_t (*setUserData)(ArkUI_NodeHandle node, void* userData);
     void* (*getUserData)(ArkUI_NodeHandle node);
@@ -96,9 +107,34 @@ typedef struct {
     int32_t (*removeNodeEventReceiver)(ArkUI_NodeHandle node, ArkUI_NodeEventCallback callback);
     int32_t (*registerNodeEvent)(ArkUI_NodeHandle node, int32_t eventType, int32_t eventId, void* userData);
     int32_t (*unregisterNodeEvent)(ArkUI_NodeHandle node, int32_t eventType);
+    int32_t (*registerNodeCustomEvent)(
+        ArkUI_NodeHandle node, ArkUI_NodeCustomEventType eventType, int32_t targetId, void* userData);
+    void (*unregisterNodeCustomEvent)(ArkUI_NodeHandle node, ArkUI_NodeCustomEventType eventType);
+    int32_t (*addNodeCustomEventReceiver)(ArkUI_NodeHandle node, ArkUI_NodeCustomEventCallback callback);
+    int32_t (*removeNodeCustomEventReceiver)(ArkUI_NodeHandle node, ArkUI_NodeCustomEventCallback callback);
+    void (*markDirty)(ArkUI_NodeHandle node, ArkUI_NodeDirtyFlag dirtyFlag);
+    uint32_t (*getTotalChildCount)(ArkUI_NodeHandle node);
+    ArkUI_NodeHandle (*getChildAt)(ArkUI_NodeHandle node, int32_t position);
+    int32_t (*setMeasuredSize)(ArkUI_NodeHandle node, int32_t width, int32_t height);
+    int32_t (*setLayoutPosition)(ArkUI_NodeHandle node, int32_t positionX, int32_t positionY);
+    ArkUI_IntSize (*getMeasuredSize)(ArkUI_NodeHandle node);
+    int32_t (*measureNode)(ArkUI_NodeHandle node, ArkUI_LayoutConstraint* constraint);
+    int32_t (*layoutNode)(ArkUI_NodeHandle node, int32_t positionX, int32_t positionY);
+    ArkUI_NodeHandle (*getParent)(ArkUI_NodeHandle node);
 } ArkUI_NativeNodeAPI_1;
 
 enum {
+    ARKUI_NODE_CUSTOM_EVENT_ON_MEASURE = 1 << 0,
+    ARKUI_NODE_CUSTOM_EVENT_ON_LAYOUT = 1 << 1,
+};
+
+enum {
+    NODE_NEED_MEASURE = 1,
+    NODE_NEED_LAYOUT = 2,
+};
+
+enum {
+    ARKUI_NODE_CUSTOM = 100,
     ARKUI_NODE_TEXT = 0,
     ARKUI_NODE_COLUMN = 1,
     ARKUI_NODE_ROW = 2,
@@ -151,6 +187,7 @@ enum {
     NODE_IMAGE_SRC = 24,
     NODE_IMAGE_OBJECT_FIT = 25,
     NODE_IMAGE_ALT = 26,
+    NODE_IMAGE_FILL_COLOR = 70,
     NODE_TEXT_INPUT_TEXT = 27,
     NODE_TEXT_INPUT_TYPE = 28,
     NODE_TEXT_INPUT_NUMBER_OF_LINES = 29,
@@ -208,6 +245,7 @@ enum {
     NODE_GRID_NODE_ADAPTER = 88,
     NODE_WIDTH_LAYOUTPOLICY = 105,
     NODE_HEIGHT_LAYOUTPOLICY = 106,
+    NODE_PIXEL_ROUND = 109,
     NODE_FLEX_OPTION = 86,
     NODE_FLEX_SPACE = 87,
     NODE_TEXT_MAX_FONT_SIZE = 67,
@@ -233,6 +271,7 @@ enum {
     NODE_TEXT_INPUT_CANCEL_BUTTON = 7014,
     NODE_TEXT_INPUT_UNDERLINE_COLOR = 7016,
     NODE_TEXT_INPUT_WORD_BREAK = 7029,
+    NODE_TEXT_INPUT_STYLE = 7031,
     NODE_TOGGLE_SELECTED_COLOR = 5000,
     NODE_TOGGLE_SWITCH_POINT_COLOR = 5001,
     NODE_TOGGLE_VALUE = 5002,
@@ -247,6 +286,8 @@ enum {
     NODE_TEXT_INPUT_ON_CHANGE = 101,
     NODE_TEXT_AREA_ON_CHANGE = 102,
     NODE_EVENT_ON_APPEAR = 103,
+    NODE_EVENT_ON_AREA_CHANGE = 3,
+    NODE_ON_SIZE_CHANGE = 30,
     NODE_RADIO_EVENT_ON_CHANGE = 18000,
     NODE_CHECKBOX_EVENT_ON_CHANGE = 19000,
     NODE_CHECKBOX_GROUP_EVENT_ON_CHANGE = 20000,
@@ -328,6 +369,11 @@ enum {
     ARKUI_WORD_BREAK_BREAK_ALL = 1,
     ARKUI_WORD_BREAK_BREAK_WORD = 2,
     ARKUI_WORD_BREAK_HYPHENATION = 3,
+};
+
+enum {
+    ARKUI_TEXTINPUT_STYLE_DEFAULT = 0,
+    ARKUI_TEXTINPUT_STYLE_INLINE = 1,
 };
 
 enum {
@@ -413,7 +459,13 @@ ArkUI_NodeHandle OH_ArkUI_NodeEvent_GetNodeHandle(ArkUI_NodeEvent* event);
 ArkUI_NodeEventType OH_ArkUI_NodeEvent_GetEventType(ArkUI_NodeEvent* event);
 ArkUI_NodeComponentEvent* OH_ArkUI_NodeEvent_GetNodeComponentEvent(ArkUI_NodeEvent* event);
 ArkUI_StringAsyncEvent* OH_ArkUI_NodeEvent_GetStringAsyncEvent(ArkUI_NodeEvent* event);
-
+ArkUI_LayoutConstraint* OH_ArkUI_NodeCustomEvent_GetLayoutConstraintInMeasure(ArkUI_NodeCustomEvent* event);
+ArkUI_NodeHandle OH_ArkUI_NodeCustomEvent_GetNodeHandle(ArkUI_NodeCustomEvent* event);
+ArkUI_NodeCustomEventType OH_ArkUI_NodeCustomEvent_GetEventType(ArkUI_NodeCustomEvent* event);
+void* OH_ArkUI_NodeCustomEvent_GetUserData(ArkUI_NodeCustomEvent* event);
+ArkUI_IntOffset OH_ArkUI_NodeCustomEvent_GetPositionInLayout(ArkUI_NodeCustomEvent* event);
+int32_t OH_ArkUI_LayoutConstraint_GetPercentReferenceWidth(const ArkUI_LayoutConstraint* constraint);
+int32_t OH_ArkUI_LayoutConstraint_GetPercentReferenceHeight(const ArkUI_LayoutConstraint* constraint);
 ArkUI_NodeAdapterHandle OH_ArkUI_NodeAdapter_Create(void);
 void OH_ArkUI_NodeAdapter_Dispose(ArkUI_NodeAdapterHandle handle);
 void OH_ArkUI_NodeAdapter_SetTotalNodeCount(ArkUI_NodeAdapterHandle handle, int32_t size);

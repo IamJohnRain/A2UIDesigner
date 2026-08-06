@@ -58,14 +58,7 @@ export struct ExtendedWeb {
   }
 
 build() {
-  Column() {
-    Web({ src: this.currentUrl, controller: this.webviewController })
-      .width('100%')
-      .height('100%')
-      .layoutWeight(1);
-  }
-    .width('100%')
-    .height('100%')
+  Web({ src: this.currentUrl, controller: this.webviewController })
     .layoutWeight(this.resolveWeight())
     .onClick(() => {
       dispatchComponentEvent(this.attribute, 'onClick');
@@ -77,7 +70,7 @@ build() {
     .accessibilityText(this.resolveAccessibilityLabel())
     .accessibilityDescription(this.resolveAccessibilityDescription())
     .id(this.attribute?.id ?? '')
-    .attributeModifier(buildExtendedCommonStyleModifier<ColumnAttribute>(this.attribute));
+    .attributeModifier(buildExtendedCommonStyleModifier<WebAttribute>(this.attribute));
 }
 
   private resolveWeight(): number {

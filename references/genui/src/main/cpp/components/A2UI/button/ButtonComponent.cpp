@@ -301,42 +301,7 @@ void ButtonComponent::DispatchAction() const
         return;
     }
     if (actionInfo_->GetType() == ActionType::FUNCTION_CALL) {
-        std::shared_ptr<FunctionCallInfo> functionCall = actionInfo_->GetFunctionCall();
-        JsonValue functionCallDescriptor = actionInfo_->GetFunctionCallDescriptor();
-        if (functionCallDescriptor.IsValid()) {
-            SurfaceSlot* surface = RenderManager::GetInstance().FindSurface(GetRenderId(), GetSurfaceId());
-            DynamicResolveContext context = { .renderId = GetRenderId(),
-                .surfaceId = GetSurfaceId(),
-                .componentId = GetComponentId(),
-                .dataModel = surface != nullptr ? surface->GetOrCreateDataModel() : nullptr,
-                .allowExpression = true,
-                .localVariables = GetLocalVariables() };
-            std::shared_ptr<FunctionCallInfo> resolvedFunctionCall =
-                DynamicValueResolver::ResolveFunctionCallDescriptor(functionCallDescriptor, context);
-            if (resolvedFunctionCall != nullptr) {
-                functionCall = resolvedFunctionCall;
-            } else {
-                LOG_A2UI(LOG_WARN,
-                    "ButtonComponent::DispatchAction: resolve functionCall descriptor failed, fallback to raw args");
-            }
-        }
-        if (functionCall == nullptr) {
-            LOG_A2UI(LOG_WARN, "ButtonComponent::DispatchAction: functionCall is null");
-            return;
-        }
-        if (NativeActionRegistry::GetInstance().HasAction(functionCall->GetFunctionName())) {
-            SurfaceSlot* surface = RenderManager::GetInstance().FindSurface(GetRenderId(), GetSurfaceId());
-            EventHandlerChainExecutor::ExecutionContext nativeActionContext;
-            nativeActionContext.renderId = GetRenderId();
-            nativeActionContext.surfaceId = GetSurfaceId();
-            nativeActionContext.componentId = GetComponentId();
-            nativeActionContext.dataModel = surface != nullptr ? surface->GetOrCreateDataModel() : nullptr;
-            nativeActionContext.localVariables = GetLocalVariables();
-            NativeActionRegistry::GetInstance().Execute(
-                functionCall->GetFunctionName(), functionCall->GetArgs(), nativeActionContext);
-            return;
-        }
-        FunctionBridge::GetInstance().Invoke(GetRenderId(), GetSurfaceId(), GetComponentId(), functionCall);
+        DispatchFunctionCallAction();
         return;
     }
     if (actionInfo_->GetType() == ActionType::EVENT) {
@@ -347,6 +312,46 @@ void ButtonComponent::DispatchAction() const
         ActionDispatchBridge::GetInstance().Dispatch(
             GetRenderId(), GetSurfaceId(), GetComponentId(), actionInfo_->GetEventName(), resolvedContext);
     }
+}
+
+void ButtonComponent::DispatchFunctionCallAction() const
+{
+    std::shared_ptr<FunctionCallInfo> functionCall = actionInfo_->GetFunctionCall();
+    JsonValue functionCallDescriptor = actionInfo_->GetFunctionCallDescriptor();
+    if (functionCallDescriptor.IsValid()) {
+        SurfaceSlot* surface = RenderManager::GetInstance().FindSurface(GetRenderId(), GetSurfaceId());
+        DynamicResolveContext context = { .renderId = GetRenderId(),
+            .surfaceId = GetSurfaceId(),
+            .componentId = GetComponentId(),
+            .dataModel = surface != nullptr ? surface->GetOrCreateDataModel() : nullptr,
+            .allowExpression = true,
+            .localVariables = GetLocalVariables() };
+        std::shared_ptr<FunctionCallInfo> resolvedFunctionCall =
+            DynamicValueResolver::ResolveFunctionCallDescriptor(functionCallDescriptor, context);
+        if (resolvedFunctionCall != nullptr) {
+            functionCall = resolvedFunctionCall;
+        } else {
+            LOG_A2UI(LOG_WARN,
+                "ButtonComponent::DispatchAction: resolve functionCall descriptor failed, fallback to raw args");
+        }
+    }
+    if (functionCall == nullptr) {
+        LOG_A2UI(LOG_WARN, "ButtonComponent::DispatchAction: functionCall is null");
+        return;
+    }
+    if (NativeActionRegistry::GetInstance().HasAction(functionCall->GetFunctionName())) {
+        SurfaceSlot* surface = RenderManager::GetInstance().FindSurface(GetRenderId(), GetSurfaceId());
+        EventHandlerChainExecutor::ExecutionContext nativeActionContext;
+        nativeActionContext.renderId = GetRenderId();
+        nativeActionContext.surfaceId = GetSurfaceId();
+        nativeActionContext.componentId = GetComponentId();
+        nativeActionContext.dataModel = surface != nullptr ? surface->GetOrCreateDataModel() : nullptr;
+        nativeActionContext.localVariables = GetLocalVariables();
+        NativeActionRegistry::GetInstance().Execute(
+            functionCall->GetFunctionName(), functionCall->GetArgs(), nativeActionContext);
+        return;
+    }
+    FunctionBridge::GetInstance().Invoke(GetRenderId(), GetSurfaceId(), GetComponentId(), functionCall);
 }
 
 std::shared_ptr<ButtonTheme> ButtonComponent::GetTheme()

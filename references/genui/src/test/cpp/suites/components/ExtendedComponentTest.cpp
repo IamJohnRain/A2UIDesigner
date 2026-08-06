@@ -1379,13 +1379,13 @@ TEST_F(ExtendedComponentTest, ExtendedComponentTest027)
 
 /**
  * @tc.name: ExtendedComponentTest028
- * @tc.desc: Verify Extended.Tabs only keeps TabContent/Extended.TabContent
+ * @tc.desc: Verify Tabs only keeps TabContent/Extended.TabContent
  * children in static children list.
  * @tc.type: FUNC
  */
 TEST_F(ExtendedComponentTest, ExtendedComponentTest028)
 {
-    slot_.SetCatalog(BuildExtendedProtocolCatalog({ "Extended.Tabs", "Extended.TabContent", "TabContent", "Text" }));
+    slot_.SetCatalog(BuildExtendedProtocolCatalog({ "Tabs", "Extended.TabContent", "TabContent", "Text" }));
     std::unique_ptr<JsonAdapter> message = JsonAdapter::Parse(R"({
         "components": [
             {
@@ -1472,7 +1472,7 @@ TEST_F(ExtendedComponentTest, ExtendedComponentTest029)
  */
 TEST_F(ExtendedComponentTest, ExtendedComponentTest030)
 {
-    slot_.SetCatalog(BuildExtendedProtocolCatalog({ "Extended.Tabs", "Extended.TabContent" }));
+    slot_.SetCatalog(BuildExtendedProtocolCatalog({ "Tabs", "Extended.TabContent" }));
     std::unique_ptr<JsonAdapter> message = JsonAdapter::Parse(R"({
         "components": [
             {
@@ -1534,12 +1534,12 @@ TEST_F(ExtendedComponentTest, ExtendedComponentTest031)
 
 /**
  * @tc.name: ExtendedComponentTest032
- * @tc.desc: Verify Extended.Tabs serializes multiple static children into customProps.children.
+ * @tc.desc: Verify Tabs serializes multiple static children into customProps.children.
  * @tc.type: FUNC
  */
 TEST_F(ExtendedComponentTest, ExtendedComponentTest032)
 {
-    slot_.SetCatalog(BuildExtendedProtocolCatalog({ "Extended.Tabs", "Extended.TabContent", "Text" }));
+    slot_.SetCatalog(BuildExtendedProtocolCatalog({ "Tabs", "Extended.TabContent", "Text" }));
     std::unique_ptr<JsonAdapter> message = JsonAdapter::Parse(R"({
         "components": [
             {

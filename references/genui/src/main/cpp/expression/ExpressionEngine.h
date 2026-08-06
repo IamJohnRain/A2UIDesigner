@@ -58,7 +58,8 @@ public:
     static ExpressionEngine& GetInstance();
 
     EvalResult Evaluate(const std::string& exprStr, EvaluationContext& context);
-    JsonValue EvaluateAsJsonValue(const std::string& exprStr, EvaluationContext& context);
+    JsonValue EvaluateAsJsonValue(
+        const std::string& exprStr, EvaluationContext& context, bool preserveNullResult = false);
 
     ExprParseResult Parse(const std::string& exprStr);
 
@@ -75,6 +76,13 @@ public:
 private:
     ExpressionEngine();
     EvalResult EvaluateInternal(const std::string& exprStr, EvaluationContext& context, bool stringifyJsonResult);
+    bool PrepareExpression(const std::string& exprStr, EvaluationContext& context, std::string& innerExpr);
+    bool ValidatePreparedTokens(
+        const std::string& innerExpr, const std::vector<Token>& tokens, EvaluationContext& context);
+    std::shared_ptr<AstNode> GetOrParseAst(
+        const std::string& cacheKey, const std::vector<Token>& tokens, EvaluationContext& context);
+    EvalResult FinalizeEvaluationResult(
+        const std::shared_ptr<AstNode>& ast, EvalResult result, EvaluationContext& context, bool stringifyJsonResult);
 
     static std::string Trim(const std::string& input);
 

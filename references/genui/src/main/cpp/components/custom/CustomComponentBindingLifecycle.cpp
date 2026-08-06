@@ -1,3 +1,18 @@
+/*
+ * Copyright (c) 2026 Huawei Device Co., Ltd.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 #include "components/custom/CustomComponent.h"
 #include "components/custom/CustomComponentExpressionBinding.h"
 #include "utils/LogA2UI.h"
@@ -38,8 +53,8 @@ void CustomComponent::OnDataUpdate(const std::string& property, const JsonValue&
             descriptor_.properties.accessibilityDescription.c_str(), descriptor_.type.c_str());
     }
 
-    if (!isCustomExpressionBinding) {
-        JsonValue callbackValue = GetCustomProperty(sourceProperty);
+    if (!isCustomExpressionBinding && !(isDynamicResolverBinding && !value.IsValid())) {
+        JsonValue callbackValue = value.IsValid() ? GetCustomProperty(sourceProperty) : JsonValue();
         DispatchDynamicValueCallback(sourceProperty, callbackValue.IsValid() ? callbackValue : value);
     }
     bool shouldUpdateCustomComponent = isCustomExpressionBinding || !isDynamicResolverBinding ||
@@ -62,6 +77,7 @@ void CustomComponent::OnPropertyRemoved(const std::string& propertyName)
 {
     Component::OnPropertyRemoved(propertyName);
     properties_.erase(propertyName);
+    rawDynamicProperties_.erase(propertyName);
     if (!IsCustomExpressionBindingProperty(propertyName)) {
         RemoveBindingsForProperty(BuildCustomExpressionBindingKey(propertyName));
     }
@@ -73,6 +89,10 @@ void CustomComponent::OnPropertyRemoved(const std::string& propertyName)
     if (propertyName == "accessibility.description") {
         descriptor_.properties.accessibilityDescription.clear();
         descriptor_.properties.hasAccessibilityDescription = false;
+    }
+    if (propertyName == "styles" && flexShrinkStyleState_ != FlexShrinkStyleState::UNSPECIFIED) {
+        flexShrinkStyleState_ = FlexShrinkStyleState::PARENT_DEFAULT;
+        SyncFlexShrinkParentDefaultProperties();
     }
 }
 

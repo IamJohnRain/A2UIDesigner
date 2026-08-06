@@ -68,6 +68,47 @@ protected:
     ArkUI_NodeHandle testNode_ = reinterpret_cast<ArkUI_NodeHandle>(0xA500);
 };
 
+TEST_F(ExtendedStyleResolverDfxTest, CommonStyles_NullValues_ReportInvalidValue)
+{
+    ArkUINodeApiAdapter applier = MakeTestApplier(testNode_);
+    mockArkUIPtr_->setAttributeRecords_.clear();
+
+    auto styles = JsonAdapter::Parse(R"({
+        "width": null,
+        "height": null,
+        "constraintSize": null,
+        "backgroundImage": null,
+        "backgroundImageSizeWithStyle": null,
+        "margin": null,
+        "padding": null,
+        "borderRadius": null,
+        "borderWidth": null,
+        "clip": null,
+        "backgroundColor": null,
+        "borderColor": null,
+        "linearGradient": null,
+        "layoutWeight": null,
+        "flexShrink": null,
+        "shadow": null,
+        "visibility": null
+    })");
+    ASSERT_NE(styles, nullptr);
+    std::vector<DescriptorValidationIssue> issues;
+    ExtendedStyleResolver::ResolveAndApply(styles->GetRoot(), applier, std::nullopt, issues);
+
+    const std::set<std::string> expectedPaths = { "styles.width", "styles.height", "styles.constraintSize",
+        "styles.backgroundImage", "styles.backgroundImageSizeWithStyle", "styles.margin", "styles.padding",
+        "styles.borderRadius", "styles.borderWidth", "styles.clip", "styles.backgroundColor", "styles.borderColor",
+        "styles.linearGradient", "styles.layoutWeight", "styles.flexShrink", "styles.shadow", "styles.visibility" };
+    std::set<std::string> actualPaths;
+    for (const auto& issue : issues) {
+        EXPECT_EQ(issue.code, "ERROR_CODE_INVALID_VALUE") << issue.path;
+        actualPaths.insert(issue.path);
+    }
+    EXPECT_EQ(actualPaths, expectedPaths);
+    EXPECT_EQ(issues.size(), expectedPaths.size());
+}
+
 // =============================================================================
 // DFX-01: backgroundImageSizeWithStyle 字符串枚举非法
 // 场景: backgroundImageSizeWithStyle 传入非法字符串，不在 cover/contain/auto/fill 枚举中
@@ -92,10 +133,15 @@ TEST_F(ExtendedStyleResolverDfxTest, DFX01_BackgroundImageSizeWithStyle_InvalidS
     EXPECT_EQ(issues[0].code, "ERROR_CODE_INVALID_VALUE");
     EXPECT_EQ(issues[0].path, "styles.backgroundImageSizeWithStyle");
 
-    // 验证: 不应设置 NODE_BACKGROUND_IMAGE_SIZE_WITH_STYLE
+    // 验证: 非法值应显式恢复为 Auto
+    bool restoredAuto = false;
     for (const auto& rec : mockArkUIPtr_->setAttributeRecords_) {
-        EXPECT_NE(rec.attribute, NODE_BACKGROUND_IMAGE_SIZE_WITH_STYLE);
+        if (rec.attribute == NODE_BACKGROUND_IMAGE_SIZE_WITH_STYLE && !rec.values.empty()) {
+            restoredAuto = true;
+            EXPECT_EQ(rec.values[0].i32, static_cast<int32_t>(A2UIImageSize::AUTO));
+        }
     }
+    EXPECT_TRUE(restoredAuto);
 }
 
 // DFX-01 扩展: 通用用例中的其他非法字符串值
@@ -1203,9 +1249,14 @@ TEST_F(ExtendedStyleResolverDfxTest, DFX_MultipleInvalidProperties_AllReported)
     EXPECT_TRUE(paths.count("styles.clip") > 0);
     EXPECT_TRUE(paths.count("styles.backgroundColor") > 0);
 
-    // 所有属性都不应设置到节点
+    // 除背景图尺寸恢复 Auto 外，其他非法属性都不应设置到节点
+    bool restoredBackgroundImageSizeAuto = false;
     for (const auto& rec : mockArkUIPtr_->setAttributeRecords_) {
-        EXPECT_NE(rec.attribute, NODE_BACKGROUND_IMAGE_SIZE_WITH_STYLE);
+        if (rec.attribute == NODE_BACKGROUND_IMAGE_SIZE_WITH_STYLE && !rec.values.empty()) {
+            restoredBackgroundImageSizeAuto = true;
+            EXPECT_EQ(rec.values[0].i32, static_cast<int32_t>(A2UIImageSize::AUTO));
+            continue;
+        }
         EXPECT_NE(rec.attribute, NODE_FLEX_SHRINK);
         EXPECT_NE(rec.attribute, NODE_WIDTH);
         EXPECT_NE(rec.attribute, NODE_VISIBILITY);
@@ -1213,6 +1264,7 @@ TEST_F(ExtendedStyleResolverDfxTest, DFX_MultipleInvalidProperties_AllReported)
         EXPECT_NE(rec.attribute, NODE_BACKGROUND_COLOR);
         EXPECT_NE(rec.attribute, NODE_LAYOUT_WEIGHT);
     }
+    EXPECT_TRUE(restoredBackgroundImageSizeAuto);
 }
 
 // =============================================================================

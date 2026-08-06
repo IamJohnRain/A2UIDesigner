@@ -23,6 +23,7 @@
 #include "adapter/ArkUINodeApiAdapter.h"
 #include "adapter/ArkUIOHApiAdapter.h"
 #include "components/NativeComponentFactory.h"
+#include "data/DynamicValueResolver.h"
 #include "utils/JsonAdapter.h"
 #include "utils/LogA2UI.h"
 
@@ -33,25 +34,53 @@ namespace NativeModule {
 
 namespace {
 
-std::map<std::string, JsonValue> BuildTemplateLocalVariables(std::shared_ptr<DataModel> dataModel,
-    const std::string& dataPath, int32_t itemIndex, const std::string& indexVarName, const std::string& itemVarName)
+struct TemplateLocalVariableContext {
+    const std::shared_ptr<DataModel>& dataModel;
+    const std::string& dataPath;
+    int32_t itemIndex;
+    const std::string& indexVarName;
+    const std::string& itemVarName;
+    int32_t renderId;
+    const std::string& surfaceId;
+    const std::string& componentId;
+};
+
+void AppendTemplateIndexVariable(
+    const TemplateLocalVariableContext& context, std::map<std::string, JsonValue>& localVariables)
+{
+    if (context.indexVarName.empty()) {
+        return;
+    }
+    std::unique_ptr<JsonAdapter> indexAdapter = JsonAdapter::CreateNumber(static_cast<double>(context.itemIndex));
+    if (indexAdapter != nullptr) {
+        localVariables[context.indexVarName] = indexAdapter->GetRoot();
+    }
+}
+
+void AppendTemplateItemVariable(
+    const TemplateLocalVariableContext& context, std::map<std::string, JsonValue>& localVariables)
+{
+    if (context.dataModel == nullptr || context.dataPath.empty() || context.itemVarName.empty()) {
+        return;
+    }
+    std::string itemPath = context.dataPath + "/" + std::to_string(context.itemIndex);
+    auto itemOpt = context.dataModel->GetNode(itemPath);
+    if (itemOpt.has_value()) {
+        localVariables[context.itemVarName] = itemOpt.value();
+        return;
+    }
+    DynamicResolveContext resolveContext = { .renderId = context.renderId,
+        .surfaceId = context.surfaceId,
+        .componentId = context.componentId,
+        .missingPathPolicy = MissingPathPolicy::DEFER_UNTIL_DATA_UPDATE };
+    DynamicValueResolver::ReportMissingPath(resolveContext, itemPath);
+}
+
+std::map<std::string, JsonValue> BuildTemplateLocalVariables(const TemplateLocalVariableContext& context)
 {
     std::map<std::string, JsonValue> localVariables;
-    if (!indexVarName.empty()) {
-        std::unique_ptr<JsonAdapter> indexAdapter = JsonAdapter::CreateNumber(static_cast<double>(itemIndex));
-        if (indexAdapter != nullptr) {
-            localVariables[indexVarName] = indexAdapter->GetRoot();
-        }
-    }
-
-    if (dataModel == nullptr || dataPath.empty() || itemVarName.empty()) {
-        return localVariables;
-    }
-    std::string itemPath = dataPath + "/" + std::to_string(itemIndex);
-    auto itemOpt = dataModel->GetNode(itemPath);
-    if (itemOpt.has_value()) {
-        localVariables[itemVarName] = itemOpt.value();
-    }
+    AppendTemplateIndexVariable(context, localVariables);
+    AppendTemplateItemVariable(context, localVariables);
     return localVariables;
 }
 
@@ -67,6 +96,22 @@ std::map<std::string, JsonValue> MergeLocalVariables(
     return mergedVariables;
 }
 
+int FindTemplateExprCloseBrace(const std::string& str, int openBracePos)
+{
+    int depth = 0;
+    for (int j = openBracePos; j < static_cast<int>(str.size()); ++j) {
+        if (str[j] == '{') {
+            ++depth;
+        } else if (str[j] == '}') {
+            --depth;
+            if (depth == 0) {
+                return j;
+            }
+        }
+    }
+    return -1;
+}
+
 } // namespace
 
 void TemplateAdapterNode::RewriteDataPaths(JsonValue& json, const std::string& arrayPath, int32_t itemIndex)
@@ -76,33 +121,12 @@ void TemplateAdapterNode::RewriteDataPaths(JsonValue& json, const std::string& a
     }
 
     if (json.IsObject()) {
-        if (json.Has("path")) {
-            JsonValue pathValue = json.GetItem("path");
-            if (pathValue.IsString()) {
-                std::string originalPath = pathValue.GetStringValue();
-                if (!originalPath.empty()) {
-                    std::string newPath;
-                    if (originalPath[0] == '/') {
-                        newPath = arrayPath + "/" + std::to_string(itemIndex) + originalPath;
-                    } else {
-                        newPath = arrayPath + "/" + std::to_string(itemIndex) + "/" + originalPath;
-                    }
-                    json.ReplaceString("path", newPath);
-                }
-            }
-        }
+        RewriteObjectPathField(json, arrayPath, itemIndex);
 
         for (JsonValue child = json.GetChild(); child.IsValid();) {
             JsonValue next = child.GetNext();
             if (child.IsString()) {
-                std::string str = child.GetStringValue();
-                if (str.find("${") != std::string::npos) {
-                    std::string key = child.GetKey();
-                    std::string rewritten = RewriteTemplateStringPaths(str, arrayPath, itemIndex);
-                    if (rewritten != str) {
-                        json.ReplaceString(key.c_str(), rewritten);
-                    }
-                }
+                RewriteChildStringPath(json, child, arrayPath, itemIndex);
             } else {
                 RewriteDataPaths(child, arrayPath, itemIndex);
             }
@@ -114,6 +138,38 @@ void TemplateAdapterNode::RewriteDataPaths(JsonValue& json, const std::string& a
             JsonValue item = json.GetArrayItem(i);
             TemplateAdapterNode::RewriteDataPaths(item, arrayPath, itemIndex);
         }
+    }
+}
+
+void TemplateAdapterNode::RewriteObjectPathField(JsonValue& json, const std::string& arrayPath, int32_t itemIndex)
+{
+    if (!json.Has("path")) {
+        return;
+    }
+    JsonValue pathValue = json.GetItem("path");
+    if (!pathValue.IsString()) {
+        return;
+    }
+    std::string originalPath = pathValue.GetStringValue();
+    if (originalPath.empty()) {
+        return;
+    }
+    std::string prefix = arrayPath + "/" + std::to_string(itemIndex);
+    std::string newPath = (originalPath[0] == '/') ? (prefix + originalPath) : (prefix + "/" + originalPath);
+    json.ReplaceString("path", newPath);
+}
+
+void TemplateAdapterNode::RewriteChildStringPath(
+    JsonValue& json, const JsonValue& child, const std::string& arrayPath, int32_t itemIndex)
+{
+    std::string str = child.GetStringValue();
+    if (str.find("${") == std::string::npos) {
+        return;
+    }
+    std::string key = child.GetKey();
+    std::string rewritten = RewriteTemplateStringPaths(str, arrayPath, itemIndex);
+    if (rewritten != str) {
+        json.ReplaceString(key.c_str(), rewritten);
     }
 }
 
@@ -132,19 +188,7 @@ std::string TemplateAdapterNode::RewriteTemplateStringPaths(
         }
 
         if (i + 1 < str.size() && str[i] == '$' && str[i + 1] == '{') {
-            int depth = 0;
-            int closePos = -1;
-            for (int j = static_cast<int>(i) + 1; j < static_cast<int>(str.size()); ++j) {
-                if (str[j] == '{') {
-                    ++depth;
-                } else if (str[j] == '}') {
-                    --depth;
-                    if (depth == 0) {
-                        closePos = j;
-                        break;
-                    }
-                }
-            }
+            int closePos = FindTemplateExprCloseBrace(str, static_cast<int>(i) + 1);
 
             if (closePos < 0) {
                 result += str[i];
@@ -156,15 +200,15 @@ std::string TemplateAdapterNode::RewriteTemplateStringPaths(
 
             size_t parenPos = expr.find('(');
             if (parenPos != std::string::npos && !expr.empty() && expr.back() == ')') {
-                result += "${" + RewriteTemplateStringPaths(expr, arrayPath, itemIndex) + "}";
+                result += "${";
+                result += RewriteTemplateStringPaths(expr, arrayPath, itemIndex);
+                result += "}";
             } else {
-                std::string newPath;
-                if (!expr.empty() && expr[0] == '/') {
-                    newPath = arrayPath + "/" + indexStr + expr;
-                } else {
-                    newPath = arrayPath + "/" + indexStr + "/" + expr;
-                }
-                result += "${" + newPath + "}";
+                std::string prefix = arrayPath + "/" + indexStr;
+                std::string newPath = (!expr.empty() && expr[0] == '/') ? (prefix + expr) : (prefix + "/" + expr);
+                result += "${";
+                result += newPath;
+                result += "}";
             }
 
             i = static_cast<size_t>(closePos) + 1;
@@ -199,23 +243,17 @@ void TemplateAdapterNode::CollectReferencedDescriptorIdsRecursive(const std::str
 
     if (descriptor.Has("children")) {
         JsonValue childrenValue = descriptor.GetItem("children");
-        if (childrenValue.IsArray()) {
-            int childCount = childrenValue.GetArraySize();
-            for (int i = 0; i < childCount; ++i) {
-                JsonValue childValue = childrenValue.GetArrayItem(i);
-                if (childValue.IsString()) {
-                    std::string childId = childValue.GetStringValue("");
-                    if (!childId.empty()) {
-                        CollectReferencedDescriptorIdsRecursive(childId, allDescriptors, result, visited);
-                    }
-                }
-            }
-        } else if (childrenValue.IsObject() && childrenValue.Has("componentId")) {
-            std::string componentId = childrenValue.GetString("componentId", "");
-            if (!componentId.empty()) {
-                CollectReferencedDescriptorIdsRecursive(componentId, allDescriptors, result, visited);
-            }
-        }
+        CollectChildIdsFromChildrenValue(childrenValue, allDescriptors, result, visited);
+    }
+
+    if (descriptor.Has("childrenIf")) {
+        JsonValue childrenIfValue = descriptor.GetItem("childrenIf");
+        CollectChildIdsFromChildrenValue(childrenIfValue, allDescriptors, result, visited);
+    }
+
+    if (descriptor.Has("childrenElse")) {
+        JsonValue childrenElseValue = descriptor.GetItem("childrenElse");
+        CollectChildIdsFromChildrenValue(childrenElseValue, allDescriptors, result, visited);
     }
 
     if (descriptor.Has("child")) {
@@ -229,72 +267,12 @@ void TemplateAdapterNode::CollectReferencedDescriptorIdsRecursive(const std::str
     }
 }
 
-std::set<std::string> TemplateAdapterNode::CollectReferencedDescriptorIds(
-    const std::string& rootId, const std::map<std::string, JsonValue>& allDescriptors)
+void TemplateAdapterNode::CollectChildIdsFromChildrenValue(const JsonValue& childrenValue,
+    const std::map<std::string, JsonValue>& allDescriptors, std::set<std::string>& result,
+    std::set<std::string>& visited)
 {
-    std::set<std::string> result;
-    std::set<std::string> visited;
-    CollectReferencedDescriptorIdsRecursive(rootId, allDescriptors, result, visited);
-    return result;
-}
-
-std::unique_ptr<JsonAdapter> TemplateAdapterNode::BuildTemplateInstanceDescriptorById(std::string& id,
-    const std::string& templateComponentId, const std::string& arrayPath, int32_t itemIndex,
-    const std::map<std::string, JsonValue>* allDescriptors, std::map<std::string, JsonValue>* generatedDescriptors)
-{
-    if (allDescriptors == nullptr || generatedDescriptors == nullptr) {
-        return nullptr;
-    }
-    auto childIt = allDescriptors->find(id);
-    if (childIt != allDescriptors->end()) {
-        std::string generatedInstanceId = arrayPath + templateComponentId + ":" + std::to_string(itemIndex) + ":" + id;
-        JsonValue templateDescriptor = childIt->second;
-        std::unique_ptr<JsonAdapter> adapter = JsonAdapter::Clone(templateDescriptor);
-        if (adapter != nullptr) {
-            JsonValue root = adapter->GetRoot();
-            if (root.Has("id")) {
-                root.ReplaceString("id", generatedInstanceId);
-            } else {
-                root.PutString("id", generatedInstanceId);
-            }
-            TemplateAdapterNode::RewriteDataPaths(root, arrayPath, itemIndex);
-            (*generatedDescriptors)[generatedInstanceId] = root;
-        }
-        return adapter;
-    }
-    LOG_A2UI(LOG_WARN, "BuildTemplateInstanceDescriptor: child descriptor not found for '%{public}s'", id.c_str());
-    return nullptr;
-}
-
-std::string TemplateAdapterNode::BuildTemplateInstanceTreeDescriptors(std::string& id,
-    const std::string& templateComponentId, const std::string& arrayPath, int32_t itemIndex,
-    const std::map<std::string, JsonValue>* allDescriptors, std::map<std::string, JsonValue>* generatedDescriptors)
-{
-    if (allDescriptors == nullptr || generatedDescriptors == nullptr) {
-        return "";
-    }
-
-    std::unique_ptr<JsonAdapter> genDescriptor = BuildTemplateInstanceDescriptorById(
-        id, templateComponentId, arrayPath, itemIndex, allDescriptors, generatedDescriptors);
-    if (genDescriptor == nullptr) {
-        return "";
-    }
-
-    JsonValue itemValue = genDescriptor->GetRoot();
-    std::string generatedInstanceId = itemValue.GetString("id", "");
-    if (generatedInstanceId.empty()) {
-        return "";
-    }
-    (*generatedDescriptors)[generatedInstanceId] = itemValue;
-
-    if (itemValue.Has("children")) {
-        std::unique_ptr<JsonAdapter> childrenAdapter = JsonAdapter::Clone(itemValue.GetItem("children"));
-        JsonValue childrenValue = childrenAdapter->GetRoot();
-        if (!childrenValue.IsArray()) {
-            return generatedInstanceId;
-        }
+    if (childrenValue.IsArray()) {
         int childCount = childrenValue.GetArraySize();
-        JsonValue newChildren = itemValue.ReplaceArray("children");
         for (int i = 0; i < childCount; ++i) {
             JsonValue childValue = childrenValue.GetArrayItem(i);
             if (!childValue.IsString()) {
@@ -304,28 +282,129 @@ std::string TemplateAdapterNode::BuildTemplateInstanceTreeDescriptors(std::strin
             if (childId.empty()) {
                 continue;
             }
-            std::string genChildId = BuildTemplateInstanceTreeDescriptors(
-                childId, templateComponentId, arrayPath, itemIndex, allDescriptors, generatedDescriptors);
-            if (!genChildId.empty()) {
-                newChildren.Append(JsonAdapter::CreateString(genChildId)->GetRoot());
-            }
+            CollectReferencedDescriptorIdsRecursive(childId, allDescriptors, result, visited);
+        }
+    } else if (childrenValue.IsObject() && childrenValue.Has("componentId")) {
+        std::string componentId = childrenValue.GetString("componentId", "");
+        if (!componentId.empty()) {
+            CollectReferencedDescriptorIdsRecursive(componentId, allDescriptors, result, visited);
         }
     }
+}
 
-    if (itemValue.Has("child")) {
-        JsonValue childValue = itemValue.GetItem("child");
+std::set<std::string> TemplateAdapterNode::CollectReferencedDescriptorIds(
+    const std::string& rootId, const std::map<std::string, JsonValue>& allDescriptors)
+{
+    std::set<std::string> result;
+    std::set<std::string> visited;
+    CollectReferencedDescriptorIdsRecursive(rootId, allDescriptors, result, visited);
+    return result;
+}
+
+std::unique_ptr<JsonAdapter> TemplateAdapterNode::BuildTemplateInstanceDescriptorById(
+    std::string& id, const TemplateInstanceBuildContext& context)
+{
+    if (context.allDescriptors == nullptr || context.generatedDescriptors == nullptr) {
+        return nullptr;
+    }
+    auto childIt = context.allDescriptors->find(id);
+    if (childIt != context.allDescriptors->end()) {
+        std::string generatedInstanceId =
+            context.arrayPath + context.templateComponentId + ":" + std::to_string(context.itemIndex) + ":" + id;
+        JsonValue templateDescriptor = childIt->second;
+        std::unique_ptr<JsonAdapter> adapter = JsonAdapter::Clone(templateDescriptor);
+        if (adapter != nullptr) {
+            JsonValue root = adapter->GetRoot();
+            if (root.Has("id")) {
+                root.ReplaceString("id", generatedInstanceId);
+            } else {
+                root.PutString("id", generatedInstanceId);
+            }
+            TemplateAdapterNode::RewriteDataPaths(root, context.arrayPath, context.itemIndex);
+            (*context.generatedDescriptors)[generatedInstanceId] = root;
+        }
+        return adapter;
+    }
+    LOG_A2UI(LOG_WARN, "BuildTemplateInstanceDescriptor: child descriptor not found for '%{public}s'", id.c_str());
+    return nullptr;
+}
+
+void RewriteTemplateInstanceChildren(
+    JsonValue& itemValue, const char* fieldName, const TemplateAdapterNode::TemplateInstanceBuildContext& context)
+{
+    std::unique_ptr<JsonAdapter> childrenAdapter = JsonAdapter::Clone(itemValue.GetItem(fieldName));
+    JsonValue childrenValue = childrenAdapter->GetRoot();
+    if (!childrenValue.IsArray()) {
+        return;
+    }
+    int childCount = childrenValue.GetArraySize();
+    JsonValue newChildren = itemValue.ReplaceArray(fieldName);
+    for (int i = 0; i < childCount; ++i) {
+        JsonValue childValue = childrenValue.GetArrayItem(i);
         if (!childValue.IsString()) {
-            return generatedInstanceId;
+            continue;
         }
         std::string childId = childValue.GetStringValue("");
         if (childId.empty()) {
-            return generatedInstanceId;
+            continue;
         }
-        std::string genChildId = BuildTemplateInstanceTreeDescriptors(
-            childId, templateComponentId, arrayPath, itemIndex, allDescriptors, generatedDescriptors);
+        std::string genChildId = TemplateAdapterNode::BuildTemplateInstanceTreeDescriptors(childId, context);
         if (!genChildId.empty()) {
-            itemValue.ReplaceString("child", genChildId);
+            newChildren.Append(JsonAdapter::CreateString(genChildId)->GetRoot());
         }
+    }
+}
+
+void RewriteTemplateInstanceSingleChild(
+    JsonValue& itemValue, const TemplateAdapterNode::TemplateInstanceBuildContext& context)
+{
+    JsonValue childValue = itemValue.GetItem("child");
+    if (!childValue.IsString()) {
+        return;
+    }
+    std::string childId = childValue.GetStringValue("");
+    if (childId.empty()) {
+        return;
+    }
+    std::string genChildId = TemplateAdapterNode::BuildTemplateInstanceTreeDescriptors(childId, context);
+    if (!genChildId.empty()) {
+        itemValue.ReplaceString("child", genChildId);
+    }
+}
+
+std::string TemplateAdapterNode::BuildTemplateInstanceTreeDescriptors(
+    std::string& id, const TemplateInstanceBuildContext& context)
+{
+    if (context.allDescriptors == nullptr || context.generatedDescriptors == nullptr) {
+        return "";
+    }
+
+    std::unique_ptr<JsonAdapter> genDescriptor = BuildTemplateInstanceDescriptorById(id, context);
+    if (genDescriptor == nullptr) {
+        return "";
+    }
+
+    JsonValue itemValue = genDescriptor->GetRoot();
+    std::string generatedInstanceId = itemValue.GetString("id", "");
+    if (generatedInstanceId.empty()) {
+        return "";
+    }
+    (*context.generatedDescriptors)[generatedInstanceId] = itemValue;
+
+    if (itemValue.Has("children")) {
+        RewriteTemplateInstanceChildren(itemValue, "children", context);
+    }
+
+    if (itemValue.Has("childrenIf")) {
+        RewriteTemplateInstanceChildren(itemValue, "childrenIf", context);
+    }
+
+    if (itemValue.Has("childrenElse")) {
+        RewriteTemplateInstanceChildren(itemValue, "childrenElse", context);
+    }
+
+    if (itemValue.Has("child")) {
+        RewriteTemplateInstanceSingleChild(itemValue, context);
     }
     return generatedInstanceId;
 }
@@ -469,39 +548,84 @@ void TemplateAdapterNode::OnNewItemIdCreated(A2UINodeAdapterEvent* event)
         index, id, result);
 }
 
-void TemplateAdapterNode::OnNewItemAttached(A2UINodeAdapterEvent* event)
+std::shared_ptr<Component> TemplateAdapterNode::BuildAttachedItemComponent(int32_t index,
+    const std::string& generatedInstanceId, const std::map<std::string, JsonValue>& generatedDescriptors,
+    SurfaceSlot& surfaceSlot)
 {
-    auto index = ArkUIOHApiAdapter::NodeAdapterEventGetItemIndex(event);
-
-    std::map<std::string, JsonValue> generatedDescriptors;
-    std::string generatedInstanceId = TemplateAdapterNode::BuildTemplateInstanceTreeDescriptors(
-        templateId_, templateId_, dataPath_, index, &allDescriptors_, &generatedDescriptors);
-    if (generatedInstanceId.empty()) {
-        LOG_A2UI(LOG_WARN,
-            "OnNewItemAttached: failed to build template instance descriptor, templateId=%{public}s, "
-            "itemIndex=%{public}d",
-            templateId_.c_str(), index);
-        return;
-    }
-
-    bool hasProcessedNode = false;
-    bool sawRootDescriptor = false;
-    SurfaceSlot* surfaceSlot = RenderManager::GetInstance().FindSurface(renderId_, surfaceId_);
-    if (surfaceSlot == nullptr) {
-        return;
-    }
-
-    std::map<std::string, JsonValue> currentLocalVariables =
-        BuildTemplateLocalVariables(dataModel_, dataPath_, index, indexVarName_, itemVarName_);
+    TemplateLocalVariableContext variableContext = { .dataModel = dataModel_,
+        .dataPath = dataPath_,
+        .itemIndex = index,
+        .indexVarName = indexVarName_,
+        .itemVarName = itemVarName_,
+        .renderId = renderId_,
+        .surfaceId = surfaceId_,
+        .componentId = generatedInstanceId };
+    std::map<std::string, JsonValue> currentLocalVariables = BuildTemplateLocalVariables(variableContext);
     std::map<std::string, JsonValue> localVariables =
         MergeLocalVariables(inheritedLocalVariables_, currentLocalVariables);
     Component::RegisterPendingLocalVariablesForComponents(generatedDescriptors, localVariables);
-    auto component = surfaceSlot->BuildRootFromComponents(
+    bool hasProcessedNode = false;
+    bool sawRootDescriptor = false;
+    auto component = surfaceSlot.BuildRootFromComponents(
         generatedInstanceId, generatedDescriptors, hasProcessedNode, sawRootDescriptor, false);
     Component::ClearPendingLocalVariablesForComponents(generatedDescriptors);
     if (component == nullptr) {
         LOG_A2UI(LOG_ERROR,
             "TemplateAdapterNode::OnNewItemAttached: Failed to build component tree for index=%{public}d", index);
+    }
+    return component;
+}
+
+void TemplateAdapterNode::OnNewItemAttached(A2UINodeAdapterEvent* event)
+{
+    auto index = ArkUIOHApiAdapter::NodeAdapterEventGetItemIndex(event);
+
+    std::map<std::string, JsonValue> generatedDescriptors;
+    std::string generatedInstanceId;
+    if (!BuildAttachedItemDescriptors(index, generatedInstanceId, generatedDescriptors)) {
+        return;
+    }
+
+    SurfaceSlot* surfaceSlot = RenderManager::GetInstance().FindSurface(renderId_, surfaceId_);
+    if (surfaceSlot == nullptr) {
+        return;
+    }
+
+    auto component = BuildAttachedItemComponent(
+        static_cast<int32_t>(index), generatedInstanceId, generatedDescriptors, *surfaceSlot);
+    if (component == nullptr) {
+        return;
+    }
+
+    PrepareAttachedItemComponent(component, static_cast<int32_t>(index));
+    AttachItemWrapperToAdapter(event, component, static_cast<int32_t>(index));
+}
+
+bool TemplateAdapterNode::BuildAttachedItemDescriptors(
+    int32_t index, std::string& generatedInstanceId, std::map<std::string, JsonValue>& generatedDescriptors)
+{
+    TemplateInstanceBuildContext context = {
+        .templateComponentId = templateId_,
+        .arrayPath = dataPath_,
+        .itemIndex = index,
+        .allDescriptors = &allDescriptors_,
+        .generatedDescriptors = &generatedDescriptors,
+    };
+    generatedInstanceId = TemplateAdapterNode::BuildTemplateInstanceTreeDescriptors(templateId_, context);
+    if (!generatedInstanceId.empty()) {
+        return true;
+    }
+
+    LOG_A2UI(LOG_WARN,
+        "OnNewItemAttached: failed to build template instance descriptor, templateId=%{public}s, itemIndex=%{public}d",
+        templateId_.c_str(), index);
+    return false;
+}
+
+void TemplateAdapterNode::PrepareAttachedItemComponent(const std::shared_ptr<Component>& component, int32_t index)
+{
+    SurfaceSlot* surfaceSlot = RenderManager::GetInstance().FindSurface(renderId_, surfaceId_);
+    if (surfaceSlot == nullptr) {
         return;
     }
 
@@ -511,28 +635,18 @@ void TemplateAdapterNode::OnNewItemAttached(A2UINodeAdapterEvent* event)
 
     auto nativeView = component->GetNativeView();
     if (nativeView != nullptr) {
-        for (auto prevIt = items_.begin(); prevIt != items_.end(); ++prevIt) {
-            if (prevIt->second == component) {
-                ArkUI_NodeHandle contentParent = prevIt->first;
-                auto contentParentIt = itemContentParents_.find(prevIt->first);
-                if (contentParentIt != itemContentParents_.end() && contentParentIt->second != nullptr) {
-                    contentParent = contentParentIt->second;
-                }
-                ArkUINodeApiAdapter::RemoveChild(contentParent, nativeView);
-                movedWrappers_.insert(prevIt->first);
-                LOG_A2UI(LOG_DEBUG,
-                    "OnNewItemAttached: pre-emptive detach nativeView from old wrapper=%{public}p for index=%{public}d",
-                    prevIt->first, index);
-                break;
-            }
-        }
+        DetachFromPreviousWrapper(component, nativeView, index);
     }
+}
 
+bool TemplateAdapterNode::AttachItemWrapperToAdapter(
+    A2UINodeAdapterEvent* event, const std::shared_ptr<Component>& component, int32_t index)
+{
     ItemWrapperInfo wrapperInfo = BuildItemWrapper(component);
     if (wrapperInfo.rootNode == nullptr || wrapperInfo.contentParentNode == nullptr) {
         LOG_A2UI(LOG_ERROR, "TemplateAdapterNode::OnNewItemAttached: Failed to build wrapper node for index=%{public}d",
             index);
-        return;
+        return false;
     }
     items_.emplace(wrapperInfo.rootNode, component);
     itemContentParents_[wrapperInfo.rootNode] = wrapperInfo.contentParentNode;
@@ -542,6 +656,7 @@ void TemplateAdapterNode::OnNewItemAttached(A2UINodeAdapterEvent* event)
         "TemplateAdapterNode::OnNewItemAttached: Built component tree for index=%{public}d, wrapperNode=%{public}p, "
         "setItemResult=%{public}d",
         index, wrapperInfo.rootNode, result);
+    return true;
 }
 
 void TemplateAdapterNode::OnItemDetached(A2UINodeAdapterEvent* event)
@@ -582,5 +697,26 @@ void TemplateAdapterNode::IncrementTemplateVersion()
 {
     ++templateVersion_;
     LOG_A2UI(LOG_DEBUG, "TemplateAdapterNode::IncrementTemplateVersion: version=%{public}u", templateVersion_);
+}
+
+void TemplateAdapterNode::DetachFromPreviousWrapper(
+    const std::shared_ptr<Component>& component, ArkUI_NodeHandle nativeView, int32_t index)
+{
+    for (auto prevIt = items_.begin(); prevIt != items_.end(); ++prevIt) {
+        if (prevIt->second != component) {
+            continue;
+        }
+        ArkUI_NodeHandle contentParent = prevIt->first;
+        auto contentParentIt = itemContentParents_.find(prevIt->first);
+        if (contentParentIt != itemContentParents_.end() && contentParentIt->second != nullptr) {
+            contentParent = contentParentIt->second;
+        }
+        ArkUINodeApiAdapter::RemoveChild(contentParent, nativeView);
+        movedWrappers_.insert(prevIt->first);
+        LOG_A2UI(LOG_DEBUG,
+            "OnNewItemAttached: pre-emptive detach nativeView from old wrapper=%{public}p for index=%{public}d",
+            prevIt->first, index);
+        break;
+    }
 }
 } // namespace NativeModule

@@ -30,10 +30,13 @@
 #undef protected
 #undef private
 
+#include "catalog/Catalog.h"
 #include "catalog/CatalogConstants.h"
+#include "catalog/CatalogItem.h"
 #include "components/Component.h"
 #include "data/BindingEngine.h"
 #include "data/DataModel.h"
+#include "functions/FunctionBridge.h"
 #include "utils/JsonAdapter.h"
 
 #include "NapiResourceManager.h"
@@ -189,6 +192,46 @@ napi_value RawNapiValue(intptr_t id)
     return reinterpret_cast<napi_value>(id);
 }
 
+bool PreparePassthroughNormalizeResponse(MockNapiProvider* mockNapi)
+{
+    if (mockNapi == nullptr) {
+        return false;
+    }
+
+    napi_value success = nullptr;
+    if (mockNapi->CreateBoolean(nullptr, true, &success) != napi_ok || success == nullptr) {
+        return false;
+    }
+
+    intptr_t firstValueId = static_cast<intptr_t>(mockNapi->nextValueId_);
+    napi_value normalizedArgs = RawNapiValue(firstValueId + 5);
+    napi_value result = RawNapiValue(firstValueId + 10);
+    mockNapi->valueTypes_[result] = napi_object;
+    mockNapi->objectProperties_[result] = { { "success", success }, { "normalizedArgs", normalizedArgs } };
+    return true;
+}
+
+class FunctionBridgeResetGuard {
+public:
+    FunctionBridgeResetGuard(MockNapiProvider* mockNapi, napi_env env) : mockNapi_(mockNapi), env_(env) {}
+
+    ~FunctionBridgeResetGuard()
+    {
+        if (mockNapi_ == nullptr) {
+            return;
+        }
+        napi_value callback = nullptr;
+        mockNapi_->CreateFunction(env_, "resetFunctionBridge", NAPI_AUTO_LENGTH, nullptr, nullptr, &callback);
+        mockNapi_->SetCreateReferenceStatus(napi_invalid_arg);
+        FunctionBridge::GetInstance().RegisterInvokeLocalFunction(env_, callback);
+        mockNapi_->ResetCreateReferenceStatus();
+    }
+
+private:
+    MockNapiProvider* mockNapi_ = nullptr;
+    napi_env env_ = nullptr;
+};
+
 struct NapiResourceManagerMirror {
     napi_env napiEnv_ = nullptr;
     napi_ref createCustomComponentRef_ = nullptr;
@@ -302,12 +345,44 @@ public:
     using CustomComponent::NormalizeCustomProperty;
     using CustomComponent::ParseTabsMapping;
     using CustomComponent::ResolveTabsChildIds;
+
+    void CallOnAttachToParent()
+    {
+        OnAttachToParent();
+    }
 };
 
 TEST_F(CustomComponentTest, should_prefer_component_id_for_custom_property_warning_path)
 {
     EXPECT_EQ(ResolveCustomPropertyWarningPath("target", "url"), "target.url");
     EXPECT_EQ(ResolveCustomPropertyWarningPath("", "url"), "customProps.url");
+}
+
+/**
+ * @tc.name: should_recognize_only_exact_tabs_type_in_extended_catalog
+ * @tc.desc: 验证扩展协议只识别短名 Tabs，不再把带命名空间的 *.Tabs 当作扩展 Tabs。
+ * @tc.type: FUNC
+ */
+TEST_F(CustomComponentTest, should_recognize_only_exact_tabs_type_in_extended_catalog)
+{
+    SurfaceContext extendedContext;
+    extendedContext.catalogId = A2UI_EXTENDED_CATALOG_ID;
+
+    CustomComponent shortTabs("Tabs");
+    EXPECT_TRUE(shortTabs.IsTabsType());
+    EXPECT_FALSE(shortTabs.IsExtendedTabsType());
+    shortTabs.SetSurfaceContext(extendedContext);
+    EXPECT_TRUE(shortTabs.IsExtendedTabsType());
+
+    CustomComponent formerExtendedTabs("Extended.Tabs");
+    formerExtendedTabs.SetSurfaceContext(extendedContext);
+    EXPECT_FALSE(formerExtendedTabs.IsTabsType());
+    EXPECT_FALSE(formerExtendedTabs.IsExtendedTabsType());
+
+    CustomComponent otherNamespacedTabs("Legacy.Tabs");
+    otherNamespacedTabs.SetSurfaceContext(extendedContext);
+    EXPECT_FALSE(otherNamespacedTabs.IsTabsType());
+    EXPECT_FALSE(otherNamespacedTabs.IsExtendedTabsType());
 }
 
 /**
@@ -559,6 +634,31 @@ TEST_F(CustomComponentTest, should_dispatch_schema_warnings_for_invalid_extended
     EXPECT_FALSE(styles.Has("space"));
 }
 
+TEST_F(CustomComponentTest, should_drop_negative_extended_tab_content_metric_styles)
+{
+    RegisterDispatchCallbacks(mockNapiPtr_);
+
+    CustomComponentProbe component("TabContent");
+    component.SetComponentId("tabMetricRange");
+    component.SetSurfaceId("surface-id");
+    component.SetRenderId(208);
+
+    std::unique_ptr<JsonAdapter> descriptor = ParseJson(R"({"styles":{"fontSize":-1,"iconSize":-2,"space":-3}})");
+    ASSERT_NE(descriptor, nullptr);
+
+    component.ApplyCustomProperties(descriptor->GetRoot());
+
+    EXPECT_EQ(CountWarningRequests(mockNapiPtr_, "ERROR_CODE_INVALID_VALUE", "tabMetricRange.styles.fontSize"), 1U);
+    EXPECT_EQ(CountWarningRequests(mockNapiPtr_, "ERROR_CODE_INVALID_VALUE", "tabMetricRange.styles.iconSize"), 1U);
+    EXPECT_EQ(CountWarningRequests(mockNapiPtr_, "ERROR_CODE_INVALID_VALUE", "tabMetricRange.styles.space"), 1U);
+    auto stylesOpt = component.GetProperty("styles");
+    ASSERT_TRUE(stylesOpt.has_value());
+    JsonValue styles = stylesOpt.value();
+    EXPECT_FALSE(styles.Has("fontSize"));
+    EXPECT_FALSE(styles.Has("iconSize"));
+    EXPECT_FALSE(styles.Has("space"));
+}
+
 TEST_F(CustomComponentTest, should_dispatch_schema_warnings_for_empty_extended_tab_content_style_tokens)
 {
     RegisterDispatchCallbacks(mockNapiPtr_);
@@ -767,7 +867,7 @@ TEST_F(CustomComponentTest, should_dispatch_schema_warnings_for_invalid_extended
                         ["#764BA2", 1]
                     ]
                 },
-                "flexShrink": 1.5,
+                "flexShrink": -0.5,
                 "shadow": {
                     "radius": -1,
                     "type": "bad",
@@ -818,6 +918,293 @@ TEST_F(CustomComponentTest, should_dispatch_schema_warnings_for_invalid_extended
     EXPECT_FALSE(styles.Has("visibility"));
 }
 
+TEST_F(CustomComponentTest, should_report_null_extended_common_styles_as_invalid_value)
+{
+    RegisterDispatchCallbacks(mockNapiPtr_);
+    auto countExactWarningRequests = [this](const std::string& code, const std::string& path) {
+        size_t count = 0U;
+        for (const auto& args : mockNapiPtr_->callFunctionArgsHistory_) {
+            if (args.empty()) {
+                continue;
+            }
+            napi_value request = args.front();
+            std::string actualCode = GetStringValue(mockNapiPtr_, GetRequestProperty(mockNapiPtr_, request, "code"));
+            std::string actualPath = GetStringValue(mockNapiPtr_, GetRequestProperty(mockNapiPtr_, request, "path"));
+            if (actualCode == code && actualPath == path) {
+                ++count;
+            }
+        }
+        return count;
+    };
+
+    CustomComponentProbe stylesComponent("Tabs");
+    CustomComponentProbe topLevelComponent("Tabs");
+    SurfaceContext surfaceContext;
+    surfaceContext.catalogId = A2UI_EXTENDED_CATALOG_ID;
+
+    stylesComponent.SetSurfaceContext(surfaceContext);
+    stylesComponent.SetComponentId("tabsStylesNull");
+    stylesComponent.SetSurfaceId("surface-id");
+    stylesComponent.SetRenderId(205);
+
+    auto stylesDescriptor = ParseJson(R"({"styles": null})");
+    ASSERT_NE(stylesDescriptor, nullptr);
+    stylesComponent.ApplyCustomProperties(stylesDescriptor->GetRoot());
+
+    EXPECT_EQ(countExactWarningRequests("ERROR_CODE_INVALID_VALUE", "tabsStylesNull.styles"), 1U);
+    EXPECT_EQ(countExactWarningRequests("ERROR_CODE_TYPE_MISMATCH", "tabsStylesNull.styles"), 0U);
+
+    topLevelComponent.SetSurfaceContext(surfaceContext);
+    topLevelComponent.SetComponentId("tabsTopLevelNull");
+    topLevelComponent.SetSurfaceId("surface-id");
+    topLevelComponent.SetRenderId(206);
+
+    auto topLevelDescriptor = ParseJson(R"({
+        "styles": {
+            "width": null,
+            "height": null,
+            "constraintSize": null,
+            "backgroundImage": null,
+            "backgroundImageSizeWithStyle": null,
+            "margin": null,
+            "padding": null,
+            "borderRadius": null,
+            "borderWidth": null,
+            "clip": null,
+            "backgroundColor": null,
+            "borderColor": null,
+            "linearGradient": null,
+            "layoutWeight": null,
+            "flexShrink": null,
+            "shadow": null,
+            "visibility": null
+        }
+    })");
+    ASSERT_NE(topLevelDescriptor, nullptr);
+    topLevelComponent.ApplyCustomProperties(topLevelDescriptor->GetRoot());
+
+    const std::set<std::string> topLevelPaths = { "width", "height", "constraintSize", "backgroundImage",
+        "backgroundImageSizeWithStyle", "margin", "padding", "borderRadius", "borderWidth", "clip", "backgroundColor",
+        "borderColor", "linearGradient", "layoutWeight", "flexShrink", "shadow", "visibility" };
+    for (const auto& path : topLevelPaths) {
+        const std::string fullPath = "tabsTopLevelNull.styles." + path;
+        EXPECT_EQ(countExactWarningRequests("ERROR_CODE_INVALID_VALUE", fullPath), 1U) << fullPath;
+        EXPECT_EQ(countExactWarningRequests("ERROR_CODE_TYPE_MISMATCH", fullPath), 0U) << fullPath;
+    }
+
+    CustomComponentProbe nestedComponent("Tabs");
+    nestedComponent.SetSurfaceContext(surfaceContext);
+    nestedComponent.SetComponentId("tabsNestedNull");
+    nestedComponent.SetSurfaceId("surface-id");
+    nestedComponent.SetRenderId(207);
+
+    auto nestedDescriptor = ParseJson(R"({
+        "styles": {
+            "constraintSize": { "minWidth": null, "maxWidth": 100 },
+            "backgroundImageSizeWithStyle": { "width": null, "height": "60vp" },
+            "margin": { "top": null, "right": 8 },
+            "padding": { "bottom": null, "left": "4vp" },
+            "borderRadius": { "topLeft": null, "topRight": 8 },
+            "borderWidth": { "top": null, "right": 1 },
+            "borderColor": { "left": null, "right": "#FF0000" },
+            "linearGradient": {
+                "colors": null,
+                "angle": null,
+                "direction": null,
+                "repeating": null,
+                "stops": null
+            },
+            "shadow": {
+                "style": null,
+                "radius": null,
+                "offsetX": null,
+                "offsetY": null,
+                "color": null,
+                "type": null,
+                "fill": null
+            }
+        }
+    })");
+    ASSERT_NE(nestedDescriptor, nullptr);
+    nestedComponent.ApplyCustomProperties(nestedDescriptor->GetRoot());
+
+    const std::set<std::string> nestedPaths = { "constraintSize.minWidth", "backgroundImageSizeWithStyle.width",
+        "margin.top", "padding.bottom", "borderRadius.topLeft", "borderWidth.top", "borderColor.left",
+        "linearGradient.colors", "linearGradient.angle", "linearGradient.direction", "linearGradient.repeating",
+        "linearGradient.stops", "shadow.style", "shadow.radius", "shadow.offsetX", "shadow.offsetY", "shadow.color",
+        "shadow.type", "shadow.fill" };
+    for (const auto& path : nestedPaths) {
+        const std::string fullPath = "tabsNestedNull.styles." + path;
+        EXPECT_EQ(countExactWarningRequests("ERROR_CODE_INVALID_VALUE", fullPath), 1U) << fullPath;
+        EXPECT_EQ(countExactWarningRequests("ERROR_CODE_TYPE_MISMATCH", fullPath), 0U) << fullPath;
+    }
+}
+
+TEST_F(CustomComponentTest, should_expose_parent_flex_shrink_default_for_extended_tabs)
+{
+    struct ParentDefaultCase {
+        std::string parentType;
+        double expectedDefault = 0.0;
+    };
+    const std::vector<ParentDefaultCase> cases = { { "Column", 0.0 }, { "Row", 0.0 }, { "Flex", 1.0 } };
+    for (const auto& testCase : cases) {
+        SCOPED_TRACE(testCase.parentType);
+        CustomComponentProbe component("Tabs");
+        SurfaceContext surfaceContext;
+        surfaceContext.catalogId = A2UI_EXTENDED_CATALOG_ID;
+        component.SetSurfaceContext(surfaceContext);
+        auto descriptor = ParseJson(R"({"styles":{"flexShrink":-1}})");
+        ASSERT_NE(descriptor, nullptr);
+        component.ApplyCustomProperties(descriptor->GetRoot());
+
+        auto parent = std::make_shared<TypedChildComponent>(testCase.parentType);
+        component.SetParent(parent);
+        component.CallOnAttachToParent();
+
+        EXPECT_TRUE(component.descriptor_.properties.resetFlexShrinkToParentDefault);
+        EXPECT_TRUE(component.descriptor_.properties.hasFlexShrinkParentDefault);
+        EXPECT_DOUBLE_EQ(component.descriptor_.properties.flexShrinkParentDefault, testCase.expectedDefault);
+        auto styles = component.GetProperty("styles");
+        ASSERT_TRUE(styles.has_value());
+        EXPECT_FALSE(styles->Has("flexShrink"));
+    }
+}
+
+TEST_F(CustomComponentTest, should_only_expose_parent_default_for_dynamic_or_invalid_flex_shrink)
+{
+    SurfaceContext surfaceContext;
+    surfaceContext.catalogId = A2UI_EXTENDED_CATALOG_ID;
+    auto parent = std::make_shared<TypedChildComponent>("Column");
+
+    CustomComponentProbe dynamicComponent("Tabs");
+    dynamicComponent.SetSurfaceContext(surfaceContext);
+    auto dynamicDescriptor = ParseJson(R"({"styles":{"flexShrink":"{{ $__dataModel.value }}"}})");
+    ASSERT_NE(dynamicDescriptor, nullptr);
+    dynamicComponent.ApplyCustomProperties(dynamicDescriptor->GetRoot());
+    dynamicComponent.SetParent(parent);
+    dynamicComponent.CallOnAttachToParent();
+    EXPECT_FALSE(dynamicComponent.descriptor_.properties.resetFlexShrinkToParentDefault);
+    EXPECT_TRUE(dynamicComponent.descriptor_.properties.hasFlexShrinkParentDefault);
+    EXPECT_DOUBLE_EQ(dynamicComponent.descriptor_.properties.flexShrinkParentDefault, 0.0);
+
+    CustomComponentProbe validComponent("Tabs");
+    validComponent.SetSurfaceContext(surfaceContext);
+    auto validDescriptor = ParseJson(R"({"styles":{"flexShrink":0.5}})");
+    ASSERT_NE(validDescriptor, nullptr);
+    validComponent.ApplyCustomProperties(validDescriptor->GetRoot());
+    validComponent.SetParent(parent);
+    validComponent.CallOnAttachToParent();
+    EXPECT_FALSE(validComponent.descriptor_.properties.resetFlexShrinkToParentDefault);
+    EXPECT_FALSE(validComponent.descriptor_.properties.hasFlexShrinkParentDefault);
+}
+
+TEST_F(CustomComponentTest, should_preserve_expression_strings_in_extended_common_styles)
+{
+    RegisterDispatchCallbacks(mockNapiPtr_);
+
+    const std::vector<std::string> componentTypes = { "Row", "Tabs", "TabContent", "Web" };
+    for (const auto& componentType : componentTypes) {
+        SCOPED_TRACE(componentType);
+        CustomComponentProbe component(componentType);
+        SurfaceContext surfaceContext;
+        surfaceContext.catalogId = A2UI_EXTENDED_CATALOG_ID;
+        component.SetSurfaceContext(surfaceContext);
+        component.SetComponentId(componentType + "Expr");
+        component.SetSurfaceId("surface-id");
+        component.SetRenderId(206);
+
+        std::unique_ptr<JsonAdapter> descriptor = ParseJson(
+            R"({
+                "styles": {
+                    "width": "{{ $__dataModel.width }}",
+                    "height": "{{ $__dataModel.height }}",
+                    "constraintSize": "{{ $__dataModel.constraintSize }}",
+                    "backgroundImage": "{{ $__dataModel.backgroundImage }}",
+                    "backgroundImageSizeWithStyle": {
+                        "width": "{{ $__dataModel.imageWidth }}",
+                        "height": "60vp"
+                    },
+                    "margin": "{{ $__dataModel.margin }}",
+                    "borderRadius": {
+                        "topLeft": "{{ $__dataModel.radius }}",
+                        "topRight": 8
+                    },
+                    "visibility": "{{ $__dataModel.visibility }}",
+                    "clip": "{{ $__dataModel.clip }}",
+                    "backgroundColor": "{{ $__dataModel.backgroundColor }}",
+                    "borderWidth": {
+                        "top": "{{ $__dataModel.borderWidth }}"
+                    },
+                    "borderColor": {
+                        "left": "{{ $__dataModel.borderColor }}"
+                    },
+                    "padding": {
+                        "bottom": "{{ $__dataModel.padding }}"
+                    },
+                    "layoutWeight": "{{ $__dataModel.layoutWeight }}",
+                    "flexShrink": "{{ $__dataModel.flexShrink }}",
+                    "shadow": {
+                        "style": "{{ $__dataModel.shadowStyle }}",
+                        "radius": "{{ $__dataModel.shadowRadius }}",
+                        "type": "{{ $__dataModel.shadowType }}"
+                    },
+                    "linearGradient": {
+                        "colors": "{{ $__dataModel.gradientColors }}",
+                        "angle": "{{ $__dataModel.gradientAngle }}",
+                        "direction": "{{ $__dataModel.gradientDirection }}",
+                        "stops": "{{ $__dataModel.gradientStops }}",
+                        "repeating": "{{ $__dataModel.gradientRepeating }}"
+                    }
+                }
+            })");
+        ASSERT_NE(descriptor, nullptr);
+
+        component.ApplyCustomProperties(descriptor->GetRoot());
+
+        auto stylesOpt = component.GetProperty("styles");
+        ASSERT_TRUE(stylesOpt.has_value());
+        JsonValue styles = stylesOpt.value();
+        ASSERT_TRUE(styles.IsObject());
+        EXPECT_EQ(styles.GetItem("width").GetStringValue(""), "{{ $__dataModel.width }}");
+        EXPECT_EQ(styles.GetItem("constraintSize").GetStringValue(""), "{{ $__dataModel.constraintSize }}");
+        EXPECT_EQ(styles.GetItem("margin").GetStringValue(""), "{{ $__dataModel.margin }}");
+        EXPECT_EQ(styles.GetItem("layoutWeight").GetStringValue(""), "{{ $__dataModel.layoutWeight }}");
+        EXPECT_EQ(styles.GetItem("flexShrink").GetStringValue(""), "{{ $__dataModel.flexShrink }}");
+        EXPECT_EQ(styles.GetItem("backgroundImageSizeWithStyle").GetItem("width").GetStringValue(""),
+            "{{ $__dataModel.imageWidth }}");
+        EXPECT_EQ(styles.GetItem("borderRadius").GetItem("topLeft").GetStringValue(""), "{{ $__dataModel.radius }}");
+        EXPECT_EQ(styles.GetItem("shadow").GetItem("style").GetStringValue(""), "{{ $__dataModel.shadowStyle }}");
+        EXPECT_EQ(
+            styles.GetItem("linearGradient").GetItem("colors").GetStringValue(""), "{{ $__dataModel.gradientColors }}");
+    }
+
+    EXPECT_EQ(mockNapiPtr_->callFunctionCallCount_, 0U);
+}
+
+TEST_F(CustomComponentTest, should_restore_invalid_background_image_size_to_auto)
+{
+    RegisterDispatchCallbacks(mockNapiPtr_);
+
+    CustomComponentProbe component("Tabs");
+    SurfaceContext surfaceContext;
+    surfaceContext.catalogId = A2UI_EXTENDED_CATALOG_ID;
+    component.SetSurfaceContext(surfaceContext);
+    component.SetComponentId("tabsBackgroundSize");
+    component.SetSurfaceId("surface-id");
+    component.SetRenderId(206);
+
+    std::unique_ptr<JsonAdapter> descriptor =
+        ParseJson(R"({"styles":{"backgroundImageSizeWithStyle":"invalid-size"}})");
+    ASSERT_NE(descriptor, nullptr);
+    component.ApplyCustomProperties(descriptor->GetRoot());
+
+    auto stylesOpt = component.GetProperty("styles");
+    ASSERT_TRUE(stylesOpt.has_value());
+    JsonValue styles = stylesOpt.value();
+    ASSERT_TRUE(styles.Has("backgroundImageSizeWithStyle"));
+    EXPECT_EQ(styles.GetItem("backgroundImageSizeWithStyle").GetStringValue(""), "auto");
+}
+
 TEST_F(CustomComponentTest, should_keep_valid_extended_tabs_private_properties_without_schema_warning)
 {
     RegisterDispatchCallbacks(mockNapiPtr_);
@@ -833,9 +1220,9 @@ TEST_F(CustomComponentTest, should_keep_valid_extended_tabs_private_properties_w
     std::unique_ptr<JsonAdapter> descriptor = ParseJson(
         R"({
             "barPosition": "start",
-            "vertical": "true",
+            "vertical": true,
             "scrollable": false,
-            "tabIndex": "2"
+            "tabIndex": 2
         })");
     ASSERT_NE(descriptor, nullptr);
 
@@ -847,30 +1234,36 @@ TEST_F(CustomComponentTest, should_keep_valid_extended_tabs_private_properties_w
     ASSERT_TRUE(component.GetProperty("scrollable").has_value());
     ASSERT_TRUE(component.GetProperty("tabIndex").has_value());
     EXPECT_EQ(component.GetProperty("barPosition").value().GetStringValue(""), "start");
-    EXPECT_EQ(component.GetProperty("vertical").value().GetStringValue(""), "true");
+    EXPECT_TRUE(component.GetProperty("vertical").value().GetBoolValue(false));
     EXPECT_FALSE(component.GetProperty("scrollable").value().GetBoolValue(true));
-    EXPECT_EQ(component.GetProperty("tabIndex").value().GetStringValue(""), "2");
+    EXPECT_DOUBLE_EQ(component.GetProperty("tabIndex").value().GetNumberValue(0.0), 2.0);
 
     std::unique_ptr<JsonAdapter> dynamicVerticalAdapter = ParseJson(R"({"path":"/tabs/vertical"})");
     std::unique_ptr<JsonAdapter> dynamicTabIndexAdapter = ParseJson(R"({"path":"/tabs/index"})");
+    std::unique_ptr<JsonAdapter> functionCallVerticalAdapter = ParseJson(R"({"call":"myFunction"})");
     ASSERT_NE(dynamicVerticalAdapter, nullptr);
     ASSERT_NE(dynamicTabIndexAdapter, nullptr);
+    ASSERT_NE(functionCallVerticalAdapter, nullptr);
 
     JsonValue expressionBarPosition = CreateStringValue("{{ $__dataModel.barPosition }}");
     JsonValue dynamicVertical = dynamicVerticalAdapter->GetRoot();
     JsonValue expressionScrollable = CreateStringValue("{{ $__dataModel.scrollable }}");
     JsonValue dynamicTabIndex = dynamicTabIndexAdapter->GetRoot();
+    JsonValue functionCallVertical = functionCallVerticalAdapter->GetRoot();
 
     component.NormalizeCustomProperty("barPosition", expressionBarPosition);
     component.NormalizeCustomProperty("vertical", dynamicVertical);
     component.NormalizeCustomProperty("scrollable", expressionScrollable);
     component.NormalizeCustomProperty("tabIndex", dynamicTabIndex);
+    component.NormalizeCustomProperty("vertical", functionCallVertical);
 
     EXPECT_EQ(mockNapiPtr_->callFunctionCallCount_, 0U);
     EXPECT_TRUE(expressionBarPosition.IsString());
     EXPECT_TRUE(dynamicVertical.IsObject());
     EXPECT_TRUE(expressionScrollable.IsString());
     EXPECT_TRUE(dynamicTabIndex.IsObject());
+    ASSERT_TRUE(functionCallVertical.IsObject());
+    EXPECT_EQ(functionCallVertical.GetString("call", ""), "myFunction");
 }
 
 TEST_F(CustomComponentTest, should_dispatch_schema_warnings_for_invalid_extended_tabs_private_properties)
@@ -888,6 +1281,10 @@ TEST_F(CustomComponentTest, should_dispatch_schema_warnings_for_invalid_extended
     JsonValue invalidBarPosition = CreateStringValue("left");
     JsonValue barPositionTypeMismatch = CreateNumberValue(1.0);
     JsonValue invalidVertical = CreateStringValue("maybe");
+    JsonValue verticalStringTrue = CreateStringValue("true");
+    JsonValue verticalStringFalse = CreateStringValue("false");
+    JsonValue scrollableStringTrue = CreateStringValue("true");
+    JsonValue scrollableStringFalse = CreateStringValue("false");
     std::unique_ptr<JsonAdapter> scrollableTypeMismatchAdapter = ParseJson(R"({"value":true})");
     ASSERT_NE(scrollableTypeMismatchAdapter, nullptr);
     JsonValue scrollableTypeMismatch = scrollableTypeMismatchAdapter->GetRoot();
@@ -896,19 +1293,49 @@ TEST_F(CustomComponentTest, should_dispatch_schema_warnings_for_invalid_extended
     component.NormalizeCustomProperty("barPosition", invalidBarPosition);
     component.NormalizeCustomProperty("barPosition", barPositionTypeMismatch);
     component.NormalizeCustomProperty("vertical", invalidVertical);
+    component.NormalizeCustomProperty("vertical", verticalStringTrue);
+    component.NormalizeCustomProperty("vertical", verticalStringFalse);
+    component.NormalizeCustomProperty("scrollable", scrollableStringTrue);
+    component.NormalizeCustomProperty("scrollable", scrollableStringFalse);
     component.NormalizeCustomProperty("scrollable", scrollableTypeMismatch);
     component.NormalizeCustomProperty("tabIndex", invalidTabIndex);
 
     EXPECT_FALSE(invalidBarPosition.IsValid());
     EXPECT_FALSE(barPositionTypeMismatch.IsValid());
     EXPECT_FALSE(invalidVertical.IsValid());
+    EXPECT_FALSE(verticalStringTrue.IsValid());
+    EXPECT_FALSE(verticalStringFalse.IsValid());
+    EXPECT_FALSE(scrollableStringTrue.IsValid());
+    EXPECT_FALSE(scrollableStringFalse.IsValid());
     EXPECT_FALSE(scrollableTypeMismatch.IsValid());
     EXPECT_FALSE(invalidTabIndex.IsValid());
     EXPECT_EQ(CountWarningRequests(mockNapiPtr_, "ERROR_CODE_INVALID_VALUE", "tabsPropsInvalid.barPosition"), 1U);
     EXPECT_EQ(CountWarningRequests(mockNapiPtr_, "ERROR_CODE_TYPE_MISMATCH", "tabsPropsInvalid.barPosition"), 1U);
-    EXPECT_EQ(CountWarningRequests(mockNapiPtr_, "ERROR_CODE_INVALID_VALUE", "tabsPropsInvalid.vertical"), 1U);
-    EXPECT_EQ(CountWarningRequests(mockNapiPtr_, "ERROR_CODE_TYPE_MISMATCH", "tabsPropsInvalid.scrollable"), 1U);
+    EXPECT_EQ(CountWarningRequests(mockNapiPtr_, "ERROR_CODE_TYPE_MISMATCH", "tabsPropsInvalid.vertical"), 3U);
+    EXPECT_EQ(CountWarningRequests(mockNapiPtr_, "ERROR_CODE_TYPE_MISMATCH", "tabsPropsInvalid.scrollable"), 3U);
     EXPECT_EQ(CountWarningRequests(mockNapiPtr_, "ERROR_CODE_TYPE_MISMATCH", "tabsPropsInvalid.tabIndex"), 1U);
+}
+
+TEST_F(CustomComponentTest, should_reject_negative_or_fractional_extended_tabs_index_literals)
+{
+    RegisterDispatchCallbacks(mockNapiPtr_);
+
+    CustomComponentProbe component("Tabs");
+    SurfaceContext surfaceContext;
+    surfaceContext.catalogId = A2UI_EXTENDED_CATALOG_ID;
+    component.SetSurfaceContext(surfaceContext);
+    component.SetComponentId("tabsIndexRange");
+    component.SetSurfaceId("surface-id");
+    component.SetRenderId(209);
+
+    JsonValue negativeTabIndex = CreateNumberValue(-1.0);
+    JsonValue fractionalTabIndex = CreateNumberValue(1.5);
+    component.NormalizeCustomProperty("tabIndex", negativeTabIndex);
+    component.NormalizeCustomProperty("tabIndex", fractionalTabIndex);
+
+    EXPECT_FALSE(negativeTabIndex.IsValid());
+    EXPECT_FALSE(fractionalTabIndex.IsValid());
+    EXPECT_EQ(CountWarningRequests(mockNapiPtr_, "ERROR_CODE_INVALID_VALUE", "tabsIndexRange.tabIndex"), 2U);
 }
 
 TEST_F(CustomComponentTest, should_reject_extended_tabs_linear_gradient_without_required_colors)
@@ -1102,7 +1529,7 @@ TEST_F(CustomComponentTest, should_keep_valid_extended_row_common_styles_without
                     "stops": [0, 1]
                 },
                 "layoutWeight": "2",
-                "flexShrink": "0.5",
+                "flexShrink": 2.6,
                 "shadow": {
                     "style": 2,
                     "radius": 8,
@@ -1129,6 +1556,8 @@ TEST_F(CustomComponentTest, should_keep_valid_extended_row_common_styles_without
     EXPECT_TRUE(styles.Has("constraintSize"));
     EXPECT_TRUE(styles.Has("backgroundImageSize"));
     EXPECT_TRUE(styles.Has("linearGradient"));
+    ASSERT_TRUE(styles.Has("flexShrink"));
+    EXPECT_DOUBLE_EQ(styles.GetItem("flexShrink").GetNumberValue(0.0), 2.6);
     EXPECT_TRUE(styles.Has("shadow"));
     EXPECT_TRUE(styles.Has("visibility"));
 }
@@ -1807,6 +2236,37 @@ TEST_F(CustomComponentTest, should_apply_common_attributes_and_accessibility_pro
     EXPECT_EQ(accessibility.GetString("role", ""), "button");
 }
 
+TEST_F(CustomComponentTest, should_warn_and_reset_accessibility_description_when_value_is_not_string)
+{
+    RegisterDispatchCallbacks(mockNapiPtr_);
+
+    CustomComponent component("Panel");
+    component.SetComponentId("panelMain");
+    component.SetSurfaceId("surface-id");
+    component.SetRenderId(205);
+
+    std::unique_ptr<JsonAdapter> preset = ParseJson(R"({"accessibility":{"description":"preset"}})");
+    ASSERT_NE(preset, nullptr);
+    component.ApplyCommonAttributes(preset->GetRoot());
+    ASSERT_TRUE(component.descriptor_.properties.hasAccessibilityDescription);
+    ASSERT_EQ(component.descriptor_.properties.accessibilityDescription, "preset");
+
+    std::unique_ptr<JsonAdapter> invalid = ParseJson(R"({"accessibility":{"description":123}})");
+    ASSERT_NE(invalid, nullptr);
+    component.ApplyCommonAttributes(invalid->GetRoot());
+
+    EXPECT_EQ(
+        CountWarningRequests(mockNapiPtr_, "ERROR_CODE_TYPE_MISMATCH", "panelMain.accessibility.description"), 1U);
+    ASSERT_FALSE(mockNapiPtr_->callFunctionArgsHistory_.empty());
+    ASSERT_FALSE(mockNapiPtr_->callFunctionArgsHistory_.back().empty());
+    napi_value request = mockNapiPtr_->callFunctionArgsHistory_.back().front();
+    EXPECT_EQ(GetStringValue(mockNapiPtr_, GetRequestProperty(mockNapiPtr_, request, "message")),
+        "Property accessibility.description expects string value, got type 'number', value has been coerced to "
+        "string");
+    EXPECT_FALSE(component.descriptor_.properties.hasAccessibilityDescription);
+    EXPECT_TRUE(component.descriptor_.properties.accessibilityDescription.empty());
+}
+
 TEST_F(CustomComponentTest, should_clear_custom_properties_when_descriptor_is_not_object)
 {
     CustomComponent component("Panel");
@@ -1819,6 +2279,21 @@ TEST_F(CustomComponentTest, should_clear_custom_properties_when_descriptor_is_no
 
     EXPECT_TRUE(component.customPropertyNames_.empty());
     EXPECT_TRUE(component.properties_.empty());
+}
+
+TEST_F(CustomComponentTest, should_store_and_read_runtime_custom_property)
+{
+    CustomComponent component("Panel");
+    JsonValue value = CreateStringValue("runtime-value");
+
+    EXPECT_FALSE(component.SetRuntimeCustomProperty("", value));
+    EXPECT_FALSE(component.SetRuntimeCustomProperty("runtime", JsonValue()));
+    ASSERT_TRUE(component.SetRuntimeCustomProperty("runtime", value));
+
+    JsonValue storedValue = component.GetCustomProperty("runtime");
+    ASSERT_TRUE(storedValue.IsValid());
+    EXPECT_EQ(storedValue.GetStringValue(""), "runtime-value");
+    EXPECT_TRUE(component.customPropertyNames_.find("runtime") != component.customPropertyNames_.end());
 }
 
 TEST_F(CustomComponentTest, should_apply_custom_properties_and_dynamic_path_binding)
@@ -2376,6 +2851,104 @@ TEST_F(CustomComponentTest, should_register_dynamic_value_callbacks_for_path_and
     EXPECT_TRUE(component.dynamicValueCallbacks_.find("headline") == component.dynamicValueCallbacks_.end());
 }
 
+TEST_F(CustomComponentTest, should_keep_function_call_callback_for_data_path_dependencies)
+{
+    constexpr int32_t renderId = 826;
+    const std::string surfaceId = "surface-function-call-callback";
+    RenderSlotCleanupGuard cleanupGuard(renderId);
+    RenderSlot& renderSlot = RenderManager::GetInstance().CreateRenderSlot(renderId);
+    SurfaceSlot& surface = renderSlot.GetSurfaceManager()->CreateSurface(surfaceId, nullptr);
+    auto catalog = std::make_shared<Catalog>("catalog-function-call-callback");
+    catalog->AddFunction(std::make_shared<CatalogItem>("formatString", CatalogItemType::LOCAL_FUNCTION));
+    surface.SetCatalog(catalog);
+    auto initialData = ParseJson(R"({"form":{"title":"current-title"}})");
+    ASSERT_NE(initialData, nullptr);
+    surface.GetBindingEngine()->UpdateDataModelByPath(surfaceId, "/", initialData->GetRoot());
+
+    napi_env env = reinterpret_cast<napi_env>(0x8260);
+    napi_value callback = nullptr;
+    ASSERT_EQ(
+        mockNapiPtr_->CreateFunction(env, "dynamicCallback", NAPI_AUTO_LENGTH, nullptr, nullptr, &callback), napi_ok);
+    napi_value bridgeCallback = nullptr;
+    ASSERT_EQ(mockNapiPtr_->CreateFunction(env, "functionBridge", NAPI_AUTO_LENGTH, nullptr, nullptr, &bridgeCallback),
+        napi_ok);
+    FunctionBridge::GetInstance().RegisterInvokeLocalFunction(env, bridgeCallback);
+    FunctionBridgeResetGuard bridgeResetGuard(mockNapiPtr_, env);
+
+    auto component = std::make_shared<CustomComponent>("Panel");
+    component->SetComponentId("function-call-callback");
+    component->SetSurfaceId(surfaceId);
+    component->SetRenderId(renderId);
+    auto descriptor =
+        ParseJson(R"({"call":"formatString","returnType":"string","args":{"value":{"path":"/form/title"}}})");
+    ASSERT_NE(descriptor, nullptr);
+
+    mockNapiPtr_->callFunctionCallCount_ = 0;
+    std::string errorMessage;
+    ASSERT_TRUE(PreparePassthroughNormalizeResponse(mockNapiPtr_));
+    ASSERT_TRUE(component->RegisterDynamicValueCallback("title", descriptor->GetRoot(), env, callback, &errorMessage))
+        << errorMessage;
+    EXPECT_EQ(CountBindingsForProperty(*component, "title"), 1U);
+    ASSERT_EQ(component->GetDataBindings()[0].type_, BindingType::FUNCTION_CALL);
+    EXPECT_EQ(component->GetDataBindings()[0].dataPath_, "/form/title");
+    size_t initialCallCount = mockNapiPtr_->callFunctionCallCount_;
+    ASSERT_EQ(initialCallCount, 2U);
+
+    auto updatedTitle = CreateStringValue("updated-title");
+    ASSERT_TRUE(PreparePassthroughNormalizeResponse(mockNapiPtr_));
+    surface.GetBindingEngine()->UpdateDataModelByPath(surfaceId, "/form/title", updatedTitle);
+
+    EXPECT_EQ(mockNapiPtr_->callFunctionCallCount_, initialCallCount + 2U);
+    ASSERT_FALSE(mockNapiPtr_->lastCallFunctionArgs_.empty());
+    EXPECT_EQ(GetStringValue(mockNapiPtr_, mockNapiPtr_->lastCallFunctionArgs_[0]), "updated-title");
+    EXPECT_TRUE(component->dynamicValueCallbacks_.find("title") != component->dynamicValueCallbacks_.end());
+}
+
+#ifdef ENABLE_EXPRESSION_ENGINE
+TEST_F(CustomComponentTest, should_keep_expression_callback_for_data_model_dependencies)
+{
+    constexpr int32_t renderId = 827;
+    const std::string surfaceId = "surface-expression-callback";
+    RenderSlotCleanupGuard cleanupGuard(renderId);
+    RenderSlot& renderSlot = RenderManager::GetInstance().CreateRenderSlot(renderId);
+    SurfaceSlot& surface = renderSlot.GetSurfaceManager()->CreateSurface(surfaceId, nullptr);
+    auto initialData = ParseJson(R"({"form":{"title":"current-title"}})");
+    ASSERT_NE(initialData, nullptr);
+    surface.GetBindingEngine()->UpdateDataModelByPath(surfaceId, "/", initialData->GetRoot());
+
+    napi_env env = reinterpret_cast<napi_env>(0x8270);
+    napi_value callback = nullptr;
+    ASSERT_EQ(
+        mockNapiPtr_->CreateFunction(env, "dynamicCallback", NAPI_AUTO_LENGTH, nullptr, nullptr, &callback), napi_ok);
+
+    auto component = std::make_shared<CustomComponent>("Panel");
+    component->SetComponentId("expression-callback");
+    component->SetSurfaceId(surfaceId);
+    component->SetRenderId(renderId);
+    auto descriptor = ParseJson(R"("{{ $__dataModel.form.title }}")");
+    ASSERT_NE(descriptor, nullptr);
+
+    mockNapiPtr_->callFunctionCallCount_ = 0;
+    std::string errorMessage;
+    EXPECT_TRUE(component->RegisterDynamicValueCallback("title", descriptor->GetRoot(), env, callback, &errorMessage));
+    EXPECT_EQ(CountBindingsForProperty(*component, "title"), 1U);
+    ASSERT_EQ(component->GetDataBindings()[0].type_, BindingType::EXPRESSION);
+    EXPECT_EQ(component->GetDataBindings()[0].dataPath_, "/form/title");
+    ASSERT_EQ(component->GetDataBindings()[0].globalVarDeps_.size(), 1U);
+    EXPECT_EQ(component->GetDataBindings()[0].globalVarDeps_[0], "__dataModel");
+    size_t initialCallbackCount = mockNapiPtr_->callFunctionCallCount_;
+    ASSERT_EQ(initialCallbackCount, 1U);
+
+    auto updatedTitle = CreateStringValue("updated-title");
+    surface.GetBindingEngine()->UpdateDataModelByPath(surfaceId, "/form/title", updatedTitle);
+
+    EXPECT_EQ(mockNapiPtr_->callFunctionCallCount_, initialCallbackCount + 1U);
+    ASSERT_FALSE(mockNapiPtr_->lastCallFunctionArgs_.empty());
+    EXPECT_EQ(GetStringValue(mockNapiPtr_, mockNapiPtr_->lastCallFunctionArgs_[0]), "updated-title");
+    EXPECT_TRUE(component->dynamicValueCallbacks_.find("title") != component->dynamicValueCallbacks_.end());
+}
+#endif
+
 TEST_F(CustomComponentTest, should_create_custom_component_and_sync_multi_child_slots)
 {
     napi_env env = reinterpret_cast<napi_env>(0x7300);
@@ -2593,6 +3166,31 @@ TEST_F(CustomComponentTest, should_resolve_template_children_and_merge_generated
     ASSERT_TRUE(rowProps.IsObject());
     ASSERT_TRUE(rowProps.Has("children"));
     EXPECT_EQ(rowProps.GetItem("children").GetArraySize(), 3);
+}
+
+/**
+ * @tc.name: should_preserve_template_children_descriptor_when_extended_tabs_instances_are_generated
+ * @tc.desc: 验证扩展 Tabs 已生成模板实例 ID 时仍向 ArkTS 传递原始模板 children 描述符
+ * @tc.type: FUNC
+ */
+TEST_F(CustomComponentTest, should_preserve_template_children_descriptor_when_extended_tabs_instances_are_generated)
+{
+    CustomComponentProbe tabs("Tabs");
+    SurfaceContext surfaceContext;
+    surfaceContext.catalogId = A2UI_EXTENDED_CATALOG_ID;
+    tabs.SetSurfaceContext(surfaceContext);
+    auto descriptor = ParseJson(R"({"children":{"componentId":"categoryTab","path":"/categories"}})");
+    ASSERT_NE(descriptor, nullptr);
+    tabs.CollectChildListDescriptor(descriptor->GetRoot());
+    tabs.tabChildIds_ = { "/categoriescategoryTab:0:categoryTab", "/categoriescategoryTab:1:categoryTab" };
+
+    JsonValue customProps = tabs.BuildCustomProps();
+
+    ASSERT_TRUE(customProps.IsObject());
+    JsonValue children = customProps.GetItem("children");
+    ASSERT_TRUE(children.IsObject());
+    EXPECT_EQ(children.GetString("componentId", ""), "categoryTab");
+    EXPECT_EQ(children.GetString("path", ""), "/categories");
 }
 
 TEST_F(CustomComponentTest, should_build_custom_props_for_raw_tabs_non_array_empty_tabs_and_row_children)
@@ -3140,7 +3738,8 @@ TEST_F(CustomComponentTest, should_cover_extended_common_style_dynamic_skip_and_
     ASSERT_TRUE(styles.IsObject());
     EXPECT_TRUE(styles.Has("width"));
     EXPECT_TRUE(styles.Has("height"));
-    EXPECT_FALSE(styles.Has("backgroundImageSize"));
+    ASSERT_TRUE(styles.Has("backgroundImageSize"));
+    EXPECT_EQ(styles.GetItem("backgroundImageSize").GetStringValue(""), "auto");
     EXPECT_TRUE(styles.Has("linearGradient"));
     EXPECT_TRUE(styles.GetItem("linearGradient").Has("colors"));
 }
@@ -3189,6 +3788,7 @@ TEST_F(CustomComponentTest, should_cover_template_child_resolution_empty_missing
     surface.GetBindingEngine()->UpdateDataModelByPath(surfaceId, "/items", objectData->GetRoot());
 
     component.SetSurfaceId(surfaceId);
+    EXPECT_TRUE(component.ResolveTemplateChildIds("tpl", "/missing").empty());
     EXPECT_TRUE(component.ResolveTemplateChildIds("tpl", "/items").empty());
 }
 
@@ -3465,6 +4065,448 @@ TEST_F(CustomComponentTest, should_dispatch_event_entrypoint_with_no_registered_
     ASSERT_NE(extraContext, nullptr);
 
     component.DispatchEvent("onClick", extraContext->GetRoot());
+}
+
+// =============================================================================
+// Issue #85: Width / Height schema validation in ApplyCommonAttributes
+// =============================================================================
+
+// ---------------------------------------------------------------------------
+// Group 1: Valid width / height values
+// ---------------------------------------------------------------------------
+
+TEST_F(CustomComponentTest, should_accept_valid_numeric_width_and_height_in_common_attributes)
+{
+    CustomComponent component("Panel");
+    std::unique_ptr<JsonAdapter> descriptor = ParseJson(
+        R"({
+            "width": 200,
+            "height": 150
+        })");
+    ASSERT_NE(descriptor, nullptr);
+
+    component.ApplyCommonAttributes(descriptor->GetRoot());
+
+    EXPECT_TRUE(component.descriptor_.properties.hasWidth);
+    EXPECT_DOUBLE_EQ(component.descriptor_.properties.width, 200.0);
+    EXPECT_TRUE(component.descriptor_.properties.hasHeight);
+    EXPECT_DOUBLE_EQ(component.descriptor_.properties.height, 150.0);
+    EXPECT_FALSE(component.descriptor_.properties.size.empty());
+}
+
+TEST_F(CustomComponentTest, should_accept_valid_string_dimension_width_with_vp_fp_percent_units)
+{
+    CustomComponent component("Panel");
+
+    // "100vp"
+    {
+        auto desc = ParseJson(R"({"width": "100vp"})");
+        ASSERT_NE(desc, nullptr);
+        CustomComponent comp("Panel");
+        comp.ApplyCommonAttributes(desc->GetRoot());
+        EXPECT_TRUE(comp.descriptor_.properties.hasWidth);
+        EXPECT_DOUBLE_EQ(comp.descriptor_.properties.width, 100.0);
+    }
+    // "50fp"
+    {
+        auto desc = ParseJson(R"({"width": "50fp"})");
+        ASSERT_NE(desc, nullptr);
+        CustomComponent comp("Panel");
+        comp.ApplyCommonAttributes(desc->GetRoot());
+        EXPECT_TRUE(comp.descriptor_.properties.hasWidth);
+        EXPECT_DOUBLE_EQ(comp.descriptor_.properties.width, 50.0);
+    }
+    // "75%"
+    {
+        auto desc = ParseJson(R"({"width": "75%"})");
+        ASSERT_NE(desc, nullptr);
+        CustomComponent comp("Panel");
+        comp.ApplyCommonAttributes(desc->GetRoot());
+        EXPECT_TRUE(comp.descriptor_.properties.hasWidth);
+        EXPECT_DOUBLE_EQ(comp.descriptor_.properties.width, 75.0);
+    }
+}
+
+TEST_F(CustomComponentTest, should_accept_keyword_dimension_width_values)
+{
+    // "matchParent"
+    {
+        auto desc = ParseJson(R"({"width": "matchParent"})");
+        ASSERT_NE(desc, nullptr);
+        CustomComponent component("Panel");
+        component.ApplyCommonAttributes(desc->GetRoot());
+        EXPECT_TRUE(component.descriptor_.properties.hasWidth);
+        EXPECT_DOUBLE_EQ(component.descriptor_.properties.width, 100.0);
+    }
+    // "wrapContent"
+    {
+        auto desc = ParseJson(R"({"width": "wrapContent"})");
+        ASSERT_NE(desc, nullptr);
+        CustomComponent component("Panel");
+        component.ApplyCommonAttributes(desc->GetRoot());
+        EXPECT_TRUE(component.descriptor_.properties.hasWidth);
+        EXPECT_DOUBLE_EQ(component.descriptor_.properties.width, 0.0);
+    }
+    // "fixAtIdealSize"
+    {
+        auto desc = ParseJson(R"({"width": "fixAtIdealSize"})");
+        ASSERT_NE(desc, nullptr);
+        CustomComponent component("Panel");
+        component.ApplyCommonAttributes(desc->GetRoot());
+        EXPECT_TRUE(component.descriptor_.properties.hasWidth);
+        EXPECT_DOUBLE_EQ(component.descriptor_.properties.width, 0.0);
+    }
+}
+
+TEST_F(CustomComponentTest, should_accept_zero_width_and_height_as_valid_boundary_values)
+{
+    CustomComponent component("Panel");
+    std::unique_ptr<JsonAdapter> descriptor = ParseJson(
+        R"({
+            "width": 0,
+            "height": 0
+        })");
+    ASSERT_NE(descriptor, nullptr);
+
+    component.ApplyCommonAttributes(descriptor->GetRoot());
+
+    EXPECT_TRUE(component.descriptor_.properties.hasWidth);
+    EXPECT_DOUBLE_EQ(component.descriptor_.properties.width, 0.0);
+    EXPECT_TRUE(component.descriptor_.properties.hasHeight);
+    EXPECT_DOUBLE_EQ(component.descriptor_.properties.height, 0.0);
+}
+
+TEST_F(CustomComponentTest, should_set_only_width_when_only_width_is_provided)
+{
+    CustomComponent component("Panel");
+    auto desc = ParseJson(R"({"width": 300})");
+    ASSERT_NE(desc, nullptr);
+
+    component.ApplyCommonAttributes(desc->GetRoot());
+
+    EXPECT_TRUE(component.descriptor_.properties.hasWidth);
+    EXPECT_DOUBLE_EQ(component.descriptor_.properties.width, 300.0);
+    EXPECT_FALSE(component.descriptor_.properties.hasHeight);
+    EXPECT_DOUBLE_EQ(component.descriptor_.properties.height, 0.0);
+}
+
+TEST_F(CustomComponentTest, should_set_only_height_when_only_height_is_provided)
+{
+    CustomComponent component("Panel");
+    auto desc = ParseJson(R"({"height": "40vp"})");
+    ASSERT_NE(desc, nullptr);
+
+    component.ApplyCommonAttributes(desc->GetRoot());
+
+    EXPECT_FALSE(component.descriptor_.properties.hasWidth);
+    EXPECT_TRUE(component.descriptor_.properties.hasHeight);
+    EXPECT_DOUBLE_EQ(component.descriptor_.properties.height, 40.0);
+}
+
+// ---------------------------------------------------------------------------
+// Group 2: Invalid values — schema warnings dispatched
+// ---------------------------------------------------------------------------
+
+TEST_F(CustomComponentTest, should_dispatch_invalid_value_warning_for_negative_width_and_height)
+{
+    RegisterDispatchCallbacks(mockNapiPtr_);
+
+    CustomComponent component("Panel");
+    component.SetComponentId("negSize");
+    component.SetSurfaceId("surface-85");
+    component.SetRenderId(8501);
+
+    auto desc = ParseJson(R"({"width": -100, "height": -50})");
+    ASSERT_NE(desc, nullptr);
+
+    component.ApplyCommonAttributes(desc->GetRoot());
+
+    EXPECT_FALSE(component.descriptor_.properties.hasWidth);
+    EXPECT_FALSE(component.descriptor_.properties.hasHeight);
+    EXPECT_EQ(CountWarningRequests(mockNapiPtr_, "ERROR_CODE_INVALID_VALUE", "negSize.width"), 1U);
+    EXPECT_EQ(CountWarningRequests(mockNapiPtr_, "ERROR_CODE_INVALID_VALUE", "negSize.height"), 1U);
+}
+
+TEST_F(CustomComponentTest, should_dispatch_invalid_value_warning_for_unsupported_string_unit_px)
+{
+    RegisterDispatchCallbacks(mockNapiPtr_);
+
+    CustomComponent component("Panel");
+    component.SetComponentId("pxUnit");
+    component.SetSurfaceId("surface-85");
+    component.SetRenderId(8502);
+
+    auto desc = ParseJson(R"({"width": "100px", "height": "200px"})");
+    ASSERT_NE(desc, nullptr);
+
+    component.ApplyCommonAttributes(desc->GetRoot());
+
+    EXPECT_FALSE(component.descriptor_.properties.hasWidth);
+    EXPECT_FALSE(component.descriptor_.properties.hasHeight);
+    EXPECT_EQ(CountWarningRequests(mockNapiPtr_, "ERROR_CODE_INVALID_VALUE", "pxUnit.width"), 1U);
+    EXPECT_EQ(CountWarningRequests(mockNapiPtr_, "ERROR_CODE_INVALID_VALUE", "pxUnit.height"), 1U);
+}
+
+TEST_F(CustomComponentTest, should_dispatch_invalid_value_warning_for_unparseable_string_dimension)
+{
+    RegisterDispatchCallbacks(mockNapiPtr_);
+
+    CustomComponent component("Panel");
+    component.SetComponentId("badStr");
+    component.SetSurfaceId("surface-85");
+    component.SetRenderId(8503);
+
+    auto desc = ParseJson(R"({"width": "abc", "height": ""})");
+    ASSERT_NE(desc, nullptr);
+
+    component.ApplyCommonAttributes(desc->GetRoot());
+
+    EXPECT_FALSE(component.descriptor_.properties.hasWidth);
+    EXPECT_FALSE(component.descriptor_.properties.hasHeight);
+    EXPECT_EQ(CountWarningRequests(mockNapiPtr_, "ERROR_CODE_INVALID_VALUE", "badStr.width"), 1U);
+    EXPECT_EQ(CountWarningRequests(mockNapiPtr_, "ERROR_CODE_INVALID_VALUE", "badStr.height"), 1U);
+}
+
+TEST_F(CustomComponentTest, should_dispatch_type_mismatch_warning_for_boolean_width_and_height)
+{
+    RegisterDispatchCallbacks(mockNapiPtr_);
+
+    CustomComponent component("Panel");
+    component.SetComponentId("boolDim");
+    component.SetSurfaceId("surface-85");
+    component.SetRenderId(8504);
+
+    auto desc = ParseJson(R"({"width": true, "height": false})");
+    ASSERT_NE(desc, nullptr);
+
+    component.ApplyCommonAttributes(desc->GetRoot());
+
+    EXPECT_FALSE(component.descriptor_.properties.hasWidth);
+    EXPECT_FALSE(component.descriptor_.properties.hasHeight);
+    EXPECT_EQ(CountWarningRequests(mockNapiPtr_, "ERROR_CODE_TYPE_MISMATCH", "boolDim.width"), 1U);
+    EXPECT_EQ(CountWarningRequests(mockNapiPtr_, "ERROR_CODE_TYPE_MISMATCH", "boolDim.height"), 1U);
+}
+
+TEST_F(CustomComponentTest, should_dispatch_type_mismatch_warning_for_array_and_object_width)
+{
+    RegisterDispatchCallbacks(mockNapiPtr_);
+
+    // Array width
+    {
+        auto desc = ParseJson(R"({"width": [1, 2, 3]})");
+        ASSERT_NE(desc, nullptr);
+        CustomComponent comp("Panel");
+        comp.SetComponentId("arrObj");
+        comp.SetSurfaceId("surface-85");
+        comp.SetRenderId(8505);
+        comp.ApplyCommonAttributes(desc->GetRoot());
+        EXPECT_FALSE(comp.descriptor_.properties.hasWidth);
+    }
+    // Plain object width (non-dynamic — no "path" or "call" key)
+    {
+        auto desc = ParseJson(R"({"width": {"value": 100}})");
+        ASSERT_NE(desc, nullptr);
+        CustomComponent comp("Panel");
+        comp.SetComponentId("arrObj");
+        comp.SetSurfaceId("surface-85");
+        comp.SetRenderId(8505);
+        comp.ApplyCommonAttributes(desc->GetRoot());
+        EXPECT_FALSE(comp.descriptor_.properties.hasWidth);
+    }
+
+    EXPECT_EQ(CountWarningRequests(mockNapiPtr_, "ERROR_CODE_TYPE_MISMATCH", "arrObj.width"), 2U);
+}
+
+TEST_F(CustomComponentTest, should_dispatch_invalid_value_warning_for_negative_float_string_dimension)
+{
+    RegisterDispatchCallbacks(mockNapiPtr_);
+
+    CustomComponent component("Panel");
+    component.SetComponentId("negFloat");
+    component.SetSurfaceId("surface-85");
+    component.SetRenderId(8506);
+
+    // "-10vp" is parsed by strtof → -10.0, then checked < 0 → rejected
+    auto desc = ParseJson(R"({"width": "-10vp"})");
+    ASSERT_NE(desc, nullptr);
+
+    component.ApplyCommonAttributes(desc->GetRoot());
+
+    EXPECT_FALSE(component.descriptor_.properties.hasWidth);
+    EXPECT_EQ(CountWarningRequests(mockNapiPtr_, "ERROR_CODE_INVALID_VALUE", "negFloat.width"), 1U);
+}
+
+// ---------------------------------------------------------------------------
+// Group 3: Dynamic / expression values — skipped (no validation)
+// ---------------------------------------------------------------------------
+
+TEST_F(CustomComponentTest, should_skip_validation_for_dynamic_descriptor_width_and_height)
+{
+    RegisterDispatchCallbacks(mockNapiPtr_);
+
+    CustomComponent component("Panel");
+    component.SetComponentId("dynDim");
+    component.SetSurfaceId("surface-85");
+    component.SetRenderId(8507);
+
+    auto desc = ParseJson(
+        R"({
+            "width": {"path": "data.dynamicWidth"},
+            "height": {"call": "computeHeight"}
+        })");
+    ASSERT_NE(desc, nullptr);
+
+    component.ApplyCommonAttributes(desc->GetRoot());
+
+    // Dynamic values are skipped — hasWidth/hasHeight should NOT be set.
+    EXPECT_FALSE(component.descriptor_.properties.hasWidth);
+    EXPECT_FALSE(component.descriptor_.properties.hasHeight);
+    // No warnings should be dispatched for dynamic values.
+    EXPECT_EQ(mockNapiPtr_->callFunctionCallCount_, 0U);
+}
+
+TEST_F(CustomComponentTest, should_skip_validation_for_expression_string_width_and_height)
+{
+    RegisterDispatchCallbacks(mockNapiPtr_);
+
+    CustomComponent component("Panel");
+    component.SetComponentId("exprDim");
+    component.SetSurfaceId("surface-85");
+    component.SetRenderId(8508);
+
+    auto desc = ParseJson(
+        R"({
+            "width": "{{data.boundWidth}}",
+            "height": "{{data.boundHeight}}"
+        })");
+    ASSERT_NE(desc, nullptr);
+
+    component.ApplyCommonAttributes(desc->GetRoot());
+
+    // Expression strings are skipped — hasWidth/hasHeight should NOT be set.
+    EXPECT_FALSE(component.descriptor_.properties.hasWidth);
+    EXPECT_FALSE(component.descriptor_.properties.hasHeight);
+    // No warnings should be dispatched for expression values.
+    EXPECT_EQ(mockNapiPtr_->callFunctionCallCount_, 0U);
+}
+
+// ---------------------------------------------------------------------------
+// Group 4: Mixed validity — partial application
+// ---------------------------------------------------------------------------
+
+TEST_F(CustomComponentTest, should_apply_valid_width_and_reject_invalid_height_together)
+{
+    RegisterDispatchCallbacks(mockNapiPtr_);
+
+    CustomComponent component("Panel");
+    component.SetComponentId("mixedVal");
+    component.SetSurfaceId("surface-85");
+    component.SetRenderId(8509);
+
+    auto desc = ParseJson(R"({"width": 200, "height": "notValidHeight"})");
+    ASSERT_NE(desc, nullptr);
+
+    component.ApplyCommonAttributes(desc->GetRoot());
+
+    // Valid width is applied.
+    EXPECT_TRUE(component.descriptor_.properties.hasWidth);
+    EXPECT_DOUBLE_EQ(component.descriptor_.properties.width, 200.0);
+    // Invalid height is rejected.
+    EXPECT_FALSE(component.descriptor_.properties.hasHeight);
+    // Warning only for height.
+    EXPECT_EQ(CountWarningRequests(mockNapiPtr_, "ERROR_CODE_INVALID_VALUE", "mixedVal.height"), 1U);
+    EXPECT_EQ(CountWarningRequests(mockNapiPtr_, "ERROR_CODE_INVALID_VALUE", "mixedVal.width"), 0U);
+}
+
+TEST_F(CustomComponentTest, should_reject_both_when_width_and_height_are_invalid)
+{
+    RegisterDispatchCallbacks(mockNapiPtr_);
+
+    CustomComponent component("Panel");
+    component.SetComponentId("bothBad");
+    component.SetSurfaceId("surface-85");
+    component.SetRenderId(8510);
+
+    auto desc = ParseJson(R"({"width": true, "height": []})");
+    ASSERT_NE(desc, nullptr);
+
+    component.ApplyCommonAttributes(desc->GetRoot());
+
+    EXPECT_FALSE(component.descriptor_.properties.hasWidth);
+    EXPECT_FALSE(component.descriptor_.properties.hasHeight);
+    EXPECT_TRUE(component.descriptor_.properties.size.empty());
+    EXPECT_EQ(CountWarningRequests(mockNapiPtr_, "ERROR_CODE_TYPE_MISMATCH", "bothBad.width"), 1U);
+    EXPECT_EQ(CountWarningRequests(mockNapiPtr_, "ERROR_CODE_TYPE_MISMATCH", "bothBad.height"), 1U);
+}
+
+// ---------------------------------------------------------------------------
+// Group 5: Size JSON string construction
+// ---------------------------------------------------------------------------
+
+TEST_F(CustomComponentTest, should_build_size_json_string_from_validated_width_and_height)
+{
+    CustomComponent component("Panel");
+    auto desc = ParseJson(R"({"width": 320, "height": 240})");
+    ASSERT_NE(desc, nullptr);
+
+    component.ApplyCommonAttributes(desc->GetRoot());
+
+    EXPECT_TRUE(component.descriptor_.properties.hasWidth);
+    EXPECT_TRUE(component.descriptor_.properties.hasHeight);
+    EXPECT_FALSE(component.descriptor_.properties.size.empty());
+    // The size string should contain both width and height.
+    std::string size = component.descriptor_.properties.size;
+    EXPECT_NE(size.find("\"width\":320"), std::string::npos);
+    EXPECT_NE(size.find("\"height\":240"), std::string::npos);
+}
+
+TEST_F(CustomComponentTest, should_not_build_size_json_when_width_and_height_are_absent)
+{
+    CustomComponent component("Panel");
+    auto desc = ParseJson(R"({"weight": 2})");
+    ASSERT_NE(desc, nullptr);
+
+    component.ApplyCommonAttributes(desc->GetRoot());
+
+    EXPECT_FALSE(component.descriptor_.properties.hasWidth);
+    EXPECT_FALSE(component.descriptor_.properties.hasHeight);
+    EXPECT_TRUE(component.descriptor_.properties.size.empty());
+}
+
+TEST_F(CustomComponentTest, should_build_size_json_with_only_width_when_height_is_absent)
+{
+    CustomComponent component("Panel");
+    auto desc = ParseJson(R"({"width": "200vp"})");
+    ASSERT_NE(desc, nullptr);
+
+    component.ApplyCommonAttributes(desc->GetRoot());
+
+    EXPECT_TRUE(component.descriptor_.properties.hasWidth);
+    EXPECT_FALSE(component.descriptor_.properties.hasHeight);
+    EXPECT_FALSE(component.descriptor_.properties.size.empty());
+    std::string size = component.descriptor_.properties.size;
+    EXPECT_NE(size.find("\"width\":200"), std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// Group 6: No warnings when renderId is not set (guard clause coverage)
+// ---------------------------------------------------------------------------
+
+TEST_F(CustomComponentTest, should_not_dispatch_warnings_when_render_id_is_negative)
+{
+    // No RegisterDispatchCallbacks — renderId_ defaults to -1
+    CustomComponent component("Panel");
+    // Do NOT set renderId — leave it at the default (-1).
+
+    auto desc = ParseJson(R"({"width": -999, "height": "badPx"})");
+    ASSERT_NE(desc, nullptr);
+
+    component.ApplyCommonAttributes(desc->GetRoot());
+
+    // hasWidth/hasHeight are still correctly false.
+    EXPECT_FALSE(component.descriptor_.properties.hasWidth);
+    EXPECT_FALSE(component.descriptor_.properties.hasHeight);
+    // But no warnings were dispatched because renderId_ < 0 triggers the early return.
 }
 
 } // namespace

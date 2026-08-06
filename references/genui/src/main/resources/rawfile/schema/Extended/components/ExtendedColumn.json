@@ -1,0 +1,88 @@
+{
+  "type": "object",
+  "$defs": {
+    "NonNegativeNumberValue": {
+      "oneOf": [
+        {
+          "type": "number",
+          "minimum": 0
+        },
+        {
+          "type": "string",
+          "pattern": "^(0|[1-9]\\d*)(?:\\.\\d+)?$"
+        },
+        {
+          "$ref": "../common_types.json#/$defs/ExtendedDynamicValueRef"
+        }
+      ]
+    },
+    "JustifyContentValue": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": ["start", "center", "end", "spaceAround", "spaceBetween", "spaceEvenly"]
+        },
+        {
+          "$ref": "../common_types.json#/$defs/ExtendedDynamicValueRef"
+        }
+      ]
+    },
+    "AlignItemsValue": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": ["start", "center", "end"]
+        },
+        {
+          "$ref": "../common_types.json#/$defs/ExtendedDynamicValueRef"
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "$ref": "../common_types.json#/$defs/ComponentCommon"
+    },
+    {
+      "$ref": "../common_types.json#/$defs/CatalogComponentCommon"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "component": {
+          "const": "Column"
+        },
+        "children": {
+          "$ref": "../common_types.json#/$defs/ChildList",
+          "description": "Child component IDs or a template child list."
+        },
+        "itemMargin": {
+          "$ref": "#/$defs/NonNegativeNumberValue",
+          "default": 8,
+          "description": "Non-negative vertical spacing between child components. The default is 8vp. Missing or invalid values, including null and type mismatches, fall back to 8vp. Type mismatches emit ERROR_CODE_TYPE_MISMATCH."
+        },
+        "styles": {
+          "allOf": [
+            {
+              "$ref": "../common_types.json#/$defs/ExtendedCommonStyles"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "justifyContent": {
+                  "$ref": "#/$defs/JustifyContentValue"
+                },
+                "alignItems": {
+                  "$ref": "#/$defs/AlignItemsValue"
+                }
+              },
+              "additionalProperties": true
+            }
+          ]
+        }
+      },
+      "required": ["component"]
+    }
+  ],
+  "additionalProperties": true
+}

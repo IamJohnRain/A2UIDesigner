@@ -25,6 +25,8 @@
 #include "utils/LogA2UI.h"
 
 #include "RenderManager.h"
+#include "RenderSlot.h"
+#include "SurfaceManager.h"
 #include "SurfaceSlot.h"
 #include "expression/EvalResult.h"
 #ifdef ENABLE_EXPRESSION_ENGINE
@@ -71,58 +73,77 @@ bool HasOnlyPathDescriptorKey(const JsonValue& value)
     return true;
 }
 
-bool ResolveJsonValueRecursively(const JsonValue& value, const DynamicResolveContext& context, JsonValue& resolvedValue)
+bool ResolveJsonValueRecursively(
+    const JsonValue& value, const DynamicResolveContext& context, JsonValue& resolvedValue);
+
+bool ResolveDynamicJsonValue(const JsonValue& value, const DynamicResolveContext& context, JsonValue& resolvedValue)
 {
-    if (!value.IsValid()) {
-        return false;
-    }
-    if (value.IsObject() && !value.Has("call") && !HasOnlyPathDescriptorKey(value)) {
-        std::unique_ptr<JsonAdapter> objectAdapter = JsonAdapter::CreateObject();
-        if (objectAdapter == nullptr) {
-            return false;
-        }
-        JsonValue objectValue = objectAdapter->GetRoot();
-        for (JsonValue child = value.GetChild(); child.IsValid(); child = child.GetNext()) {
-            std::string key = child.GetKey();
-            if (key.empty()) {
-                continue;
-            }
-            JsonValue childValue;
-            if (!ResolveJsonValueRecursively(child, context, childValue)) {
-                return false;
-            }
-            if (!objectValue.Put(key.c_str(), childValue)) {
-                return false;
-            }
-        }
-        resolvedValue = objectValue;
-        return true;
-    }
-    if (value.IsArray()) {
-        std::unique_ptr<JsonAdapter> arrayAdapter = JsonAdapter::CreateArray();
-        if (arrayAdapter == nullptr) {
-            return false;
-        }
-        JsonValue arrayValue = arrayAdapter->GetRoot();
-        int itemCount = value.GetArraySize();
-        for (int index = 0; index < itemCount; ++index) {
-            JsonValue itemValue;
-            if (!ResolveJsonValueRecursively(value.GetArrayItem(index), context, itemValue)) {
-                return false;
-            }
-            if (!arrayValue.Append(itemValue)) {
-                return false;
-            }
-        }
-        resolvedValue = arrayValue;
-        return true;
-    }
     ResolvedValue resolved = DynamicValueResolver::Resolve(value, context);
     if (!resolved.success || !resolved.value.IsValid()) {
         return false;
     }
     resolvedValue = resolved.value;
     return true;
+}
+
+bool ResolveJsonObjectRecursively(
+    const JsonValue& value, const DynamicResolveContext& context, JsonValue& resolvedValue)
+{
+    std::unique_ptr<JsonAdapter> objectAdapter = JsonAdapter::CreateObject();
+    if (objectAdapter == nullptr) {
+        return false;
+    }
+    JsonValue objectValue = objectAdapter->GetRoot();
+    for (JsonValue child = value.GetChild(); child.IsValid(); child = child.GetNext()) {
+        std::string key = child.GetKey();
+        if (key.empty()) {
+            continue;
+        }
+        JsonValue childValue;
+        if (!ResolveJsonValueRecursively(child, context, childValue)) {
+            return false;
+        }
+        if (!objectValue.Put(key.c_str(), childValue)) {
+            return false;
+        }
+    }
+    resolvedValue = objectValue;
+    return true;
+}
+
+bool ResolveJsonArrayRecursively(const JsonValue& value, const DynamicResolveContext& context, JsonValue& resolvedValue)
+{
+    std::unique_ptr<JsonAdapter> arrayAdapter = JsonAdapter::CreateArray();
+    if (arrayAdapter == nullptr) {
+        return false;
+    }
+    JsonValue arrayValue = arrayAdapter->GetRoot();
+    int itemCount = value.GetArraySize();
+    for (int index = 0; index < itemCount; ++index) {
+        JsonValue itemValue;
+        if (!ResolveJsonValueRecursively(value.GetArrayItem(index), context, itemValue)) {
+            return false;
+        }
+        if (!arrayValue.Append(itemValue)) {
+            return false;
+        }
+    }
+    resolvedValue = arrayValue;
+    return true;
+}
+
+bool ResolveJsonValueRecursively(const JsonValue& value, const DynamicResolveContext& context, JsonValue& resolvedValue)
+{
+    if (!value.IsValid()) {
+        return false;
+    }
+    if (value.IsObject() && !value.Has("call") && !HasOnlyPathDescriptorKey(value)) {
+        return ResolveJsonObjectRecursively(value, context, resolvedValue);
+    }
+    if (value.IsArray()) {
+        return ResolveJsonArrayRecursively(value, context, resolvedValue);
+    }
+    return ResolveDynamicJsonValue(value, context, resolvedValue);
 }
 
 #ifndef ENABLE_EXPRESSION_ENGINE
@@ -269,6 +290,10 @@ bool ResolveCondition(const EventHandlerStep& step, const EventHandlerChainExecu
     evalContext.SetRenderId(context.renderId);
     evalContext.SetSurfaceId(context.surfaceId);
     evalContext.SetComponentId(context.componentId);
+    RenderSlot* renderSlot = RenderManager::GetInstance().FindRenderSlot(context.renderId);
+    if (renderSlot != nullptr && renderSlot->GetSurfaceManager() != nullptr) {
+        evalContext.SetThemeContext(&renderSlot->GetSurfaceManager()->GetThemeContext());
+    }
     if (context.dataModel != nullptr) {
         evalContext.SetDataModel(context.dataModel.get());
     }
@@ -338,6 +363,22 @@ JsonValue BuildDispatchEventContext(const std::string& componentId, const JsonVa
     return BuildEventContextValue(componentId, extraContext);
 }
 
+JsonValue DispatchHandlerCall(const std::string& call, const JsonValue& resolvedArgs,
+    EventHandlerChainExecutor::ExecutionContext& context, ActionDispatcherList& dispatchers, size_t handlerIndex)
+{
+    for (auto& dispatcher : dispatchers) {
+        if (dispatcher->CanDispatch(call)) {
+            return dispatcher->Dispatch(call, resolvedArgs, context);
+        }
+    }
+    BridgeFunctionDispatcher bridgeDispatcher;
+    JsonValue result = bridgeDispatcher.Dispatch(call, resolvedArgs, context);
+    LOG_A2UI(LOG_WARN,
+        "EventHandlerChainExecutor: unknown call '%{public}s' at handler[%{public}zu], componentId=%{public}s",
+        call.c_str(), handlerIndex, context.componentId.c_str());
+    return result;
+}
+
 } // namespace
 
 void EventHandlerChainExecutor::ExecuteChain(const std::vector<EventHandlerStep>& handlers, ExecutionContext& context)
@@ -358,25 +399,9 @@ void EventHandlerChainExecutor::ExecuteChain(const std::vector<EventHandlerStep>
         }
 
         JsonValue result;
-        bool dispatched = false;
         JsonValue resolvedArgs = ResolveArgs(step, context);
         try {
-            for (auto& dispatcher : dispatchers) {
-                if (dispatcher->CanDispatch(step.call)) {
-                    result = dispatcher->Dispatch(step.call, resolvedArgs, context);
-                    dispatched = true;
-                    break;
-                }
-            }
-
-            if (!dispatched) {
-                BridgeFunctionDispatcher bridgeDispatcher;
-                result = bridgeDispatcher.Dispatch(step.call, resolvedArgs, context);
-                LOG_A2UI(LOG_WARN,
-                    "EventHandlerChainExecutor: unknown call '%{public}s' at handler[%{public}zu], "
-                    "componentId=%{public}s",
-                    step.call.c_str(), i, context.componentId.c_str());
-            }
+            result = DispatchHandlerCall(step.call, resolvedArgs, context, dispatchers, i);
         } catch (const std::exception& e) {
             LOG_A2UI(LOG_ERROR,
                 "EventHandlerChainExecutor: exception at handler[%{public}zu], call='%{public}s', "

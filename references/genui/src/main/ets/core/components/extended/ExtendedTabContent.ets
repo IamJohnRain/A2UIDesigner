@@ -32,8 +32,8 @@ import { A2UIResolveContext, ResolveResult } from '../../types/runtime/ResolveCo
 import { DynamicValueResolver } from '../../types/runtime/DynamicValueResolver';
 import { FunctionBridge } from '../../functions/FunctionBridge';
 import {
-  applyExtendedCommonStyleOptions,
-  resolveExtendedCommonStyleOptions
+  buildExtendedCommonStyleModifier,
+  ExtendedCommonStyleState
 } from './ExtendedCommonStyleModifier';
 import { ThemeMode } from '../../base/NativeEngineBridge';
 
@@ -46,6 +46,7 @@ const DEFAULT_TAB_CONTENT_TYPE_VALUE: string = '';
 const DEFAULT_TAB_CONTENT_AREA_BACKGROUND_COLOR_LIGHT: string = '#FFFFFF';
 const DEFAULT_TAB_CONTENT_AREA_BACKGROUND_COLOR_DARK: string = '#171E2B';
 const A2UI_BINDINGS_KEY: string = '__a2uiBindings';
+const TAB_CONTENT_HEX_COLOR_PATTERN: RegExp = /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
 
 export function isExtendedTabContentExpressionString(value: string): boolean {
   let trimmed = value.trim();
@@ -73,35 +74,40 @@ export function normalizeExtendedTabTypeValue(value: string | undefined, fallbac
   return fallback;
 }
 
-class ExtendedTabContentStyleModifier implements AttributeModifier<ColumnAttribute> {
-  private readonly attribute: CustomComponentAttribute | undefined;
-  private readonly backgroundColor: ResourceColor | undefined;
-  private readonly borderColor: ResourceColor | EdgeColors | undefined;
-
-  constructor(
-    attribute: CustomComponentAttribute | undefined,
-    backgroundColor: ResourceColor | undefined,
-    borderColor: ResourceColor | EdgeColors | undefined
-  ) {
-    this.attribute = attribute;
-    this.backgroundColor = backgroundColor;
-    this.borderColor = borderColor;
+export function normalizeExtendedTabContentMetricValue(value: number): number | undefined {
+  if (Number.isFinite(value) && value >= 0) {
+    return value;
   }
+  return undefined;
+}
 
-  applyNormalAttribute(instance: ColumnAttribute): void {
-    applyExtendedCommonStyleOptions(instance, resolveExtendedCommonStyleOptions(this.attribute));
-    if (this.backgroundColor !== undefined) {
-      instance.backgroundColor(this.backgroundColor);
-    }
-    if (this.borderColor !== undefined) {
-      instance.borderColor(this.borderColor);
-    }
+export function normalizeExtendedTabContentFontWeightValue(value: Object | undefined): TabFontWeight | undefined {
+  if (typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value) &&
+    value >= 100 && value <= 900 && value % 100 === 0) {
+    return value;
   }
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  let normalized = value.trim().toLowerCase();
+  if (normalized === 'lighter' || normalized === 'normal' || normalized === 'regular' ||
+    normalized === 'medium' || normalized === 'bold' || normalized === 'bolder') {
+    return normalized;
+  }
+  return undefined;
+}
+
+export function normalizeExtendedTabContentColorValue(value: string | undefined): string | undefined {
+  if (value === undefined || !TAB_CONTENT_HEX_COLOR_PATTERN.test(value)) {
+    return undefined;
+  }
+  return value;
 }
 
 @Component
 export struct ExtendedTabContent {
   private readonly tag: string = 'ExtendedTabContent';
+  private commonStyleState: ExtendedCommonStyleState = {};
   @Prop @Watch('onAttributeChange') attribute: CustomComponentAttribute | undefined = undefined;
 
   aboutToAppear(): void {
@@ -122,10 +128,6 @@ export struct ExtendedTabContent {
         ContentSlot(this.attribute?.slot as NodeContent)
       }
     }
-    .width('100%')
-    .height('100%')
-    .backgroundColor(this.resolveContentAreaBackgroundColor())
-    .layoutWeight(this.resolveWeight())
     .onClick(() => {
       dispatchComponentEvent(this.attribute, 'onClick');
     })
@@ -135,11 +137,11 @@ export struct ExtendedTabContent {
     .accessibilityText(this.resolveAccessibilityLabel())
     .accessibilityDescription(this.resolveAccessibilityDescription())
     .id(this.attribute?.id ?? '')
-    .attributeModifier(new ExtendedTabContentStyleModifier(
-      this.attribute,
-      this.resolveTabContentBackgroundColor(),
-      this.resolveTabContentBorderColor()
-    ))
+    .attributeModifier(buildExtendedCommonStyleModifier<ColumnAttribute>(this.attribute, {
+      width: '100%',
+      height: '100%',
+      layoutWeight: this.resolveWeight()
+    }, this.commonStyleState))
   }
 
   private syncMetadata(): void {
@@ -155,16 +157,16 @@ export struct ExtendedTabContent {
       icon: this.readDynamicString(customProps, 'icon', DEFAULT_TAB_CONTENT_ICON),
       selectedSrc: this.readDynamicString(customProps, 'selectedSrc', DEFAULT_TAB_CONTENT_SELECTED_SRC),
       tabType: this.readTabType(customProps, 'tabType', DEFAULT_TAB_CONTENT_TYPE_VALUE),
-      selectedColor: this.readOptionalString(customProps, styleProps, 'selectedColor'),
-      unSelectedColor: this.readOptionalString(customProps, styleProps, 'unSelectedColor'),
-      defaultBackgroundColor: this.readOptionalString(customProps, styleProps, 'defaultBackgroundColor'),
-      selectedBackgroundColor: this.readOptionalString(customProps, styleProps, 'selectedBackgroundColor'),
-      defaultBorderColor: this.readOptionalString(customProps, styleProps, 'defaultBorderColor'),
-      selectedBorderColor: this.readOptionalString(customProps, styleProps, 'selectedBorderColor'),
-      fontSize: this.readOptionalNumber(customProps, styleProps, 'fontSize'),
-      fontWeight: this.readOptionalFontWeight(customProps, styleProps, 'fontWeight') ?? DEFAULT_TAB_FONT_WEIGHT,
-      iconSize: this.readOptionalNumber(customProps, styleProps, 'iconSize'),
-      space: this.readOptionalNumber(customProps, styleProps, 'space')
+      selectedColor: this.readOptionalStyleColor(styleProps, 'selectedColor'),
+      unSelectedColor: this.readOptionalStyleColor(styleProps, 'unSelectedColor'),
+      defaultBackgroundColor: this.readOptionalStyleColor(styleProps, 'defaultBackgroundColor'),
+      selectedBackgroundColor: this.readOptionalStyleColor(styleProps, 'selectedBackgroundColor'),
+      defaultBorderColor: this.readOptionalStyleColor(styleProps, 'defaultBorderColor'),
+      selectedBorderColor: this.readOptionalStyleColor(styleProps, 'selectedBorderColor'),
+      fontSize: this.readOptionalStyleNumber(styleProps, 'fontSize'),
+      fontWeight: this.readOptionalStyleFontWeight(styleProps, 'fontWeight') ?? DEFAULT_TAB_FONT_WEIGHT,
+      iconSize: this.readOptionalStyleNumber(styleProps, 'iconSize'),
+      space: this.readOptionalStyleNumber(styleProps, 'space')
     };
     ExtendedTabsRegistry.updateMetadata(surfaceId, componentId, metadata);
   }
@@ -204,21 +206,26 @@ export struct ExtendedTabContent {
     return normalizeExtendedTabTypeValue(resolved, fallback);
   }
 
-  private readOptionalString(
-    customProps: Record<string, Object> | undefined,
+  private readOptionalStyleString(
     styleProps: Record<string, Object> | undefined,
     key: string
   ): string | undefined {
-    let value = this.resolveStyleValue(customProps, styleProps, key);
+    if (styleProps === undefined) {
+      return undefined;
+    }
+    let value = styleProps[key];
     let resolved: string | undefined = this.resolveRuntimeStringValue(value);
     if (resolved !== undefined && resolved.length > 0) {
       return resolved;
     }
-    let bindingResolved: string | undefined = this.resolveBoundStringValue(customProps, key);
-    if (bindingResolved !== undefined && bindingResolved.length > 0) {
-      return bindingResolved;
-    }
     return undefined;
+  }
+
+  private readOptionalStyleColor(
+    styleProps: Record<string, Object> | undefined,
+    key: string
+  ): string | undefined {
+    return normalizeExtendedTabContentColorValue(this.readOptionalStyleString(styleProps, key));
   }
 
   private resolveBoundStringValue(
@@ -255,38 +262,36 @@ export struct ExtendedTabContent {
     return resolveExtendedTabContentRuntimeStringValue(value, this.attribute);
   }
 
-  private readOptionalNumber(
-    customProps: Record<string, Object> | undefined,
+  private readOptionalStyleNumber(
     styleProps: Record<string, Object> | undefined,
     key: string
   ): number | undefined {
-    let value = this.resolveStyleValue(customProps, styleProps, key);
-    if (typeof value === 'number' && Number.isFinite(value)) {
-      return value;
+    if (styleProps === undefined) {
+      return undefined;
     }
-    if (typeof value === 'string') {
-      let parsed = Number(value);
-      if (!Number.isNaN(parsed) && Number.isFinite(parsed)) {
-        return parsed;
-      }
+    let value = styleProps[key];
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return normalizeExtendedTabContentMetricValue(value);
     }
     if (value !== undefined) {
       let resolveContext: A2UIResolveContext | undefined = this.buildResolveContext();
       let resolved: number = DynamicValueResolver.resolveNumber(value as A2UIDynamicNumber, Number.NaN, resolveContext);
       if (!Number.isNaN(resolved) && Number.isFinite(resolved)) {
-        return resolved;
+        return normalizeExtendedTabContentMetricValue(resolved);
       }
     }
     return undefined;
   }
 
-  private readOptionalFontWeight(
-    customProps: Record<string, Object> | undefined,
+  private readOptionalStyleFontWeight(
     styleProps: Record<string, Object> | undefined,
     key: string
   ): TabFontWeight | undefined {
-    let value = this.resolveStyleValue(customProps, styleProps, key);
-    let normalized = this.normalizeFontWeight(value);
+    if (styleProps === undefined) {
+      return undefined;
+    }
+    let value = styleProps[key];
+    let normalized = normalizeExtendedTabContentFontWeightValue(value);
     if (normalized !== undefined) {
       return normalized;
     }
@@ -294,30 +299,8 @@ export struct ExtendedTabContent {
       let resolveContext: A2UIResolveContext | undefined = this.buildResolveContext();
       let result = DynamicValueResolver.resolveValue(value as A2UIDynamicValue, resolveContext);
       if (result.success) {
-        return this.normalizeFontWeight(result.value as Object | undefined);
+        return normalizeExtendedTabContentFontWeightValue(result.value as Object | undefined);
       }
-    }
-    return undefined;
-  }
-
-  private normalizeFontWeight(value: Object | undefined): TabFontWeight | undefined {
-    if (typeof value === 'number' && Number.isFinite(value)) {
-      return value;
-    }
-    if (typeof value !== 'string') {
-      return undefined;
-    }
-    let normalized = value.trim().toLowerCase();
-    if (normalized.length === 0) {
-      return undefined;
-    }
-    if (normalized === 'lighter' || normalized === 'normal' || normalized === 'regular' ||
-      normalized === 'medium' || normalized === 'bold' || normalized === 'bolder') {
-      return normalized;
-    }
-    let parsed = Number(normalized);
-    if (!Number.isNaN(parsed) && Number.isFinite(parsed)) {
-      return parsed;
     }
     return undefined;
   }
@@ -331,26 +314,6 @@ export struct ExtendedTabContent {
     let styleValue = customProps['styles'];
     if (typeof styleValue === 'object' && styleValue !== null && !Array.isArray(styleValue)) {
       return styleValue as Record<string, Object>;
-    }
-    return undefined;
-  }
-
-  private resolveStyleValue(
-    customProps: Record<string, Object> | undefined,
-    styleProps: Record<string, Object> | undefined,
-    key: string
-  ): Object | undefined {
-    if (styleProps !== undefined) {
-      let styleValue = styleProps[key];
-      if (styleValue !== undefined) {
-        return styleValue;
-      }
-    }
-    if (customProps !== undefined) {
-      let customValue = customProps[key];
-      if (customValue !== undefined) {
-        return customValue;
-      }
     }
     return undefined;
   }
@@ -392,26 +355,6 @@ export struct ExtendedTabContent {
     return this.attribute?.componentTheme?.colorMode === ThemeMode.DARK ?
       DEFAULT_TAB_CONTENT_AREA_BACKGROUND_COLOR_DARK :
       DEFAULT_TAB_CONTENT_AREA_BACKGROUND_COLOR_LIGHT;
-  }
-
-  private resolveTabContentBackgroundColor(): ResourceColor | undefined {
-    let customProps = parseCustomProps(this.attribute, this.tag);
-    let styleProps = this.resolveStyleProps(customProps);
-    let selectedColor = this.readOptionalString(customProps, styleProps, 'selectedBackgroundColor');
-    if (selectedColor !== undefined) {
-      return selectedColor;
-    }
-    return this.readOptionalString(customProps, styleProps, 'defaultBackgroundColor');
-  }
-
-  private resolveTabContentBorderColor(): ResourceColor | undefined {
-    let customProps = parseCustomProps(this.attribute, this.tag);
-    let styleProps = this.resolveStyleProps(customProps);
-    let selectedColor = this.readOptionalString(customProps, styleProps, 'selectedBorderColor');
-    if (selectedColor !== undefined) {
-      return selectedColor;
-    }
-    return this.readOptionalString(customProps, styleProps, 'defaultBorderColor');
   }
 }
 

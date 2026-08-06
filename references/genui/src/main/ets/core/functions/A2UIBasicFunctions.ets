@@ -31,6 +31,11 @@ import { andFunction } from './logic/AndFunction';
 import { notFunction } from './logic/NotFunction';
 import { orFunction } from './logic/OrFunction';
 import { navigateFunction } from './extended/NavigateFunction';
+import {
+  breakFunction,
+  setAttributesFunction,
+  setDataModelFunction
+} from './extended/CatalogActionFunctions';
 import { emailFunction } from './validation/EmailFunction';
 import { lengthFunction } from './validation/LengthFunction';
 import { numericFunction } from './validation/NumericFunction';
@@ -60,6 +65,9 @@ const extendedCatalogFunctions: BuiltinFunctionBase[] = [
   getCheckboxGroupValuesFunction,
   getToggleValueFunction,
   getSelectValueFunction,
+  setDataModelFunction,
+  setAttributesFunction,
+  breakFunction,
   navigateFunction
 ];
 

@@ -36,8 +36,10 @@
 #include "composition/TemplateAdapterNode.h"
 #include "data/BindingEngine.h"
 #include "data/DataModel.h"
+#include "data/PathValidator.h"
 #include "theme/ThemeManager.h"
 #include "utils/LogA2UI.h"
+#include "utils/SystemProperties.h"
 
 #include "ArkUINodeApiAdapter.h"
 #include "ArkUIOHApiAdapter.h"
@@ -125,37 +127,6 @@ bool IsCheckboxGroupType(const std::string& componentType)
 bool ShouldUseCustomExtendedRow(int32_t apiVersion, const std::string& componentType)
 {
     return apiVersion > 0 && apiVersion < MIN_API_VERSION_EXTENDED_ROW_NATIVE && IsExtendedRowType(componentType);
-}
-
-std::string NormalizeExtendedProtocolComponentType(
-    const std::string& componentType, const std::shared_ptr<Catalog>& catalog)
-{
-    if (componentType.empty()) {
-        return componentType;
-    }
-    static constexpr const char* EXTENDED_PREFIX = "Extended.";
-
-    if (catalog == nullptr) {
-        return componentType;
-    }
-    if (catalog->GetCatalogItemByName(componentType) != nullptr) {
-        return componentType;
-    }
-    if (componentType.rfind(EXTENDED_PREFIX, 0) == 0) {
-        std::string shortType = GetShortComponentType(componentType);
-        if (catalog->GetCatalogItemByName(shortType) != nullptr) {
-            return shortType;
-        }
-        return componentType;
-    }
-    if (componentType.find('.') != std::string::npos) {
-        return componentType;
-    }
-    std::string extendedType = std::string(EXTENDED_PREFIX) + componentType;
-    if (catalog->GetCatalogItemByName(extendedType) != nullptr) {
-        return extendedType;
-    }
-    return componentType;
 }
 
 bool HasUsableNativeRootView(const std::shared_ptr<Component>& node)
@@ -320,15 +291,15 @@ int32_t MeasureComponentTreeDepth(const std::shared_ptr<Component>& root)
         return 0;
     }
     int32_t maxDepth = 0;
-    std::function<void(const std::shared_ptr<Component>&, int32_t)> traverse;
-    traverse = [&](const std::shared_ptr<Component>& node, int32_t depth) {
-        if (depth > maxDepth) {
-            maxDepth = depth;
-        }
-        for (const auto& child : node->GetChildren()) {
-            traverse(child, depth + 1);
-        }
-    };
+    std::function<void(const std::shared_ptr<Component>&, int32_t)> traverse =
+        [&](const std::shared_ptr<Component>& node, int32_t depth) {
+            if (depth > maxDepth) {
+                maxDepth = depth;
+            }
+            for (const auto& child : node->GetChildren()) {
+                traverse(child, depth + 1);
+            }
+        };
     traverse(root, 1);
     return maxDepth;
 }
@@ -363,6 +334,15 @@ int32_t ResolveBuildDepth(const std::string& nodeId, const std::map<std::string,
 }
 
 } // namespace
+
+struct SurfaceSlot::RootBuildState {
+    std::shared_ptr<Component> resolvedRoot;
+    std::vector<ModalCoordinator::ModalDescriptor> modalDescriptors;
+    std::vector<std::shared_ptr<Component>> buildNodeCandidates;
+    std::set<std::string> staticReachableIds;
+    std::set<std::string> templateRootIds;
+    bool hasExplicitRootDescriptor = false;
+};
 
 bool SurfaceSlot::BuildNodeDepthComparator::operator()(
     const std::shared_ptr<Component>& lhs, const std::shared_ptr<Component>& rhs) const
@@ -457,16 +437,16 @@ void SurfaceSlot::DismissActiveModal()
     modalCoordinator_->DismissActiveModal();
 }
 
-bool SurfaceSlot::UpdateComponents(const JsonValue& messageRoot)
+bool SurfaceSlot::UpdateComponents(const JsonValue& messageBody)
 {
     LOG_A2UI(LOG_DEBUG, "SurfaceSlot::UpdateComponents(json) - renderId=%{public}d, surfaceId=%{public}s", renderId_,
         surfaceId_.c_str());
-    if (!messageRoot.IsValid() || !messageRoot.IsObject() || !messageRoot.Has("components")) {
+    if (!messageBody.IsValid() || !messageBody.IsObject() || !messageBody.Has("components")) {
         LOG_A2UI(LOG_ERROR, "UpdateComponents: root is invalid or missing components");
         return false;
     }
 
-    return UpdateComponentsArray(messageRoot.GetItem("components"));
+    return UpdateComponentsArray(messageBody.GetItem("components"));
 }
 
 bool SurfaceSlot::UpdateComponentsArray(const JsonValue& componentsValue)
@@ -516,47 +496,98 @@ bool SurfaceSlot::UpdateComponentsArray(const JsonValue& componentsValue)
     return true;
 }
 
-bool SurfaceSlot::UpdateDataModel(const JsonValue& messageRoot)
+bool SurfaceSlot::ValidateDataModelValue(const JsonValue& messageBody, JsonValue& value, bool& hasValue) const
+{
+    hasValue = messageBody.Has("value");
+    if (!hasValue) {
+        return true;
+    }
+
+    JsonValue valueJson = messageBody.GetItem("value");
+    if (!valueJson.IsValid()) {
+        LOG_A2UI(LOG_ERROR, "UpdateDataModel: value is invalid");
+        return false;
+    }
+
+    int32_t depth = DataModel::MeasureJsonDepth(valueJson);
+    if (depth > DataModel::MAX_DATA_MODEL_DEPTH) {
+        LOG_A2UI(LOG_ERROR, "UpdateDataModel: data model nesting depth %{public}d exceeds maximum allowed %{public}d",
+            depth, DataModel::MAX_DATA_MODEL_DEPTH);
+    }
+
+    value = valueJson;
+    return true;
+}
+
+bool SurfaceSlot::ExecuteDataModelOperation(
+    const std::string& path, const JsonValue& value, bool hasValue, const std::string& surfaceId)
+{
+    if (!path.empty() && hasValue) {
+        // Case 1: Update specific field - both path and value are present
+        LOG_A2UI(LOG_DEBUG, "UpdateDataModel: UPDATE field - path=%{public}s", path.c_str());
+        if (!bindingEngine_->UpdateDataModelByPath(surfaceId, path, value)) {
+            return false;
+        }
+        RefreshLazyAdapters(path);
+    } else if (!path.empty() && !hasValue) {
+        // Case 2: Delete field - only path is present, no value
+        LOG_A2UI(LOG_DEBUG, "UpdateDataModel: DELETE field - path=%{public}s", path.c_str());
+        if (!bindingEngine_->DeleteDataModelByPath(surfaceId, path)) {
+            return false;
+        }
+        RefreshLazyAdapters(path);
+    } else if (path.empty() && hasValue) {
+        // Case 3: Replace entire data model - only value is present, no path
+        LOG_A2UI(LOG_DEBUG, "UpdateDataModel: REPLACE entire model");
+        ClearRuntimeStateStore();
+        if (!bindingEngine_->ReplaceDataModel(surfaceId, value)) {
+            return false;
+        }
+        RefreshLazyAdapters("", true);
+    } else {
+        // Both path and value are missing - invalid request
+        LOG_A2UI(LOG_ERROR, "UpdateDataModel: Invalid request - both path and value are missing");
+        return false;
+    }
+
+    if (modalCoordinator_ != nullptr) {
+        modalCoordinator_->RefreshModalBindings();
+    }
+    return true;
+}
+
+bool SurfaceSlot::UpdateDataModel(const JsonValue& messageBody)
 {
     LOG_A2UI(LOG_DEBUG, "UpdateDataModel: process json message body");
 
-    if (!messageRoot.IsValid()) {
+    if (!messageBody.IsValid()) {
         LOG_A2UI(LOG_ERROR, "UpdateDataModel: messageBody is invalid");
         return false;
     }
 
-    if (!messageRoot.IsObject()) {
+    if (!messageBody.IsObject()) {
         LOG_A2UI(LOG_ERROR, "UpdateDataModel: root is not an object");
         return false;
     }
 
     // Get path (optional - if empty, will replace entire data model)
-    std::string path = messageRoot.GetString("path", "");
+    std::string path = messageBody.GetString("path", "");
 
     // Get value (optional - if missing, will delete the path)
     JsonValue value;
-    bool hasValue = messageRoot.Has("value");
-
-    if (hasValue) {
-        JsonValue valueJson = messageRoot.GetItem("value");
-        if (!valueJson.IsValid()) {
-            LOG_A2UI(LOG_ERROR, "UpdateDataModel: value is invalid");
-            return false;
-        }
-
-        int32_t depth = DataModel::MeasureJsonDepth(valueJson);
-        if (depth > DataModel::MAX_DATA_MODEL_DEPTH) {
-            LOG_A2UI(LOG_ERROR,
-                "UpdateDataModel: data model nesting depth %{public}d exceeds maximum allowed %{public}d", depth,
-                DataModel::MAX_DATA_MODEL_DEPTH);
-        }
-
-        value = valueJson;
+    bool hasValue = false;
+    if (!ValidateDataModelValue(messageBody, value, hasValue)) {
+        return false;
     }
 
     // Determine the operation type and delegate to appropriate BindingEngine method
     if (bindingEngine_ == nullptr) {
         LOG_A2UI(LOG_ERROR, "UpdateDataModel: BindingEngine is nullptr");
+        return false;
+    }
+
+    if (!path.empty() && !IsValidDataPath(path)) {
+        LOG_A2UI(LOG_ERROR, "UpdateDataModel: invalid path=%{public}s", path.c_str());
         return false;
     }
 
@@ -566,39 +597,18 @@ bool SurfaceSlot::UpdateDataModel(const JsonValue& messageRoot)
         LOG_A2UI(LOG_INFO, "UpdateDataModel: surfaceId not set, using 'default'");
     }
 
-    if (!path.empty() && hasValue) {
-        // Case 1: Update specific field - both path and value are present
-        LOG_A2UI(LOG_DEBUG, "UpdateDataModel: UPDATE field - path=%{public}s", path.c_str());
-        bindingEngine_->UpdateDataModelByPath(surfaceId, path, value);
-        RefreshLazyAdapters(path);
-        if (modalCoordinator_ != nullptr) {
-            modalCoordinator_->RefreshModalBindings();
-        }
-        return true;
-    } else if (!path.empty() && !hasValue) {
-        // Case 2: Delete field - only path is present, no value
-        LOG_A2UI(LOG_DEBUG, "UpdateDataModel: DELETE field - path=%{public}s", path.c_str());
-        bindingEngine_->DeleteDataModelByPath(surfaceId, path);
-        RefreshLazyAdapters(path);
-        if (modalCoordinator_ != nullptr) {
-            modalCoordinator_->RefreshModalBindings();
-        }
-        return true;
-    } else if (path.empty() && hasValue) {
-        // Case 3: Replace entire data model - only value is present, no path
-        LOG_A2UI(LOG_DEBUG, "UpdateDataModel: REPLACE entire model");
-        ClearRuntimeStateStore();
-        bindingEngine_->ReplaceDataModel(surfaceId, value);
-        RefreshLazyAdapters("", true);
-        if (modalCoordinator_ != nullptr) {
-            modalCoordinator_->RefreshModalBindings();
-        }
-        return true;
-    } else {
-        // Both path and value are missing - invalid request
-        LOG_A2UI(LOG_ERROR, "UpdateDataModel: Invalid request - both path and value are missing");
-        return false;
+    bool previousUpdateState = hasReceivedDataModelUpdate_;
+    hasReceivedDataModelUpdate_ = true;
+    bool success = ExecuteDataModelOperation(path, value, hasValue, surfaceId);
+    if (!success) {
+        hasReceivedDataModelUpdate_ = previousUpdateState;
     }
+    return success;
+}
+
+bool SurfaceSlot::HasReceivedDataModelUpdate() const
+{
+    return hasReceivedDataModelUpdate_;
 }
 
 std::shared_ptr<BindingEngine> SurfaceSlot::GetBindingEngine() const
@@ -724,6 +734,7 @@ void SurfaceSlot::Dispose()
     hasSurfaceCatalogId_ = false;
     surfaceProtocolMode_ = SurfaceProtocolMode::UNKNOWN;
     surfaceContext_ = SurfaceContext();
+    hasReceivedDataModelUpdate_ = false;
 
     // Release BindingEngine
     if (bindingEngine_ != nullptr) {
@@ -737,68 +748,89 @@ void SurfaceSlot::Dispose()
 std::shared_ptr<Component> SurfaceSlot::BuildComponent(const std::string& componentType)
 {
     bool traceButtonRouting = componentType == "Button" || componentType == "Extended.Button";
+    if (!CanBuildComponent(componentType)) {
+        return nullptr;
+    }
+    if (IsExtendedProtocolSurface()) {
+        return BuildExtendedProtocolComponent(componentType, traceButtonRouting);
+    }
+    return BuildStandardProtocolComponent(componentType, traceButtonRouting);
+}
+
+bool SurfaceSlot::CanBuildComponent(const std::string& componentType) const
+{
     if (catalog_ == nullptr) {
         LOG_A2UI(LOG_WARN,
             "SurfaceSlot::BuildComponent - catalog is null, surfaceId=%{public}s, componentType=%{public}s",
             surfaceId_.c_str(), componentType.c_str());
-        return nullptr;
+        return false;
     }
     if (componentType.empty()) {
         LOG_A2UI(
             LOG_WARN, "SurfaceSlot::BuildComponent - componentType is empty, surfaceId=%{public}s", surfaceId_.c_str());
+        return false;
+    }
+    return true;
+}
+
+std::shared_ptr<Component> SurfaceSlot::BuildExtendedProtocolComponent(
+    const std::string& componentType, bool traceButtonRouting) const
+{
+    auto catalogItem = catalog_->GetCatalogItemByName(componentType);
+    if (catalogItem == nullptr) {
+        LOG_A2UI(LOG_WARN,
+            "SurfaceSlot::BuildComponent - extended protocol component not found in catalog, "
+            "surfaceId=%{public}s, catalogId=%{public}s, componentType=%{public}s",
+            surfaceId_.c_str(), catalog_->GetCatalogId().c_str(), componentType.c_str());
         return nullptr;
     }
-    if (IsExtendedProtocolSurface()) {
-        ExtendedComponentFactory& factory = ExtendedComponentFactory::GetInstance();
-        if (ShouldUseCustomExtendedRow(apiVersion_, componentType)) {
-            LOG_A2UI(LOG_INFO,
-                "SurfaceSlot::BuildComponent - route Row to custom factory for apiVersion=%{public}d, "
-                "surfaceId=%{public}s, componentType=%{public}s",
-                apiVersion_, surfaceId_.c_str(), componentType.c_str());
-            return CustomComponentFactory::Create(componentType);
-        }
-        if (factory.IsExtendedComponent(componentType)) {
-            if (traceButtonRouting) {
-                LOG_A2UI(LOG_DEBUG,
-                    "SurfaceSlot::BuildComponent - Button route to extended factory, surfaceId=%{public}s, "
-                    "componentType=%{public}s",
-                    surfaceId_.c_str(), componentType.c_str());
-            }
-            LOG_A2UI(LOG_DEBUG,
-                "SurfaceSlot::BuildComponent - route to extended factory, surfaceId=%{public}s, "
-                "componentType=%{public}s",
-                surfaceId_.c_str(), componentType.c_str());
-            return factory.CreateComponent(componentType);
-        }
 
-        auto catalogItem = catalog_->GetCatalogItemByName(componentType);
-        if (catalogItem == nullptr) {
-            LOG_A2UI(LOG_WARN,
-                "SurfaceSlot::BuildComponent - extended protocol component not found in catalog, "
-                "surfaceId=%{public}s, catalogId=%{public}s, componentType=%{public}s",
-                surfaceId_.c_str(), catalog_->GetCatalogId().c_str(), componentType.c_str());
-            return nullptr;
-        }
-        if (catalogItem->IsInnerNative()) {
-            LOG_A2UI(LOG_WARN,
-                "SurfaceSlot::BuildComponent - extended protocol inner-native component is unsupported, "
-                "surfaceId=%{public}s, componentType=%{public}s",
-                surfaceId_.c_str(), componentType.c_str());
-            return nullptr;
-        }
-
+    ExtendedComponentFactory& factory = ExtendedComponentFactory::GetInstance();
+    const int32_t apiVersion = SystemProperties::GetInstance().GetApiVersion();
+    if (ShouldUseCustomExtendedRow(apiVersion, componentType)) {
         LOG_A2UI(LOG_INFO,
-            "SurfaceSlot::BuildComponent - route to custom factory under extended protocol, "
+            "SurfaceSlot::BuildComponent - route Row to custom factory for apiVersion=%{public}d, "
             "surfaceId=%{public}s, componentType=%{public}s",
-            surfaceId_.c_str(), componentType.c_str());
-        if (traceButtonRouting) {
-            LOG_A2UI(LOG_DEBUG,
-                "SurfaceSlot::BuildComponent - Button route to custom factory under extended protocol, "
-                "surfaceId=%{public}s, componentType=%{public}s",
-                surfaceId_.c_str(), componentType.c_str());
-        }
+            apiVersion, surfaceId_.c_str(), componentType.c_str());
         return CustomComponentFactory::Create(componentType);
     }
+    if (factory.IsExtendedComponent(componentType)) {
+        if (traceButtonRouting) {
+            LOG_A2UI(LOG_DEBUG,
+                "SurfaceSlot::BuildComponent - Button route to extended factory, surfaceId=%{public}s, "
+                "componentType=%{public}s",
+                surfaceId_.c_str(), componentType.c_str());
+        }
+        LOG_A2UI(LOG_DEBUG,
+            "SurfaceSlot::BuildComponent - route to extended factory, surfaceId=%{public}s, componentType=%{public}s",
+            surfaceId_.c_str(), componentType.c_str());
+        return factory.CreateComponent(componentType);
+    }
+
+    if (catalogItem->IsInnerNative()) {
+        LOG_A2UI(LOG_WARN,
+            "SurfaceSlot::BuildComponent - extended protocol inner-native component is unsupported, "
+            "surfaceId=%{public}s, componentType=%{public}s",
+            surfaceId_.c_str(), componentType.c_str());
+        return nullptr;
+    }
+
+    LOG_A2UI(LOG_INFO,
+        "SurfaceSlot::BuildComponent - route to custom factory under extended protocol, "
+        "surfaceId=%{public}s, componentType=%{public}s",
+        surfaceId_.c_str(), componentType.c_str());
+    if (traceButtonRouting) {
+        LOG_A2UI(LOG_DEBUG,
+            "SurfaceSlot::BuildComponent - Button route to custom factory under extended protocol, "
+            "surfaceId=%{public}s, componentType=%{public}s",
+            surfaceId_.c_str(), componentType.c_str());
+    }
+    return CustomComponentFactory::Create(componentType, catalogItem->ShouldPreserveDynamicDescriptors());
+}
+
+std::shared_ptr<Component> SurfaceSlot::BuildStandardProtocolComponent(
+    const std::string& componentType, bool traceButtonRouting) const
+{
     auto catalogItem = catalog_->GetCatalogItemByName(componentType);
     if (catalogItem == nullptr) {
         LOG_A2UI(LOG_WARN,
@@ -815,15 +847,15 @@ std::shared_ptr<Component> SurfaceSlot::BuildComponent(const std::string& compon
                 surfaceId_.c_str(), componentType.c_str());
         }
         return NativeComponentFactory::CreateComponent(componentType);
-    } else {
-        if (traceButtonRouting) {
-            LOG_A2UI(LOG_DEBUG,
-                "SurfaceSlot::BuildComponent - Button route to custom factory, surfaceId=%{public}s, "
-                "componentType=%{public}s",
-                surfaceId_.c_str(), componentType.c_str());
-        }
-        return CustomComponentFactory::Create(componentType);
     }
+
+    if (traceButtonRouting) {
+        LOG_A2UI(LOG_DEBUG,
+            "SurfaceSlot::BuildComponent - Button route to custom factory, surfaceId=%{public}s, "
+            "componentType=%{public}s",
+            surfaceId_.c_str(), componentType.c_str());
+    }
+    return CustomComponentFactory::Create(componentType, catalogItem->ShouldPreserveDynamicDescriptors());
 }
 
 std::shared_ptr<Component> SurfaceSlot::BuildExtendedComponent(const std::string& componentType) const
@@ -862,13 +894,6 @@ void SurfaceSlot::PrepareDescriptorById(const JsonValue& componentsValue)
         JsonValue nodeValue = componentsValue.GetArrayItem(i);
         if (!nodeValue.IsObject()) {
             continue;
-        }
-        if (IsExtendedProtocolSurface()) {
-            std::string componentType = nodeValue.GetString("component", "");
-            std::string normalizedType = NormalizeExtendedProtocolComponentType(componentType, catalog_);
-            if (!componentType.empty() && normalizedType != componentType) {
-                nodeValue.ReplaceString("component", normalizedType);
-            }
         }
         if (!ValidateDescriptorIdForPreparation(nodeValue, renderId_, surfaceId_)) {
             continue;
@@ -1009,8 +1034,9 @@ std::shared_ptr<Component> SurfaceSlot::CreateOrUpdateComponentNode(
     if (themeManager_ != nullptr) {
         colorMode = themeManager_->GetContext().colorMode;
     }
+    const int32_t apiVersion = SystemProperties::GetInstance().GetApiVersion();
     RenderContext renderContext = RenderContext::Create(
-        GetRenderId(), GetSurfaceId(), bindingEngine_, catalog_, fontSizeScale_, apiVersion_, colorMode);
+        GetRenderId(), GetSurfaceId(), bindingEngine_, catalog_, fontSizeScale_, apiVersion, colorMode);
     ApplyExtendedComponentDescriptor(nodeValue, node, isNewNode, renderContext);
     node->ApplyParentsRelations(this);
 
@@ -1032,97 +1058,112 @@ std::shared_ptr<Component> SurfaceSlot::BuildRootFromComponents(
     return root;
 }
 
-std::shared_ptr<Component> SurfaceSlot::BuildRootFromComponents(const std::string& rootId,
-    const std::map<std::string, JsonValue>& descriptorsById, bool& hasProcessedNode, bool& sawRootDescriptor,
-    bool updateSurfaceRoot)
+void SurfaceSlot::PrepareRootBuildState(const std::string& rootId,
+    const std::map<std::string, JsonValue>& descriptorsById, RootBuildState& state, bool& sawRootDescriptor) const
 {
-    std::shared_ptr<Component> resolvedRoot = nullptr;
-    std::vector<ModalCoordinator::ModalDescriptor> modalDescriptors;
-    std::vector<std::shared_ptr<Component>> buildNodeCandidates;
-    buildNodeCandidates.reserve(descriptorsById.size());
-    const bool hasExplicitRootDescriptor = descriptorsById.find(rootId) != descriptorsById.end();
-    sawRootDescriptor = hasExplicitRootDescriptor;
-    std::set<std::string> staticReachableIds;
-    if (hasExplicitRootDescriptor) {
-        CollectStaticReachableDescriptorIds(rootId, descriptorsById, staticReachableIds);
+    state.buildNodeCandidates.reserve(descriptorsById.size());
+    state.hasExplicitRootDescriptor = descriptorsById.find(rootId) != descriptorsById.end();
+    sawRootDescriptor = state.hasExplicitRootDescriptor;
+    if (state.hasExplicitRootDescriptor) {
+        CollectStaticReachableDescriptorIds(rootId, descriptorsById, state.staticReachableIds);
     }
-    std::set<std::string> templateRootIds;
     for (const auto& [_, descriptor] : descriptorsById) {
-        CollectTemplateRootIdsFromDescriptor(descriptor, templateRootIds);
+        CollectTemplateRootIdsFromDescriptor(descriptor, state.templateRootIds);
     }
-    // First pass: Create or update all components
-    for (auto iter = descriptorsById.begin(); iter != descriptorsById.end(); ++iter) {
-        std::string nodeId = iter->first;
-        JsonValue nodeValue = iter->second;
-        if (nodeId.empty()) {
-            LOG_A2UI(LOG_WARN, "BuildRootFromComponents: nodeId is empty, skip");
-            continue;
-        }
-        if (!nodeValue.IsObject()) {
-            LOG_A2UI(LOG_WARN, "BuildRootFromComponents: nodeValue is not an object, skip");
-            continue;
-        }
+}
 
-        ValidateRequiredCreationFields(nodeValue, renderId_, surfaceId_);
+bool SurfaceSlot::ResolveRootBuildComponentType(
+    const std::string& nodeId, const JsonValue& nodeValue, std::string& componentType) const
+{
+    if (nodeId.empty()) {
+        LOG_A2UI(LOG_WARN, "BuildRootFromComponents: nodeId is empty, skip");
+        return false;
+    }
+    if (!nodeValue.IsObject()) {
+        LOG_A2UI(LOG_WARN, "BuildRootFromComponents: nodeValue is not an object, skip");
+        return false;
+    }
 
-        std::string componentType = nodeValue.GetString("component", "");
-        if (componentType.empty()) {
-            LOG_A2UI(
-                LOG_WARN, "BuildRootFromComponents: component is empty for nodeId=%{public}s, skipped", nodeId.c_str());
-            continue;
-        }
-        if (componentType == "Modal") {
-            ModalCoordinator::ModalDescriptor modalDescriptor;
-            if (modalCoordinator_ != nullptr && modalCoordinator_->TryCreateDescriptor(nodeValue, modalDescriptor)) {
-                modalDescriptors.push_back(modalDescriptor);
-                continue;
-            }
-            continue;
-        }
-        if (nodeId != rootId && templateRootIds.count(nodeId) > 0) {
-            // Template prototypes stay cached in descriptor storage and are instantiated lazily by container nodes.
-            hasProcessedNode = true;
-            LOG_A2UI(LOG_DEBUG, "BuildRootFromComponents: skip template prototype nodeId=%{public}s", nodeId.c_str());
-            continue;
-        }
-        if (hasExplicitRootDescriptor && staticReachableIds.count(nodeId) == 0 &&
-            !ShouldBuildDetachedCheckboxForReachableGroup(nodeId, nodeValue, descriptorsById, staticReachableIds)) {
-            hasProcessedNode = true;
-            LOG_A2UI(LOG_DEBUG,
-                "BuildRootFromComponents: skip detached descriptor nodeId=%{public}s under explicit root",
-                nodeId.c_str());
-            continue;
-        }
+    ValidateRequiredCreationFields(nodeValue, renderId_, surfaceId_);
+    componentType = nodeValue.GetString("component", "");
+    if (componentType.empty()) {
+        LOG_A2UI(
+            LOG_WARN, "BuildRootFromComponents: component is empty for nodeId=%{public}s, skipped", nodeId.c_str());
+        return false;
+    }
+    return true;
+}
 
+bool SurfaceSlot::HandleSpecialRootBuildDescriptor(const std::string& rootId,
+    const std::map<std::string, JsonValue>& descriptorsById, const std::string& nodeId, const JsonValue& nodeValue,
+    const std::string& componentType, RootBuildState& state, bool& hasProcessedNode)
+{
+    if (componentType == "Modal") {
+        ModalCoordinator::ModalDescriptor modalDescriptor;
+        if (modalCoordinator_ != nullptr && modalCoordinator_->TryCreateDescriptor(nodeValue, modalDescriptor)) {
+            state.modalDescriptors.push_back(modalDescriptor);
+        }
+        return true;
+    }
+    if (nodeId != rootId && state.templateRootIds.count(nodeId) > 0) {
+        // Template prototypes stay cached in descriptor storage and are instantiated lazily by container nodes.
         hasProcessedNode = true;
-        if (nodeId == rootId || (!hasExplicitRootDescriptor && resolvedRoot == nullptr)) {
-            PrebuildExtendedTabsChildren(*this, nodeValue);
-        }
+        LOG_A2UI(LOG_DEBUG, "BuildRootFromComponents: skip template prototype nodeId=%{public}s", nodeId.c_str());
+        return true;
+    }
+    if (state.hasExplicitRootDescriptor && state.staticReachableIds.count(nodeId) == 0 &&
+        !ShouldBuildDetachedCheckboxForReachableGroup(nodeId, nodeValue, descriptorsById, state.staticReachableIds)) {
+        hasProcessedNode = true;
+        LOG_A2UI(LOG_DEBUG, "BuildRootFromComponents: skip detached descriptor nodeId=%{public}s under explicit root",
+            nodeId.c_str());
+        return true;
+    }
+    return false;
+}
 
-        std::shared_ptr<Component> node = CreateOrUpdateComponentNode(nodeValue, nodeId, componentType);
-        if (node == nullptr) {
-            continue;
+void SurfaceSlot::UpdateResolvedRootFromCandidate(const std::string& rootId, const std::shared_ptr<Component>& node,
+    RootBuildState& state, bool& sawRootDescriptor, bool updateSurfaceRoot)
+{
+    if (node->GetComponentId() == rootId) {
+        sawRootDescriptor = true;
+        state.resolvedRoot = node;
+        if (updateSurfaceRoot) {
+            SetRootComponent(node);
         }
-        ValidateRequiredStructuralFields(nodeValue, renderId_, surfaceId_, surfaceProtocolMode_);
-        ValidateStructuralFieldShapes(nodeValue, renderId_, surfaceId_, surfaceProtocolMode_);
-        ValidateEventHandlerFields(nodeValue, renderId_, surfaceId_);
-        buildNodeCandidates.push_back(node);
-        if (node->GetComponentId() == rootId) {
-            sawRootDescriptor = true;
-            resolvedRoot = node;
-            if (updateSurfaceRoot) {
-                SetRootComponent(node);
-            }
-        } else if (!hasExplicitRootDescriptor && resolvedRoot == nullptr) {
-            resolvedRoot = rootComponent_ != nullptr ? rootComponent_ : node;
-            if (updateSurfaceRoot && rootComponent_ == nullptr) {
-                SetRootComponent(node);
-            }
+        return;
+    }
+    if (!state.hasExplicitRootDescriptor && state.resolvedRoot == nullptr) {
+        state.resolvedRoot = rootComponent_ != nullptr ? rootComponent_ : node;
+        if (updateSurfaceRoot && rootComponent_ == nullptr) {
+            SetRootComponent(node);
         }
     }
+}
 
+void SurfaceSlot::AddRootBuildCandidate(const std::string& rootId, const std::string& nodeId,
+    const JsonValue& nodeValue, const std::string& componentType, RootBuildState& state, bool& hasProcessedNode,
+    bool& sawRootDescriptor, bool updateSurfaceRoot)
+{
+    hasProcessedNode = true;
+    if (nodeId == rootId || (!state.hasExplicitRootDescriptor && state.resolvedRoot == nullptr)) {
+        PrebuildExtendedTabsChildren(*this, nodeValue);
+    }
+
+    std::shared_ptr<Component> node = CreateOrUpdateComponentNode(nodeValue, nodeId, componentType);
+    if (node == nullptr) {
+        return;
+    }
+    ValidateRequiredStructuralFields(nodeValue, renderId_, surfaceId_, surfaceProtocolMode_);
+    ValidateStructuralFieldShapes(nodeValue, renderId_, surfaceId_, surfaceProtocolMode_);
+    ValidateEventHandlerFields(nodeValue, renderId_, surfaceId_);
+    state.buildNodeCandidates.push_back(node);
+    UpdateResolvedRootFromCandidate(rootId, node, state, sawRootDescriptor, updateSurfaceRoot);
+}
+
+void SurfaceSlot::FinalizeRootBuildState(RootBuildState& state)
+{
     std::set<std::shared_ptr<Component>, BuildNodeDepthComparator> buildNodes;
-    for (const auto& node : buildNodeCandidates) {
+    for (const auto& node : state.buildNodeCandidates) {
         if (node == nullptr) {
             continue;
         }
@@ -1133,11 +1174,33 @@ std::shared_ptr<Component> SurfaceSlot::BuildRootFromComponents(const std::strin
     SyncExtendedCheckboxGroupState();
 
     if (modalCoordinator_ != nullptr) {
-        modalCoordinator_->HandlePendingModalDescriptors(modalDescriptors, allComponents_, parentsRelations_);
+        modalCoordinator_->HandlePendingModalDescriptors(state.modalDescriptors, allComponents_, parentsRelations_);
     }
 
     DebugPrintGlobalMapsInternal();
-    return resolvedRoot;
+}
+
+std::shared_ptr<Component> SurfaceSlot::BuildRootFromComponents(const std::string& rootId,
+    const std::map<std::string, JsonValue>& descriptorsById, bool& hasProcessedNode, bool& sawRootDescriptor,
+    bool updateSurfaceRoot)
+{
+    RootBuildState state;
+    PrepareRootBuildState(rootId, descriptorsById, state, sawRootDescriptor);
+    for (const auto& [nodeId, descriptor] : descriptorsById) {
+        JsonValue nodeValue = descriptor;
+        std::string componentType;
+        if (!ResolveRootBuildComponentType(nodeId, nodeValue, componentType)) {
+            continue;
+        }
+        if (HandleSpecialRootBuildDescriptor(
+                rootId, descriptorsById, nodeId, nodeValue, componentType, state, hasProcessedNode)) {
+            continue;
+        }
+        AddRootBuildCandidate(
+            rootId, nodeId, nodeValue, componentType, state, hasProcessedNode, sawRootDescriptor, updateSurfaceRoot);
+    }
+    FinalizeRootBuildState(state);
+    return state.resolvedRoot;
 }
 
 void SurfaceSlot::BuildComponentTree(const std::set<std::shared_ptr<Component>, BuildNodeDepthComparator>& buildNodes)
@@ -1500,11 +1563,11 @@ float SurfaceSlot::GetFontSizeScale() const
 
 void SurfaceSlot::SetApiVersion(int32_t apiVersion)
 {
-    apiVersion_ = apiVersion;
+    SystemProperties::GetInstance().SetApiVersion(apiVersion);
 }
 
 int32_t SurfaceSlot::GetApiVersion() const
 {
-    return apiVersion_;
+    return SystemProperties::GetInstance().GetApiVersion();
 }
 } // namespace NativeModule

@@ -468,7 +468,7 @@ export class CustomComponentFactory {
   }
 
   public static createCustomComponent(value: CustomComponentDescriptor): CustomComponentResult {
-    console.log("ArkTS createCustomComponent");
+    console.log('ArkTS createCustomComponent');
     if (CustomComponentFactory.currentUIContext === undefined) {
       return {};
     }
@@ -599,7 +599,10 @@ export class CustomComponentFactory {
     if (definition === undefined) {
       throw new Error(`Custom component is not registered: ${type}`);
     }
+    return CustomComponentFactory.createCatalogItemFromDefinition(definition);
+  }
 
+  public static createCatalogItemFromDefinition(definition: CustomComponentDefinition): CatalogItem {
     let catalogItem = CatalogItem.forComponent(
       definition.type,
       definition.schemaProvider ?? emptySchemaProvider,

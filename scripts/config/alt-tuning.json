@@ -1,0 +1,103 @@
+{
+  "profile": "genui@0.7.0-alpha.7",
+  "description": "Automatic ALT layout tuning hyperparameters used by scripts/alt_converter.py. Every value here replaces a previously hard-coded constant and must stay in sync with scripts/config/alt-layout-profile.json and scripts/config/alt-themes.json.",
+  "text": {
+    "widthSafety": 1.10,
+    "buttonWidthSafety": 1.08,
+    "lineHeightPadding": 4.0,
+    "minimumWidthChars": 2.0,
+    "longTextUnitsThreshold": 6.0,
+    "weightFactorDivisor": 5000.0,
+    "unitWeights": {
+      "space": 0.35,
+      "cjk": 1.0,
+      "upper": 0.68,
+      "lower": 0.56,
+      "digit": 0.62,
+      "other": 0.45
+    }
+  },
+  "button": {
+    "charsHorizontalReserve": 24.0,
+    "labelFontFallback": 16.0
+  },
+  "components": {
+    "button": {
+      "paddingVertical": 8,
+      "paddingHorizontal": 12,
+      "minimumHeight": 32,
+      "minimumWidth": 48,
+      "widthSafety": 4
+    },
+    "autoButton": {
+      "paddingVertical": 7,
+      "paddingHorizontal": 12,
+      "minimumHeight": 32,
+      "minimumWidth": 48,
+      "widthSafety": 4
+    },
+    "checkbox": {
+      "outerHeight": 48,
+      "controlSize": 20,
+      "controlMargin": 2,
+      "labelGap": 12,
+      "labelFontSize": 16
+    },
+    "autoCheckbox": {
+      "outerHeight": 22,
+      "controlSize": 20,
+      "controlMargin": 2,
+      "labelGap": 12,
+      "labelFontSize": 16,
+      "minimumWidth": 36
+    },
+    "image": {
+      "meta": 18,
+      "support": 20,
+      "action": 20,
+      "asset": 24,
+      "primary2x2": 48,
+      "primary2x4": 56
+    },
+    "progress": {
+      "ring2x2": 56,
+      "ring2x4": 64,
+      "linearHeight": 8,
+      "linearMinimumWidth": 64
+    },
+    "divider": {
+      "stroke": "1px"
+    }
+  },
+  "density": {
+    "compactNodeThreshold2x2": 7,
+    "compactNodeThreshold2x4": 13,
+    "compactUnitsRatio": 0.72
+  },
+  "column": {
+    "centerMainRatio": 0.7,
+    "bottomActionAnchorGap": 18.0,
+    "compactGapMinimum": 2.0
+  },
+  "tolerance": {
+    "comparisonEpsilon": 0.01
+  },
+  "typography": {
+    "primaryFontBands": [
+      {"aboveUnits": 12, "fontSize": 16},
+      {"aboveUnits": 8, "fontSize": 18},
+      {"aboveUnits": 3, "fontSize": 20}
+    ]
+  },
+  "fontAdaptation": {
+    "defaultMinSize": 10,
+    "defaultStep": 2,
+    "absoluteMinimumSize": 8
+  },
+  "themeInference": {
+    "luminanceWeights": [0.2126, 0.7152, 0.0722],
+    "darkLuminanceThreshold": 0.42,
+    "ambientChannelSpread": 12.0,
+    "ambientMinChannel": 238.0
+  }
+}

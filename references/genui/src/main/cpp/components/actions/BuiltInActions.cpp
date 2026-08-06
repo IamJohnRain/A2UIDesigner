@@ -114,99 +114,92 @@ JsonValue MergeEventContext(const JsonValue& baseContext, const JsonValue& extra
     return contextRoot;
 }
 
+JsonValue DispatchEventAction(const JsonValue& args, EventHandlerChainExecutor::ExecutionContext& ctx)
+{
+    std::string eventName = args.GetString("eventName", "");
+    if (eventName.empty()) {
+        LOG_A2UI(LOG_WARN, "NativeActionRegistry::dispatchEvent - eventName is empty, componentId=%{public}s",
+            ctx.componentId.c_str());
+        return JsonValue();
+    }
+
+    EventResolveContext resolveContext = {
+        .renderId = ctx.renderId, .surfaceId = ctx.surfaceId, .componentId = ctx.componentId
+    };
+    JsonValue resolvedContext = EventContextResolver::Resolve(args.GetItem("context"), resolveContext);
+    const JsonValue& externalContext = ctx.hasExternalEventContext ? ctx.externalEventContext : ctx.eventContext;
+    JsonValue dispatchContext = MergeEventContext(resolvedContext, externalContext);
+    ActionDispatchBridge::GetInstance().Dispatch(
+        ctx.renderId, ctx.surfaceId, ctx.componentId, eventName, dispatchContext);
+    return JsonValue();
+}
+
+JsonValue SetDataModelAction(const JsonValue& args, EventHandlerChainExecutor::ExecutionContext& ctx)
+{
+    if (ctx.dataModel == nullptr) {
+        ctx.dataModel = std::make_shared<DataModel>(ctx.surfaceId);
+    }
+
+    JsonValue pathValue = args.GetItem("path");
+    std::string resolvedPath;
+    if (pathValue.IsString()) {
+        resolvedPath = pathValue.GetStringValue();
+    }
+
+    if (resolvedPath.empty()) {
+        LOG_A2UI(LOG_WARN, "NativeActionRegistry::setDataModel - path is empty, componentId=%{public}s",
+            ctx.componentId.c_str());
+        return JsonValue();
+    }
+
+    JsonValue value = args.GetItem("value");
+    ctx.dataModel->UpdateByPath(resolvedPath, value);
+    ctx.dataModel->NotifyPathUpdate(resolvedPath);
+    return JsonValue();
+}
+
+JsonValue SetAttributesAction(const JsonValue& args, EventHandlerChainExecutor::ExecutionContext& ctx)
+{
+    std::string componentId = args.GetString("componentId", "");
+    if (componentId.empty()) {
+        LOG_A2UI(LOG_WARN, "NativeActionRegistry::setAttributes - componentId is empty, sourceComponentId=%{public}s",
+            ctx.componentId.c_str());
+        return JsonValue();
+    }
+
+    JsonValue value = args.GetItem("value");
+    if (!value.IsObject()) {
+        LOG_A2UI(LOG_WARN, "NativeActionRegistry::setAttributes - value is not object, componentId=%{public}s",
+            componentId.c_str());
+        return JsonValue();
+    }
+
+    SurfaceSlot* surface = RenderManager::GetInstance().FindSurface(ctx.renderId, ctx.surfaceId);
+    if (surface == nullptr) {
+        LOG_A2UI(LOG_WARN,
+            "NativeActionRegistry::setAttributes - surface not found, surfaceId=%{public}s, componentId=%{public}s",
+            ctx.surfaceId.c_str(), componentId.c_str());
+        return JsonValue();
+    }
+
+    std::shared_ptr<Component> component = surface->FindComponentById(componentId);
+    if (component == nullptr) {
+        LOG_A2UI(LOG_WARN, "NativeActionRegistry::setAttributes - component not found, componentId=%{public}s",
+            componentId.c_str());
+        return JsonValue();
+    }
+
+    component->ApplyDescriptor(value);
+    return JsonValue();
+}
+
 } // namespace
 
 void RegisterBuiltInActions(NativeActionRegistry& registry)
 {
-    registry.Register("dispatchEvent", [](const JsonValue& args, EventHandlerChainExecutor::ExecutionContext& ctx) {
-        std::string eventName = args.GetString("eventName", "");
-        if (eventName.empty()) {
-            LOG_A2UI(LOG_WARN, "NativeActionRegistry::dispatchEvent - eventName is empty, componentId=%{public}s",
-                ctx.componentId.c_str());
-            return JsonValue();
-        }
-
-        EventResolveContext resolveContext = {
-            .renderId = ctx.renderId, .surfaceId = ctx.surfaceId, .componentId = ctx.componentId
-        };
-        JsonValue resolvedContext = EventContextResolver::Resolve(args.GetItem("context"), resolveContext);
-        const JsonValue& externalContext = ctx.hasExternalEventContext ? ctx.externalEventContext : ctx.eventContext;
-        JsonValue dispatchContext = MergeEventContext(resolvedContext, externalContext);
-        ActionDispatchBridge::GetInstance().Dispatch(
-            ctx.renderId, ctx.surfaceId, ctx.componentId, eventName, dispatchContext);
-        return JsonValue();
-    });
-
-    registry.Register("setDataModel", [](const JsonValue& args, EventHandlerChainExecutor::ExecutionContext& ctx) {
-        if (ctx.dataModel == nullptr) {
-            ctx.dataModel = std::make_shared<DataModel>(ctx.surfaceId);
-        }
-
-        JsonValue pathValue = args.GetItem("path");
-        std::string resolvedPath;
-        if (pathValue.IsString()) {
-            resolvedPath = pathValue.GetStringValue();
-        }
-
-        if (resolvedPath.empty()) {
-            LOG_A2UI(LOG_WARN, "NativeActionRegistry::setDataModel - path is empty, componentId=%{public}s",
-                ctx.componentId.c_str());
-            return JsonValue();
-        }
-
-        JsonValue value = args.GetItem("value");
-        ctx.dataModel->UpdateByPath(resolvedPath, value);
-        ctx.dataModel->NotifyPathUpdate(resolvedPath);
-
-        return JsonValue();
-    });
-
-    registry.Register("setAttributes", [](const JsonValue& args, EventHandlerChainExecutor::ExecutionContext& ctx) {
-        std::string componentId = args.GetString("componentId", "");
-        if (componentId.empty()) {
-            LOG_A2UI(LOG_WARN,
-                "NativeActionRegistry::setAttributes - componentId is empty, "
-                "sourceComponentId=%{public}s",
-                ctx.componentId.c_str());
-            return JsonValue();
-        }
-
-        JsonValue value = args.GetItem("value");
-        if (!value.IsObject()) {
-            LOG_A2UI(LOG_WARN,
-                "NativeActionRegistry::setAttributes - value is not object, "
-                "componentId=%{public}s",
-                componentId.c_str());
-            return JsonValue();
-        }
-
-        SurfaceSlot* surface = RenderManager::GetInstance().FindSurface(ctx.renderId, ctx.surfaceId);
-        if (surface == nullptr) {
-            LOG_A2UI(LOG_WARN,
-                "NativeActionRegistry::setAttributes - surface not found, "
-                "surfaceId=%{public}s, componentId=%{public}s",
-                ctx.surfaceId.c_str(), componentId.c_str());
-            return JsonValue();
-        }
-
-        std::shared_ptr<Component> component = surface->FindComponentById(componentId);
-        if (component == nullptr) {
-            LOG_A2UI(LOG_WARN,
-                "NativeActionRegistry::setAttributes - component not found, "
-                "componentId=%{public}s",
-                componentId.c_str());
-            return JsonValue();
-        }
-
-        component->ApplyDescriptor(value);
-        return JsonValue();
-    });
-
-    registry.Register("navigate", [](const JsonValue& args, EventHandlerChainExecutor::ExecutionContext& ctx) {
-        LOG_A2UI(LOG_WARN, "NativeActionRegistry::navigate - STUB: not implemented, componentId=%{public}s",
-            ctx.componentId.c_str());
-        return JsonValue();
-    });
+    registry.Register("dispatchEvent", DispatchEventAction);
+    registry.Register("setDataModel", SetDataModelAction);
+    registry.Register("setAttributes", SetAttributesAction);
 }
 
 } // namespace NativeModule

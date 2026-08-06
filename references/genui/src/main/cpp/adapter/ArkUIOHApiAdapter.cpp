@@ -109,6 +109,52 @@ ArkUI_DialogDismissEvent* ToArkUIDialogDismissEvent(A2UIDialogDismissEvent* even
 
 } // namespace
 
+struct PixelRoundPolicyAPI {
+    using CreateFn = ArkUI_PixelRoundPolicy* (*)();
+    using DisposeFn = void (*)(ArkUI_PixelRoundPolicy*);
+    using SetFn = void (*)(ArkUI_PixelRoundPolicy*, ArkUI_PixelRoundCalcPolicy);
+
+    CreateFn create = nullptr;
+    DisposeFn dispose = nullptr;
+    SetFn setStart = nullptr;
+    SetFn setEnd = nullptr;
+    SetFn setTop = nullptr;
+    SetFn setBottom = nullptr;
+
+    bool IsAvailable() const
+    {
+        return create != nullptr && dispose != nullptr && setStart != nullptr && setEnd != nullptr &&
+               setTop != nullptr && setBottom != nullptr;
+    }
+};
+
+// Resolves all PixelRoundPolicy symbols once and caches the result. In TDD builds the
+// stub functions are linked directly; in production they are resolved via dlsym so
+// the .so has no load-time dependency on API-21-only symbols.
+const PixelRoundPolicyAPI& GetPixelRoundPolicyAPI()
+{
+    static PixelRoundPolicyAPI api = [] {
+        PixelRoundPolicyAPI pixelRound;
+#ifdef TDD_BUILD
+        pixelRound.create = OH_ArkUI_PixelRoundPolicy_Create;
+        pixelRound.dispose = OH_ArkUI_PixelRoundPolicy_Dispose;
+        pixelRound.setStart = OH_ArkUI_PixelRoundPolicy_SetStart;
+        pixelRound.setEnd = OH_ArkUI_PixelRoundPolicy_SetEnd;
+        pixelRound.setTop = OH_ArkUI_PixelRoundPolicy_SetTop;
+        pixelRound.setBottom = OH_ArkUI_PixelRoundPolicy_SetBottom;
+#else
+        pixelRound.create = ResolveArkUISymbol<PixelRoundPolicyAPI::CreateFn>("OH_ArkUI_PixelRoundPolicy_Create");
+        pixelRound.dispose = ResolveArkUISymbol<PixelRoundPolicyAPI::DisposeFn>("OH_ArkUI_PixelRoundPolicy_Dispose");
+        pixelRound.setStart = ResolveArkUISymbol<PixelRoundPolicyAPI::SetFn>("OH_ArkUI_PixelRoundPolicy_SetStart");
+        pixelRound.setEnd = ResolveArkUISymbol<PixelRoundPolicyAPI::SetFn>("OH_ArkUI_PixelRoundPolicy_SetEnd");
+        pixelRound.setTop = ResolveArkUISymbol<PixelRoundPolicyAPI::SetFn>("OH_ArkUI_PixelRoundPolicy_SetTop");
+        pixelRound.setBottom = ResolveArkUISymbol<PixelRoundPolicyAPI::SetFn>("OH_ArkUI_PixelRoundPolicy_SetBottom");
+#endif
+        return pixelRound;
+    }();
+    return api;
+}
+
 int32_t ArkUIOHApiAdapter::GetModuleInterfaceByType(int32_t type, int32_t version, void** result)
 {
     if (result == nullptr) {
@@ -669,6 +715,139 @@ int32_t ArkUIOHApiAdapter::GetNodeUniqueId(ArkUI_NodeHandle node, int32_t* uniqu
 #endif
 }
 
+ArkUI_LayoutConstraint* ArkUIOHApiAdapter::NodeCustomEventGetLayoutConstraintInMeasure(ArkUI_NodeCustomEvent* event)
+{
+#ifdef TDD_BUILD
+    return OH_ArkUI_NodeCustomEvent_GetLayoutConstraintInMeasure(event);
+#else
+    using Function = ArkUI_LayoutConstraint* (*)(ArkUI_NodeCustomEvent*);
+    static Function function = nullptr;
+    static bool probed = false;
+    if (event == nullptr) {
+        return nullptr;
+    }
+    if (!probed) {
+        function = ResolveArkUISymbol<Function>("OH_ArkUI_NodeCustomEvent_GetLayoutConstraintInMeasure");
+        probed = true;
+    }
+    return function != nullptr ? function(event) : nullptr;
+#endif
+}
+
+ArkUI_NodeHandle ArkUIOHApiAdapter::NodeCustomEventGetNodeHandle(ArkUI_NodeCustomEvent* event)
+{
+#ifdef TDD_BUILD
+    return OH_ArkUI_NodeCustomEvent_GetNodeHandle(event);
+#else
+    using Function = ArkUI_NodeHandle (*)(ArkUI_NodeCustomEvent*);
+    static Function function = nullptr;
+    static bool probed = false;
+    if (event == nullptr) {
+        return nullptr;
+    }
+    if (!probed) {
+        function = ResolveArkUISymbol<Function>("OH_ArkUI_NodeCustomEvent_GetNodeHandle");
+        probed = true;
+    }
+    return function != nullptr ? function(event) : nullptr;
+#endif
+}
+
+int32_t ArkUIOHApiAdapter::NodeCustomEventGetEventType(ArkUI_NodeCustomEvent* event)
+{
+#ifdef TDD_BUILD
+    return static_cast<int32_t>(OH_ArkUI_NodeCustomEvent_GetEventType(event));
+#else
+    using Function = ArkUI_NodeCustomEventType (*)(ArkUI_NodeCustomEvent*);
+    static Function function = nullptr;
+    static bool probed = false;
+    if (event == nullptr) {
+        return -1;
+    }
+    if (!probed) {
+        function = ResolveArkUISymbol<Function>("OH_ArkUI_NodeCustomEvent_GetEventType");
+        probed = true;
+    }
+    return function != nullptr ? static_cast<int32_t>(function(event)) : -1;
+#endif
+}
+
+void* ArkUIOHApiAdapter::NodeCustomEventGetUserData(ArkUI_NodeCustomEvent* event)
+{
+#ifdef TDD_BUILD
+    return OH_ArkUI_NodeCustomEvent_GetUserData(event);
+#else
+    using Function = void* (*)(ArkUI_NodeCustomEvent*);
+    static Function function = nullptr;
+    static bool probed = false;
+    if (event == nullptr) {
+        return nullptr;
+    }
+    if (!probed) {
+        function = ResolveArkUISymbol<Function>("OH_ArkUI_NodeCustomEvent_GetUserData");
+        probed = true;
+    }
+    return function != nullptr ? function(event) : nullptr;
+#endif
+}
+
+ArkUI_IntOffset ArkUIOHApiAdapter::NodeCustomEventGetPositionInLayout(ArkUI_NodeCustomEvent* event)
+{
+#ifdef TDD_BUILD
+    return OH_ArkUI_NodeCustomEvent_GetPositionInLayout(event);
+#else
+    using Function = ArkUI_IntOffset (*)(ArkUI_NodeCustomEvent*);
+    static Function function = nullptr;
+    static bool probed = false;
+    if (event == nullptr) {
+        return { 0, 0 };
+    }
+    if (!probed) {
+        function = ResolveArkUISymbol<Function>("OH_ArkUI_NodeCustomEvent_GetPositionInLayout");
+        probed = true;
+    }
+    return function != nullptr ? function(event) : ArkUI_IntOffset { 0, 0 };
+#endif
+}
+
+int32_t ArkUIOHApiAdapter::LayoutConstraintGetPercentReferenceWidth(const ArkUI_LayoutConstraint* constraint)
+{
+#ifdef TDD_BUILD
+    return OH_ArkUI_LayoutConstraint_GetPercentReferenceWidth(constraint);
+#else
+    using Function = int32_t (*)(const ArkUI_LayoutConstraint*);
+    static Function function = nullptr;
+    static bool probed = false;
+    if (constraint == nullptr) {
+        return -1;
+    }
+    if (!probed) {
+        function = ResolveArkUISymbol<Function>("OH_ArkUI_LayoutConstraint_GetPercentReferenceWidth");
+        probed = true;
+    }
+    return function != nullptr ? function(constraint) : -1;
+#endif
+}
+
+int32_t ArkUIOHApiAdapter::LayoutConstraintGetPercentReferenceHeight(const ArkUI_LayoutConstraint* constraint)
+{
+#ifdef TDD_BUILD
+    return OH_ArkUI_LayoutConstraint_GetPercentReferenceHeight(constraint);
+#else
+    using Function = int32_t (*)(const ArkUI_LayoutConstraint*);
+    static Function function = nullptr;
+    static bool probed = false;
+    if (constraint == nullptr) {
+        return -1;
+    }
+    if (!probed) {
+        function = ResolveArkUISymbol<Function>("OH_ArkUI_LayoutConstraint_GetPercentReferenceHeight");
+        probed = true;
+    }
+    return function != nullptr ? function(constraint) : -1;
+#endif
+}
+
 NativeDisplayManager_ErrorCode ArkUIOHApiAdapter::GetDefaultDisplayDensityPixels(float* densityPixels)
 {
 #ifdef TDD_BUILD
@@ -705,6 +884,34 @@ NativeDisplayManager_ErrorCode ArkUIOHApiAdapter::GetDefaultDisplayScaledDensity
     }
     return function(scaledDensity);
 #endif
+}
+
+ArkUI_PixelRoundPolicy* ArkUIOHApiAdapter::CreatePixelRoundPolicyNoForceRound()
+{
+    const PixelRoundPolicyAPI& api = GetPixelRoundPolicyAPI();
+    if (!api.IsAvailable()) {
+        return nullptr;
+    }
+    ArkUI_PixelRoundPolicy* policy = api.create();
+    if (policy == nullptr) {
+        return nullptr;
+    }
+    api.setStart(policy, ARKUI_PIXELROUNDCALCPOLICY_NOFORCEROUND);
+    api.setEnd(policy, ARKUI_PIXELROUNDCALCPOLICY_NOFORCEROUND);
+    api.setTop(policy, ARKUI_PIXELROUNDCALCPOLICY_NOFORCEROUND);
+    api.setBottom(policy, ARKUI_PIXELROUNDCALCPOLICY_NOFORCEROUND);
+    return policy;
+}
+
+void ArkUIOHApiAdapter::DisposePixelRoundPolicy(ArkUI_PixelRoundPolicy* policy)
+{
+    if (policy == nullptr) {
+        return;
+    }
+    const PixelRoundPolicyAPI& api = GetPixelRoundPolicyAPI();
+    if (api.dispose != nullptr) {
+        api.dispose(policy);
+    }
 }
 
 } // namespace NativeModule

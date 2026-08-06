@@ -13,16 +13,16 @@
  * limitations under the License.
  */
 
-import { CatalogCategory, CatalogItem, EMPTY_COMPONENT_BUILDER } from "../../base/CatalogItem";
-import { SchemaResourceLoader } from "../../schema/SchemaResourceLoader";
-import { SchemaProvider } from "../../types/types";
+import { CatalogCategory, CatalogItem, EMPTY_COMPONENT_BUILDER } from '../../base/CatalogItem';
+import { SchemaResourceLoader } from '../../schema/SchemaResourceLoader';
+import { SchemaProvider } from '../../types/types';
 
 export class A2UIColumn {
   // 禁止构造
   private constructor() {
   }
 
-  private static type: string = "Column";
+  private static type: string = 'Column';
 
   private static schemaProvider: SchemaProvider = (version: string) => {
     return SchemaResourceLoader.loadA2UISchema(version, 'components/Column.json');

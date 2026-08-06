@@ -162,7 +162,7 @@ TEST_F(GridAdapterNodeBranchTest, should_skip_grid_update_when_node_is_missing_o
     nestedGridMissing->SetAdapterNode(nestedAdapterMissing);
 
     parentAdapter.OnNestedAdapterUpdate(nestedGridMissing, "/users/0");
-    EXPECT_EQ(mockArkUIPtr_->totalNodeCounts_[nestedAdapterMissing->GetHandle()], 1U);
+    EXPECT_EQ(mockArkUIPtr_->totalNodeCounts_[nestedAdapterMissing->GetHandle()], 0U);
 
     auto nestedGridNonArray = std::make_shared<ExtendedGridComponent>();
     auto nestedAdapterNonArray = std::make_shared<GridAdapterNode>();
@@ -244,7 +244,7 @@ TEST_F(GridAdapterNodeBranchTest, should_skip_grid_update_when_data_path_not_fou
     root->AddChild(validPathGrid);
 
     parentAdapter.OnNestedAdapterUpdate(root, "/users/0");
-    EXPECT_EQ(mockArkUIPtr_->totalNodeCounts_[missingPathAdapter->GetHandle()], 1U);
+    EXPECT_EQ(mockArkUIPtr_->totalNodeCounts_[missingPathAdapter->GetHandle()], 0U);
     EXPECT_EQ(mockArkUIPtr_->totalNodeCounts_[validPathAdapter->GetHandle()], 3U);
 }
 

@@ -65,6 +65,8 @@ private:
     };
 
     void ReportStyleWarning(const std::string& code, const std::string& styleName, const std::string& message) const;
+    void ApplyStrokeWidthPrivateAttribute(const JsonValue& styles, const std::string& componentId);
+    void ApplyColorPrivateAttribute(const JsonValue& styles, const std::string& componentId);
     void ApplyStrokeWidthPrivateValue(const JsonValue& value, bool reportWarning);
     void ApplyVerticalPrivateValue(const JsonValue& value, bool reportWarning);
     void SetStrokeWidth(const JsonValue& value);

@@ -98,10 +98,7 @@ public:
         return fontSizeScale_;
     }
     void SetApiVersion(int32_t apiVersion);
-    int32_t GetApiVersion() const
-    {
-        return apiVersion_;
-    }
+    int32_t GetApiVersion() const;
 
     /**
      * Set the render ID
@@ -152,7 +149,6 @@ private:
     int32_t renderId_ = -1;                         // Render ID for tracking which RenderSlot this belongs to
     bool forceRootFill_ = false;
     float fontSizeScale_ = 1.0F;
-    int32_t apiVersion_ = 0;
     ThemeContext themeContext_; // Current theme context
 };
 

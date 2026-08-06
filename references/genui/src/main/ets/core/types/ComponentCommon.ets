@@ -27,8 +27,8 @@ export class A2UIComponentId {
 }
 
 export class A2UIAccessibilityAttributes {
-  label?: A2UIDynamicString
-  description?: A2UIDynamicString
+  public label?: A2UIDynamicString
+  public description?: A2UIDynamicString
 
   static schema(): string {
     return `{
@@ -43,8 +43,8 @@ export class A2UIAccessibilityAttributes {
 }
 
 export class A2UIComponentCommon {
-  id: string = ''
-  accessibility?: A2UIAccessibilityAttributes
+  public id: string = ''
+  public accessibility?: A2UIAccessibilityAttributes
 
   static schema(): string {
     return `{

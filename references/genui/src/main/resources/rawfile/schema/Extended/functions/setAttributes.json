@@ -1,0 +1,36 @@
+{
+  "type": "object",
+  "description": "Updates one or more properties on a component in the current surface.",
+  "properties": {
+    "call": {
+      "const": "setAttributes"
+    },
+    "args": {
+      "type": "object",
+      "properties": {
+        "componentId": {
+          "$ref": "../common_types.json#/$defs/DynamicString",
+          "description": "The target component ID."
+        },
+        "value": {
+          "type": "object",
+          "description": "The component properties to update.",
+          "additionalProperties": {}
+        }
+      },
+      "required": [
+        "componentId",
+        "value"
+      ],
+      "additionalProperties": false
+    },
+    "returnType": {
+      "const": "void"
+    }
+  },
+  "required": [
+    "call",
+    "args"
+  ],
+  "unevaluatedProperties": false
+}

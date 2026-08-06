@@ -13,8 +13,11 @@
  * limitations under the License.
  */
 
+#define private public
 #include "components/extended/ExtendedImageComponent.h"
+#undef private
 
+#include <algorithm>
 #include <gtest/gtest.h>
 #include <limits>
 #include <memory>
@@ -24,6 +27,7 @@
 #include "catalog/CatalogConstants.h"
 #include "catalog/CatalogItem.h"
 #include "components/extended/ExtendedComponentFactory.h"
+#include "components/extended/ExtendedStyleResolver.h"
 #include "data/DataBinding.h"
 #include "styles/StyleResolver.h"
 #include "utils/JsonAdapter.h"
@@ -32,6 +36,7 @@
 #include "ArkUINodeApiAdapter.h"
 #include "SchemaWarningTestHelper.h"
 #include "SurfaceSlot.h"
+#include "mock_arkui_native_provider.h"
 
 using namespace NativeModule;
 
@@ -53,6 +58,20 @@ std::shared_ptr<Catalog> BuildExtendedProtocolCatalog()
     item->SetCategory(CatalogCategory::OHOS_EXTENDS);
     catalog->AddComponent(item);
     return catalog;
+}
+
+void ExpectAspectRatioFromMockProvider(ArkUI_NodeHandle node, float expected)
+{
+    auto* provider = MockArkUINativeProvider::GetActiveInstance();
+    ASSERT_NE(provider, nullptr);
+    const auto& records = provider->setAttributeRecords_;
+    auto it =
+        std::find_if(records.rbegin(), records.rend(), [node](const MockArkUINativeProvider::SetAttributeRecord& r) {
+            return r.nodeHandle == node && r.attribute == NODE_ASPECT_RATIO;
+        });
+    ASSERT_NE(it, records.rend());
+    ASSERT_FALSE(it->values.empty());
+    EXPECT_FLOAT_EQ(it->values[0].f32, expected);
 }
 
 class ExtendedImageComponentTest : public A2UIComponentTddTest {
@@ -83,6 +102,7 @@ public:
     using ExtendedImageComponent::ApplyPrivateAttributes;
     using ExtendedImageComponent::OnDataUpdate;
     using ExtendedImageComponent::SetApplyingStyleDeltaUpdateForTest;
+    using ExtendedImageComponent::ValidateComponentSpecificStylesSchema;
 };
 
 TEST_F(ExtendedImageComponentTest, L0_should_return_image_type_and_default_object_fit)
@@ -117,7 +137,6 @@ TEST_F(ExtendedImageComponentTest, L0_should_apply_src_aspect_ratio_and_object_f
         std::dynamic_pointer_cast<ExtendedImageComponent>(slot_.FindComponentById("root"));
     ASSERT_NE(image, nullptr);
     EXPECT_EQ(image->GetSrcValueForTest(), "https://example.com/photo.png");
-    EXPECT_FLOAT_EQ(image->GetAspectRatioForTest(), 1.5F);
     EXPECT_EQ(image->GetObjectFitForTest(), ToA2UIObjectFitValue(A2UIObjectFit::CONTAIN));
 
     ExpectStringAttribute(image->GetNativeView(), NODE_IMAGE_SRC, "https://example.com/photo.png");
@@ -329,6 +348,7 @@ TEST_F(ExtendedImageComponentTest, L0_should_parse_all_supported_object_fit_enum
 
 TEST_F(ExtendedImageComponentTest, L0_should_fallback_matrix_object_fit_when_runtime_api_is_below_21)
 {
+    slot_.SetApiVersion(0);
     slot_.SetApiVersion(MIN_API_VERSION_IMAGE_OBJECT_FIT_MATRIX - 1);
     slot_.SetCatalog(BuildExtendedProtocolCatalog());
     std::unique_ptr<JsonAdapter> message = JsonAdapter::Parse(R"({
@@ -481,9 +501,10 @@ TEST_F(ExtendedImageComponentTest, L0_should_apply_object_fit_and_aspect_ratio_v
     })");
     ASSERT_NE(styles, nullptr);
 
+    std::vector<DescriptorValidationIssue> issues;
+    ExtendedStyleResolver::ResolveAndApply(styles->GetRoot(), applier, std::nullopt, issues);
     component.ApplyComponentSpecificStylesForTest(styles->GetRoot(), applier);
 
-    EXPECT_FLOAT_EQ(component.GetAspectRatioForTest(), 3.25F);
     EXPECT_EQ(component.GetObjectFitForTest(), ToA2UIObjectFitValue(A2UIObjectFit::COVER));
     ExpectF32Attribute(component.GetNativeView(), NODE_ASPECT_RATIO, 3.25F);
     ExpectI32Attribute(component.GetNativeView(), NODE_IMAGE_OBJECT_FIT, ARKUI_OBJECT_FIT_COVER);
@@ -496,9 +517,11 @@ TEST_F(ExtendedImageComponentTest, L0_should_ignore_non_object_styles_and_unknow
     std::unique_ptr<JsonAdapter> styles = JsonAdapter::Parse(R"("not-an-object")");
     ASSERT_NE(styles, nullptr);
 
+    std::vector<DescriptorValidationIssue> issues;
+    ExtendedStyleResolver::ResolveAndApply(styles->GetRoot(), applier, std::nullopt, issues);
     component.ApplyComponentSpecificStylesForTest(styles->GetRoot(), applier);
 
-    EXPECT_FLOAT_EQ(component.GetAspectRatioForTest(), 1.0F);
+    ExpectF32Attribute(component.GetNativeView(), NODE_ASPECT_RATIO, 1.0F);
     EXPECT_EQ(component.GetObjectFitForTest(), ToA2UIObjectFitValue(A2UIObjectFit::COVER));
 
     PropertyDeclaration declaration = component.GetPrivatePropertyDeclarationForTest("unknown");
@@ -534,6 +557,10 @@ TEST_F(ExtendedImageComponentTest, L0_should_skip_native_updates_when_native_vie
     })");
     ASSERT_NE(missingViewStyles, nullptr);
     ArkUINodeApiAdapter missingViewApplier = CreateNodeApiAdapter(component);
+    {
+        std::vector<DescriptorValidationIssue> issues;
+        ExtendedStyleResolver::ResolveAndApply(missingViewStyles->GetRoot(), missingViewApplier, std::nullopt, issues);
+    }
     component.ApplyComponentSpecificStylesForTest(missingViewStyles->GetRoot(), missingViewApplier);
 
     EXPECT_EQ(CountAttributeCall(originalView, NODE_IMAGE_SRC), originalSrcCalls);
@@ -551,6 +578,10 @@ TEST_F(ExtendedImageComponentTest, L0_should_skip_native_updates_when_native_vie
     })");
     ASSERT_NE(missingApiStyles, nullptr);
     ArkUINodeApiAdapter missingApiApplier = CreateNodeApiAdapter(component);
+    {
+        std::vector<DescriptorValidationIssue> issues;
+        ExtendedStyleResolver::ResolveAndApply(missingApiStyles->GetRoot(), missingApiApplier, std::nullopt, issues);
+    }
     component.ApplyComponentSpecificStylesForTest(missingApiStyles->GetRoot(), missingApiApplier);
 
     EXPECT_EQ(CountAttributeCall(originalView, NODE_IMAGE_SRC), originalSrcCalls);
@@ -575,12 +606,17 @@ TEST_F(ExtendedImageComponentTest, L0_should_create_image_via_extended_factory)
 TEST_F(ExtendedImageComponentTest, L0_should_fallback_image_styles_to_defaults_for_invalid_style_deltas)
 {
     TestableExtendedImageComponent component;
+    component.nodeApplier_ = CreateSharedNodeApiAdapter(component);
     ArkUINodeApiAdapter applier = CreateNodeApiAdapter(component);
 
     std::unique_ptr<JsonAdapter> nonObjectStyles = JsonAdapter::Parse("true");
     ASSERT_NE(nonObjectStyles, nullptr);
+    {
+        std::vector<DescriptorValidationIssue> issues;
+        ExtendedStyleResolver::ResolveAndApply(nonObjectStyles->GetRoot(), applier, std::nullopt, issues);
+    }
     component.ApplyComponentSpecificStylesForTest(nonObjectStyles->GetRoot(), applier);
-    EXPECT_FLOAT_EQ(component.GetAspectRatioForTest(), 1.0F);
+    ExpectF32Attribute(component.GetNativeView(), NODE_ASPECT_RATIO, 1.0F);
     EXPECT_EQ(component.GetObjectFitForTest(), ToA2UIObjectFitValue(A2UIObjectFit::COVER));
 
     std::unique_ptr<JsonAdapter> validStyles = JsonAdapter::Parse(R"({
@@ -588,13 +624,21 @@ TEST_F(ExtendedImageComponentTest, L0_should_fallback_image_styles_to_defaults_f
         "objectFit": "fill"
     })");
     ASSERT_NE(validStyles, nullptr);
+    {
+        std::vector<DescriptorValidationIssue> issues;
+        ExtendedStyleResolver::ResolveAndApply(validStyles->GetRoot(), applier, std::nullopt, issues);
+    }
     component.ApplyComponentSpecificStylesForTest(validStyles->GetRoot(), applier);
-    EXPECT_FLOAT_EQ(component.GetAspectRatioForTest(), 2.5F);
+    ExpectF32Attribute(component.GetNativeView(), NODE_ASPECT_RATIO, 2.5F);
     EXPECT_EQ(component.GetObjectFitForTest(), ToA2UIObjectFitValue(A2UIObjectFit::FILL));
 
     component.SetApplyingStyleDeltaUpdateForTest(true);
+    {
+        std::vector<DescriptorValidationIssue> issues;
+        ExtendedStyleResolver::ResolveAndApply(nonObjectStyles->GetRoot(), applier, std::nullopt, issues);
+    }
     component.ApplyComponentSpecificStylesForTest(nonObjectStyles->GetRoot(), applier);
-    EXPECT_FLOAT_EQ(component.GetAspectRatioForTest(), 1.0F);
+    ExpectF32Attribute(component.GetNativeView(), NODE_ASPECT_RATIO, 2.5F);
     EXPECT_EQ(component.GetObjectFitForTest(), ToA2UIObjectFitValue(A2UIObjectFit::COVER));
 
     std::unique_ptr<JsonAdapter> invalidFullStyles = JsonAdapter::Parse(R"({
@@ -602,8 +646,12 @@ TEST_F(ExtendedImageComponentTest, L0_should_fallback_image_styles_to_defaults_f
         "objectFit": "unsupported"
     })");
     ASSERT_NE(invalidFullStyles, nullptr);
+    {
+        std::vector<DescriptorValidationIssue> issues;
+        ExtendedStyleResolver::ResolveAndApply(invalidFullStyles->GetRoot(), applier, std::nullopt, issues);
+    }
     component.ApplyComponentSpecificStylesForTest(invalidFullStyles->GetRoot(), applier);
-    EXPECT_FLOAT_EQ(component.GetAspectRatioForTest(), 1.0F);
+    ExpectF32Attribute(component.GetNativeView(), NODE_ASPECT_RATIO, 1.0F);
     EXPECT_EQ(component.GetObjectFitForTest(), ToA2UIObjectFitValue(A2UIObjectFit::COVER));
 
     std::unique_ptr<JsonAdapter> invalidObjectFitDelta = JsonAdapter::Parse(R"("unsupported")");
@@ -614,11 +662,15 @@ TEST_F(ExtendedImageComponentTest, L0_should_fallback_image_styles_to_defaults_f
     std::unique_ptr<JsonAdapter> invalidAspectRatioDelta = JsonAdapter::Parse("false");
     ASSERT_NE(invalidAspectRatioDelta, nullptr);
     component.OnDataUpdate(StyleResolver::BuildStyleBindingProperty("aspectRatio"), invalidAspectRatioDelta->GetRoot());
-    EXPECT_FLOAT_EQ(component.GetAspectRatioForTest(), 1.0F);
+    ExpectF32Attribute(component.GetNativeView(), NODE_ASPECT_RATIO, 1.0F);
 
     component.SetApplyingStyleDeltaUpdateForTest(false);
+    {
+        std::vector<DescriptorValidationIssue> issues;
+        ExtendedStyleResolver::ResolveAndApply(invalidFullStyles->GetRoot(), applier, std::nullopt, issues);
+    }
     component.ApplyComponentSpecificStylesForTest(invalidFullStyles->GetRoot(), applier);
-    EXPECT_FLOAT_EQ(component.GetAspectRatioForTest(), 1.0F);
+    ExpectF32Attribute(component.GetNativeView(), NODE_ASPECT_RATIO, 1.0F);
     EXPECT_EQ(component.GetObjectFitForTest(), ToA2UIObjectFitValue(A2UIObjectFit::COVER));
 }
 
@@ -638,28 +690,52 @@ TEST_F(ExtendedImageComponentTest, L0_should_cover_private_attribute_non_object_
         "objectFit": "fill"
     })");
     ASSERT_NE(validStyles, nullptr);
+    {
+        std::vector<DescriptorValidationIssue> issues;
+        ExtendedStyleResolver::ResolveAndApply(validStyles->GetRoot(), applier, std::nullopt, issues);
+    }
     component.ApplyComponentSpecificStylesForTest(validStyles->GetRoot(), applier);
-    EXPECT_FLOAT_EQ(component.GetAspectRatioForTest(), 2.0F);
+    ExpectF32Attribute(component.GetNativeView(), NODE_ASPECT_RATIO, 2.0F);
     EXPECT_EQ(component.GetObjectFitForTest(), ToA2UIObjectFitValue(A2UIObjectFit::FILL));
 
     std::unique_ptr<JsonAdapter> emptyStyles = JsonAdapter::Parse(R"({})");
     ASSERT_NE(emptyStyles, nullptr);
+    {
+        std::vector<DescriptorValidationIssue> issues;
+        ExtendedStyleResolver::ResolveAndApply(emptyStyles->GetRoot(), applier, std::nullopt, issues);
+    }
     component.ApplyComponentSpecificStylesForTest(emptyStyles->GetRoot(), applier);
-    EXPECT_FLOAT_EQ(component.GetAspectRatioForTest(), 1.0F);
+    ExpectF32Attribute(component.GetNativeView(), NODE_ASPECT_RATIO, 2.0F);
     EXPECT_EQ(component.GetObjectFitForTest(), ToA2UIObjectFitValue(A2UIObjectFit::COVER));
 
+    {
+        std::vector<DescriptorValidationIssue> issues;
+        ExtendedStyleResolver::ResolveAndApply(validStyles->GetRoot(), applier, std::nullopt, issues);
+    }
     component.ApplyComponentSpecificStylesForTest(validStyles->GetRoot(), applier);
     std::unique_ptr<JsonAdapter> invalidTypeStyles = JsonAdapter::Parse(R"({
         "objectFit": true
     })");
     ASSERT_NE(invalidTypeStyles, nullptr);
+    {
+        std::vector<DescriptorValidationIssue> issues;
+        ExtendedStyleResolver::ResolveAndApply(invalidTypeStyles->GetRoot(), applier, std::nullopt, issues);
+    }
     component.ApplyComponentSpecificStylesForTest(invalidTypeStyles->GetRoot(), applier);
     EXPECT_EQ(component.GetObjectFitForTest(), ToA2UIObjectFitValue(A2UIObjectFit::COVER));
 
+    {
+        std::vector<DescriptorValidationIssue> issues;
+        ExtendedStyleResolver::ResolveAndApply(validStyles->GetRoot(), applier, std::nullopt, issues);
+    }
     component.ApplyComponentSpecificStylesForTest(validStyles->GetRoot(), applier);
     component.SetApplyingStyleDeltaUpdateForTest(true);
+    {
+        std::vector<DescriptorValidationIssue> issues;
+        ExtendedStyleResolver::ResolveAndApply(invalidTypeStyles->GetRoot(), applier, std::nullopt, issues);
+    }
     component.ApplyComponentSpecificStylesForTest(invalidTypeStyles->GetRoot(), applier);
-    EXPECT_FLOAT_EQ(component.GetAspectRatioForTest(), 2.0F);
+    ExpectF32Attribute(component.GetNativeView(), NODE_ASPECT_RATIO, 2.0F);
     EXPECT_EQ(component.GetObjectFitForTest(), ToA2UIObjectFitValue(A2UIObjectFit::COVER));
     component.SetApplyingStyleDeltaUpdateForTest(false);
 
@@ -678,20 +754,36 @@ TEST_F(ExtendedImageComponentTest, L0_should_cover_image_invalid_numeric_aspect_
         "objectFit": "fill"
     })");
     ASSERT_NE(validStyles, nullptr);
+    {
+        std::vector<DescriptorValidationIssue> issues;
+        ExtendedStyleResolver::ResolveAndApply(validStyles->GetRoot(), applier, std::nullopt, issues);
+    }
     component.ApplyComponentSpecificStylesForTest(validStyles->GetRoot(), applier);
 
     std::unique_ptr<JsonAdapter> invalidNumericAspectRatio = JsonAdapter::Parse(R"({
         "aspectRatio": 0
     })");
     ASSERT_NE(invalidNumericAspectRatio, nullptr);
+    {
+        std::vector<DescriptorValidationIssue> issues;
+        ExtendedStyleResolver::ResolveAndApply(invalidNumericAspectRatio->GetRoot(), applier, std::nullopt, issues);
+    }
     component.ApplyComponentSpecificStylesForTest(invalidNumericAspectRatio->GetRoot(), applier);
-    EXPECT_FLOAT_EQ(component.GetAspectRatioForTest(), 1.0F);
+    ExpectF32Attribute(component.GetNativeView(), NODE_ASPECT_RATIO, 1.0F);
     EXPECT_EQ(component.GetObjectFitForTest(), ToA2UIObjectFitValue(A2UIObjectFit::COVER));
 
+    {
+        std::vector<DescriptorValidationIssue> issues;
+        ExtendedStyleResolver::ResolveAndApply(validStyles->GetRoot(), applier, std::nullopt, issues);
+    }
     component.ApplyComponentSpecificStylesForTest(validStyles->GetRoot(), applier);
     component.SetApplyingStyleDeltaUpdateForTest(true);
+    {
+        std::vector<DescriptorValidationIssue> issues;
+        ExtendedStyleResolver::ResolveAndApply(invalidNumericAspectRatio->GetRoot(), applier, std::nullopt, issues);
+    }
     component.ApplyComponentSpecificStylesForTest(invalidNumericAspectRatio->GetRoot(), applier);
-    EXPECT_FLOAT_EQ(component.GetAspectRatioForTest(), 1.0F);
+    ExpectF32Attribute(component.GetNativeView(), NODE_ASPECT_RATIO, 1.0F);
     EXPECT_EQ(component.GetObjectFitForTest(), ToA2UIObjectFitValue(A2UIObjectFit::FILL));
     component.SetApplyingStyleDeltaUpdateForTest(false);
 
@@ -699,15 +791,23 @@ TEST_F(ExtendedImageComponentTest, L0_should_cover_image_invalid_numeric_aspect_
     ASSERT_NE(nanStyles, nullptr);
     JsonValue nanRoot = nanStyles->GetRoot();
     ASSERT_TRUE(nanRoot.PutNumber("aspectRatio", std::numeric_limits<double>::quiet_NaN()));
+    {
+        std::vector<DescriptorValidationIssue> issues;
+        ExtendedStyleResolver::ResolveAndApply(nanRoot, applier, std::nullopt, issues);
+    }
     component.ApplyComponentSpecificStylesForTest(nanRoot, applier);
-    EXPECT_FLOAT_EQ(component.GetAspectRatioForTest(), 1.0F);
+    ExpectF32Attribute(component.GetNativeView(), NODE_ASPECT_RATIO, 1.0F);
 
     std::unique_ptr<JsonAdapter> aspectOnlyStyles = JsonAdapter::Parse(R"({
         "aspectRatio": 2.25
     })");
     ASSERT_NE(aspectOnlyStyles, nullptr);
+    {
+        std::vector<DescriptorValidationIssue> issues;
+        ExtendedStyleResolver::ResolveAndApply(aspectOnlyStyles->GetRoot(), applier, std::nullopt, issues);
+    }
     component.ApplyComponentSpecificStylesForTest(aspectOnlyStyles->GetRoot(), applier);
-    EXPECT_FLOAT_EQ(component.GetAspectRatioForTest(), 2.25F);
+    ExpectF32Attribute(component.GetNativeView(), NODE_ASPECT_RATIO, 2.25F);
     EXPECT_EQ(component.GetObjectFitForTest(), ToA2UIObjectFitValue(A2UIObjectFit::COVER));
 }
 
@@ -721,13 +821,21 @@ TEST_F(ExtendedImageComponentTest, L0_should_reject_string_typed_image_aspect_ra
         "objectFit": " fill "
     })");
     ASSERT_NE(invalidTypedStyles, nullptr);
+    {
+        std::vector<DescriptorValidationIssue> issues;
+        ExtendedStyleResolver::ResolveAndApply(invalidTypedStyles->GetRoot(), applier, std::nullopt, issues);
+    }
     component.ApplyComponentSpecificStylesForTest(invalidTypedStyles->GetRoot(), applier);
-    EXPECT_FLOAT_EQ(component.GetAspectRatioForTest(), 1.0F);
+    ExpectF32Attribute(component.GetNativeView(), NODE_ASPECT_RATIO, 1.0F);
     EXPECT_EQ(component.GetObjectFitForTest(), ToA2UIObjectFitValue(A2UIObjectFit::FILL));
 
     JsonValue invalidStyles;
+    {
+        std::vector<DescriptorValidationIssue> issues;
+        ExtendedStyleResolver::ResolveAndApply(invalidStyles, applier, std::nullopt, issues);
+    }
     component.ApplyComponentSpecificStylesForTest(invalidStyles, applier);
-    EXPECT_FLOAT_EQ(component.GetAspectRatioForTest(), 1.0F);
+    ExpectF32Attribute(component.GetNativeView(), NODE_ASPECT_RATIO, 1.0F);
     EXPECT_EQ(component.GetObjectFitForTest(), ToA2UIObjectFitValue(A2UIObjectFit::COVER));
 
     std::unique_ptr<JsonAdapter> invalidStringStyles = JsonAdapter::Parse(R"({
@@ -735,8 +843,12 @@ TEST_F(ExtendedImageComponentTest, L0_should_reject_string_typed_image_aspect_ra
         "objectFit": " unsupported "
     })");
     ASSERT_NE(invalidStringStyles, nullptr);
+    {
+        std::vector<DescriptorValidationIssue> issues;
+        ExtendedStyleResolver::ResolveAndApply(invalidStringStyles->GetRoot(), applier, std::nullopt, issues);
+    }
     component.ApplyComponentSpecificStylesForTest(invalidStringStyles->GetRoot(), applier);
-    EXPECT_FLOAT_EQ(component.GetAspectRatioForTest(), 1.0F);
+    ExpectF32Attribute(component.GetNativeView(), NODE_ASPECT_RATIO, 1.0F);
     EXPECT_EQ(component.GetObjectFitForTest(), ToA2UIObjectFitValue(A2UIObjectFit::COVER));
 }
 
@@ -780,14 +892,14 @@ TEST_F(ExtendedImageComponentSchemaWarningTest,
     component.ApplyPrivateAttributes(missingSrcDescriptor->GetRoot());
     EXPECT_EQ(component.GetSrcValueForTest(), "");
 
-    ArkUINodeApiAdapter applier = CreateNodeApiAdapter(component);
+    component.nodeApplier_ = CreateSharedNodeApiAdapter(component);
     std::unique_ptr<JsonAdapter> invalidStyles = JsonAdapter::Parse(R"({
         "aspectRatio": null,
         "objectFit": false
     })");
     ASSERT_NE(invalidStyles, nullptr);
-    component.ApplyComponentSpecificStylesForTest(invalidStyles->GetRoot(), applier);
-    EXPECT_FLOAT_EQ(component.GetAspectRatioForTest(), 1.0F);
+    component.ApplyResolvedStyles(invalidStyles->GetRoot());
+    ExpectAspectRatioFromMockProvider(component.GetNativeView(), 1.0F);
     EXPECT_EQ(component.GetObjectFitForTest(), ToA2UIObjectFitValue(A2UIObjectFit::COVER));
 
     EXPECT_GE(TestHelpers::CountWarningRequests(mockNapiPtr_, "ERROR_CODE_TYPE_MISMATCH", "src"), 2U);
@@ -803,15 +915,15 @@ TEST_F(ExtendedImageComponentSchemaWarningTest,
     component.SetRenderId(1005);
     component.SetSurfaceId("surface-image-invalid-value-warning");
     component.SetComponentId("root");
+    component.nodeApplier_ = CreateSharedNodeApiAdapter(component);
 
-    ArkUINodeApiAdapter applier = CreateNodeApiAdapter(component);
     std::unique_ptr<JsonAdapter> validStyles = JsonAdapter::Parse(R"({
         "aspectRatio": 2.5,
         "objectFit": "fill"
     })");
     ASSERT_NE(validStyles, nullptr);
-    component.ApplyComponentSpecificStylesForTest(validStyles->GetRoot(), applier);
-    EXPECT_FLOAT_EQ(component.GetAspectRatioForTest(), 2.5F);
+    component.ApplyResolvedStyles(validStyles->GetRoot());
+    ExpectAspectRatioFromMockProvider(component.GetNativeView(), 2.5F);
     EXPECT_EQ(component.GetObjectFitForTest(), ToA2UIObjectFitValue(A2UIObjectFit::FILL));
 
     std::unique_ptr<JsonAdapter> invalidValueStyles = JsonAdapter::Parse(R"({
@@ -819,14 +931,14 @@ TEST_F(ExtendedImageComponentSchemaWarningTest,
         "objectFit": "unsupported"
     })");
     ASSERT_NE(invalidValueStyles, nullptr);
-    component.ApplyComponentSpecificStylesForTest(invalidValueStyles->GetRoot(), applier);
-    EXPECT_FLOAT_EQ(component.GetAspectRatioForTest(), 1.0F);
+    component.ApplyResolvedStyles(invalidValueStyles->GetRoot());
+    ExpectAspectRatioFromMockProvider(component.GetNativeView(), 1.0F);
     EXPECT_EQ(component.GetObjectFitForTest(), ToA2UIObjectFitValue(A2UIObjectFit::COVER));
 
     std::unique_ptr<JsonAdapter> nonObjectStyles = JsonAdapter::Parse("true");
     ASSERT_NE(nonObjectStyles, nullptr);
-    component.ApplyComponentSpecificStylesForTest(nonObjectStyles->GetRoot(), applier);
-    EXPECT_FLOAT_EQ(component.GetAspectRatioForTest(), 1.0F);
+    component.ApplyResolvedStyles(nonObjectStyles->GetRoot());
+    ExpectAspectRatioFromMockProvider(component.GetNativeView(), 1.0F);
     EXPECT_EQ(component.GetObjectFitForTest(), ToA2UIObjectFitValue(A2UIObjectFit::COVER));
 
     EXPECT_GE(TestHelpers::CountWarningRequests(mockNapiPtr_, "ERROR_CODE_INVALID_VALUE", "styles.aspectRatio"), 1U);
@@ -834,43 +946,581 @@ TEST_F(ExtendedImageComponentSchemaWarningTest,
     EXPECT_GE(TestHelpers::CountWarningRequests(mockNapiPtr_, "ERROR_CODE_TYPE_MISMATCH", "styles"), 1U);
 }
 
-TEST_F(ExtendedImageComponentTest, L0_should_apply_reset_and_validate_static_image_fill_color)
+TEST_F(ExtendedImageComponentTest, L0_should_apply_fill_color_when_valid_8_digit_argb_hex)
 {
     TestableExtendedImageComponent component;
+    component.SetRenderId(1100);
+    component.SetSurfaceId("surface-image-fillcolor-valid-argb");
+    component.SetComponentId("root");
+
     ArkUINodeApiAdapter applier = CreateNodeApiAdapter(component);
-
-    std::unique_ptr<JsonAdapter> validStyles = JsonAdapter::Parse(R"({
-        "fillColor": "#FF317AF7"
+    std::unique_ptr<JsonAdapter> styles = JsonAdapter::Parse(R"({
+        "fillColor": "#FFFF0000"
     })");
-    ASSERT_NE(validStyles, nullptr);
-    component.ApplyComponentSpecificStylesForTest(validStyles->GetRoot(), applier);
-    EXPECT_TRUE(component.HasFillColorForTest());
-    EXPECT_EQ(component.GetFillColorForTest(), 0xFF317AF7U);
-    ExpectU32Attribute(component.GetNativeView(), NODE_IMAGE_FILL_COLOR, 0xFF317AF7U);
+    ASSERT_NE(styles, nullptr);
+    component.ApplyComponentSpecificStylesForTest(styles->GetRoot(), applier);
 
-    component.SetApplyingStyleDeltaUpdateForTest(true);
-    std::unique_ptr<JsonAdapter> unrelatedDelta = JsonAdapter::Parse(R"({
+    EXPECT_TRUE(component.HasFillColorForTest());
+    EXPECT_EQ(component.GetFillColorForTest(), 0xFFFF0000U);
+    ExpectU32Attribute(component.GetNativeView(), NODE_IMAGE_FILL_COLOR, 0xFFFF0000U);
+}
+
+TEST_F(ExtendedImageComponentTest, L0_should_apply_fill_color_when_valid_6_digit_rgb_hex)
+{
+    TestableExtendedImageComponent component;
+    component.SetRenderId(1101);
+    component.SetSurfaceId("surface-image-fillcolor-valid-rgb");
+    component.SetComponentId("root");
+
+    ArkUINodeApiAdapter applier = CreateNodeApiAdapter(component);
+    std::unique_ptr<JsonAdapter> styles = JsonAdapter::Parse(R"({
+        "fillColor": "#FF0000"
+    })");
+    ASSERT_NE(styles, nullptr);
+    component.ApplyComponentSpecificStylesForTest(styles->GetRoot(), applier);
+
+    EXPECT_TRUE(component.HasFillColorForTest());
+    EXPECT_EQ(component.GetFillColorForTest(), 0xFFFF0000U);
+    ExpectU32Attribute(component.GetNativeView(), NODE_IMAGE_FILL_COLOR, 0xFFFF0000U);
+}
+
+TEST_F(ExtendedImageComponentTest, L0_should_not_apply_or_reset_fill_color_when_absent)
+{
+    TestableExtendedImageComponent component;
+    component.SetRenderId(1102);
+    component.SetSurfaceId("surface-image-fillcolor-absent");
+    component.SetComponentId("root");
+
+    ArkUINodeApiAdapter applier = CreateNodeApiAdapter(component);
+    std::unique_ptr<JsonAdapter> styles = JsonAdapter::Parse(R"({
+        "aspectRatio": 1.5,
         "objectFit": "contain"
     })");
-    ASSERT_NE(unrelatedDelta, nullptr);
-    component.ApplyComponentSpecificStylesForTest(unrelatedDelta->GetRoot(), applier);
-    EXPECT_TRUE(component.HasFillColorForTest());
-    EXPECT_EQ(component.GetFillColorForTest(), 0xFF317AF7U);
+    ASSERT_NE(styles, nullptr);
+    component.ApplyComponentSpecificStylesForTest(styles->GetRoot(), applier);
 
-    std::unique_ptr<JsonAdapter> invalidDelta = JsonAdapter::Parse(R"({
-        "fillColor": "blue"
+    EXPECT_FALSE(component.HasFillColorForTest());
+    EXPECT_EQ(CountAttributeCall(component.GetNativeView(), NODE_IMAGE_FILL_COLOR), 0);
+    EXPECT_FALSE(HasResetAttributeCall(component.GetNativeView(), NODE_IMAGE_FILL_COLOR));
+}
+
+TEST_F(ExtendedImageComponentTest, L0_should_retain_fill_color_on_delta_update_without_fillcolor)
+{
+    TestableExtendedImageComponent component;
+    component.SetRenderId(1103);
+    component.SetSurfaceId("surface-image-fillcolor-delta-retain");
+    component.SetComponentId("root");
+
+    ArkUINodeApiAdapter applier = CreateNodeApiAdapter(component);
+    std::unique_ptr<JsonAdapter> initial = JsonAdapter::Parse(R"({
+        "fillColor": "#FFFF0000"
     })");
-    ASSERT_NE(invalidDelta, nullptr);
-    component.ApplyComponentSpecificStylesForTest(invalidDelta->GetRoot(), applier);
-    EXPECT_FALSE(component.HasFillColorForTest());
-
-    component.SetApplyingStyleDeltaUpdateForTest(false);
-    component.ApplyComponentSpecificStylesForTest(validStyles->GetRoot(), applier);
+    ASSERT_NE(initial, nullptr);
+    component.ApplyComponentSpecificStylesForTest(initial->GetRoot(), applier);
     ASSERT_TRUE(component.HasFillColorForTest());
-    std::unique_ptr<JsonAdapter> emptyStyles = JsonAdapter::Parse(R"({})");
-    ASSERT_NE(emptyStyles, nullptr);
-    component.ApplyComponentSpecificStylesForTest(emptyStyles->GetRoot(), applier);
+    ASSERT_EQ(component.GetFillColorForTest(), 0xFFFF0000U);
+
+    component.SetApplyingStyleDeltaUpdateForTest(true);
+    std::unique_ptr<JsonAdapter> delta = JsonAdapter::Parse(R"({
+        "objectFit": "contain"
+    })");
+    ASSERT_NE(delta, nullptr);
+    component.ApplyComponentSpecificStylesForTest(delta->GetRoot(), applier);
+
+    EXPECT_TRUE(component.HasFillColorForTest());
+    EXPECT_EQ(component.GetFillColorForTest(), 0xFFFF0000U);
+    ExpectU32Attribute(component.GetNativeView(), NODE_IMAGE_FILL_COLOR, 0xFFFF0000U);
+}
+
+TEST_F(ExtendedImageComponentTest, L0_should_apply_fill_color_alongside_aspect_ratio_and_object_fit)
+{
+    TestableExtendedImageComponent component;
+    component.SetRenderId(1104);
+    component.SetSurfaceId("surface-image-fillcolor-combined");
+    component.SetComponentId("root");
+
+    ArkUINodeApiAdapter applier = CreateNodeApiAdapter(component);
+    std::unique_ptr<JsonAdapter> styles = JsonAdapter::Parse(R"({
+        "aspectRatio": 1.5,
+        "objectFit": "contain",
+        "fillColor": "#AA00FF00"
+    })");
+    ASSERT_NE(styles, nullptr);
+    {
+        std::vector<DescriptorValidationIssue> issues;
+        ExtendedStyleResolver::ResolveAndApply(styles->GetRoot(), applier, std::nullopt, issues);
+    }
+    component.ApplyComponentSpecificStylesForTest(styles->GetRoot(), applier);
+
+    EXPECT_EQ(component.GetObjectFitForTest(), ToA2UIObjectFitValue(A2UIObjectFit::CONTAIN));
+    EXPECT_TRUE(component.HasFillColorForTest());
+    EXPECT_EQ(component.GetFillColorForTest(), 0xAA00FF00U);
+    ExpectF32Attribute(component.GetNativeView(), NODE_ASPECT_RATIO, 1.5F);
+    ExpectI32Attribute(component.GetNativeView(), NODE_IMAGE_OBJECT_FIT, ARKUI_OBJECT_FIT_CONTAIN);
+    ExpectU32Attribute(component.GetNativeView(), NODE_IMAGE_FILL_COLOR, 0xAA00FF00U);
+}
+
+TEST_F(ExtendedImageComponentSchemaWarningTest, L0_should_report_type_mismatch_and_reset_when_fill_color_not_string)
+{
+    TestableExtendedImageComponent component;
+    component.SetRenderId(1105);
+    component.SetSurfaceId("surface-image-fillcolor-type-mismatch");
+    component.SetComponentId("root");
+
+    ArkUINodeApiAdapter applier = CreateNodeApiAdapter(component);
+    std::unique_ptr<JsonAdapter> initial = JsonAdapter::Parse(R"({
+        "fillColor": "#FFFF0000"
+    })");
+    ASSERT_NE(initial, nullptr);
+    component.ApplyComponentSpecificStylesForTest(initial->GetRoot(), applier);
+    ASSERT_TRUE(component.HasFillColorForTest());
+    ASSERT_EQ(component.GetFillColorForTest(), 0xFFFF0000U);
+
+    std::unique_ptr<JsonAdapter> badType = JsonAdapter::Parse(R"({
+        "fillColor": true
+    })");
+    ASSERT_NE(badType, nullptr);
+    component.ApplyComponentSpecificStylesForTest(badType->GetRoot(), applier);
+
     EXPECT_FALSE(component.HasFillColorForTest());
+    EXPECT_EQ(component.GetFillColorForTest(), 0U);
+    EXPECT_GE(TestHelpers::CountWarningRequests(mockNapiPtr_, "ERROR_CODE_TYPE_MISMATCH", "styles.fillColor"), 1U);
+}
+
+TEST_F(ExtendedImageComponentSchemaWarningTest, L0_should_reject_number_type_for_fill_color)
+{
+    TestableExtendedImageComponent component;
+    component.SetRenderId(1108);
+    component.SetSurfaceId("surface-image-fillcolor-number");
+    component.SetComponentId("root");
+
+    ArkUINodeApiAdapter applier = CreateNodeApiAdapter(component);
+    std::unique_ptr<JsonAdapter> stringValue = JsonAdapter::Parse(R"({
+        "fillColor": "#FF0000FF"
+    })");
+    ASSERT_NE(stringValue, nullptr);
+    component.ApplyComponentSpecificStylesForTest(stringValue->GetRoot(), applier);
+    ASSERT_TRUE(component.HasFillColorForTest());
+    ASSERT_EQ(component.GetFillColorForTest(), 0xFF0000FFU);
+
+    std::unique_ptr<JsonAdapter> numberValue = JsonAdapter::Parse(R"({
+        "fillColor": 4278190335
+    })");
+    ASSERT_NE(numberValue, nullptr);
+    component.ApplyComponentSpecificStylesForTest(numberValue->GetRoot(), applier);
+
+    EXPECT_FALSE(component.HasFillColorForTest());
+    EXPECT_EQ(component.GetFillColorForTest(), 0U);
+    EXPECT_GE(TestHelpers::CountWarningRequests(mockNapiPtr_, "ERROR_CODE_INVALID_VALUE", "styles.fillColor"), 1U);
+}
+
+TEST_F(ExtendedImageComponentSchemaWarningTest, L0_should_report_invalid_value_and_reset_when_fill_color_unparseable)
+{
+    TestableExtendedImageComponent component;
+    component.SetRenderId(1106);
+    component.SetSurfaceId("surface-image-fillcolor-invalid-value");
+    component.SetComponentId("root");
+
+    ArkUINodeApiAdapter applier = CreateNodeApiAdapter(component);
+    std::unique_ptr<JsonAdapter> initial = JsonAdapter::Parse(R"({
+        "fillColor": "#FFFF0000"
+    })");
+    ASSERT_NE(initial, nullptr);
+    component.ApplyComponentSpecificStylesForTest(initial->GetRoot(), applier);
+    ASSERT_TRUE(component.HasFillColorForTest());
+    ASSERT_EQ(component.GetFillColorForTest(), 0xFFFF0000U);
+
+    std::unique_ptr<JsonAdapter> badValue = JsonAdapter::Parse(R"({
+        "fillColor": "#xyz123"
+    })");
+    ASSERT_NE(badValue, nullptr);
+    component.ApplyComponentSpecificStylesForTest(badValue->GetRoot(), applier);
+
+    EXPECT_FALSE(component.HasFillColorForTest());
+    EXPECT_EQ(component.GetFillColorForTest(), 0U);
+    EXPECT_GE(TestHelpers::CountWarningRequests(mockNapiPtr_, "ERROR_CODE_INVALID_VALUE", "styles.fillColor"), 1U);
+}
+
+TEST_F(ExtendedImageComponentSchemaWarningTest, L0_should_report_invalid_value_when_fill_color_empty_string)
+{
+    TestableExtendedImageComponent component;
+    component.SetRenderId(1107);
+    component.SetSurfaceId("surface-image-fillcolor-empty");
+    component.SetComponentId("root");
+
+    ArkUINodeApiAdapter applier = CreateNodeApiAdapter(component);
+    std::unique_ptr<JsonAdapter> emptyColor = JsonAdapter::Parse(R"({
+        "fillColor": ""
+    })");
+    ASSERT_NE(emptyColor, nullptr);
+    component.ApplyComponentSpecificStylesForTest(emptyColor->GetRoot(), applier);
+
+    EXPECT_FALSE(component.HasFillColorForTest());
+    EXPECT_GE(TestHelpers::CountWarningRequests(mockNapiPtr_, "ERROR_CODE_INVALID_VALUE", "styles.fillColor"), 1U);
+}
+
+TEST_F(ExtendedImageComponentTest, L1_should_resolve_fill_color_via_path_binding)
+{
+    slot_.SetCatalog(BuildExtendedProtocolCatalog());
+    std::unique_ptr<JsonAdapter> dataModel = JsonAdapter::Parse(R"({
+        "path": "/iconColor",
+        "value": "#FFFF0000"
+    })");
+    ASSERT_NE(dataModel, nullptr);
+    ASSERT_TRUE(slot_.UpdateDataModel(dataModel->GetRoot()));
+
+    std::unique_ptr<JsonAdapter> message = JsonAdapter::Parse(R"({
+        "components": [
+            {
+                "id": "root",
+                "component": "Image",
+                "src": "res://app.media.icon",
+                "styles": {
+                    "fillColor": { "path": "/iconColor" }
+                }
+            }
+        ]
+    })");
+    ASSERT_NE(message, nullptr);
+    ASSERT_TRUE(slot_.UpdateComponents(message->GetRoot()));
+
+    std::shared_ptr<ExtendedImageComponent> image =
+        std::dynamic_pointer_cast<ExtendedImageComponent>(slot_.FindComponentById("root"));
+    ASSERT_NE(image, nullptr);
+    EXPECT_TRUE(image->HasFillColorForTest());
+    EXPECT_EQ(image->GetFillColorForTest(), 0xFFFF0000U);
+}
+
+TEST_F(ExtendedImageComponentTest, L1_should_refresh_fill_color_when_path_binding_data_updates)
+{
+    slot_.SetCatalog(BuildExtendedProtocolCatalog());
+    std::unique_ptr<JsonAdapter> dataModel = JsonAdapter::Parse(R"({
+        "path": "/iconColor",
+        "value": "#FFFF0000"
+    })");
+    ASSERT_NE(dataModel, nullptr);
+    ASSERT_TRUE(slot_.UpdateDataModel(dataModel->GetRoot()));
+
+    std::unique_ptr<JsonAdapter> message = JsonAdapter::Parse(R"({
+        "components": [
+            {
+                "id": "root",
+                "component": "Image",
+                "src": "res://app.media.icon",
+                "styles": {
+                    "fillColor": { "path": "/iconColor" }
+                }
+            }
+        ]
+    })");
+    ASSERT_NE(message, nullptr);
+    ASSERT_TRUE(slot_.UpdateComponents(message->GetRoot()));
+
+    std::shared_ptr<ExtendedImageComponent> image =
+        std::dynamic_pointer_cast<ExtendedImageComponent>(slot_.FindComponentById("root"));
+    ASSERT_NE(image, nullptr);
+    ASSERT_EQ(image->GetFillColorForTest(), 0xFFFF0000U);
+
+    std::unique_ptr<JsonAdapter> update = JsonAdapter::Parse(R"({
+        "path": "/iconColor",
+        "value": "#FF00FF00"
+    })");
+    ASSERT_NE(update, nullptr);
+    ASSERT_TRUE(slot_.UpdateDataModel(update->GetRoot()));
+
+    image = std::dynamic_pointer_cast<ExtendedImageComponent>(slot_.FindComponentById("root"));
+    ASSERT_NE(image, nullptr);
+    EXPECT_TRUE(image->HasFillColorForTest());
+    EXPECT_EQ(image->GetFillColorForTest(), 0xFF00FF00U);
+}
+
+TEST_F(ExtendedImageComponentTest, L1_should_accept_fill_color_expression_binding_shape)
+{
+    slot_.SetCatalog(BuildExtendedProtocolCatalog());
+    std::unique_ptr<JsonAdapter> message = JsonAdapter::Parse(R"({
+        "components": [
+            {
+                "id": "root",
+                "component": "Image",
+                "src": "res://app.media.icon",
+                "styles": {
+                    "fillColor": "{{ \"#FFFF0000\" }}"
+                }
+            }
+        ]
+    })");
+    ASSERT_NE(message, nullptr);
+    ASSERT_TRUE(slot_.UpdateComponents(message->GetRoot()));
+
+    std::shared_ptr<ExtendedImageComponent> image =
+        std::dynamic_pointer_cast<ExtendedImageComponent>(slot_.FindComponentById("root"));
+    ASSERT_NE(image, nullptr);
+}
+
+TEST_F(ExtendedImageComponentTest, L1_should_accept_fill_color_function_call_binding_shape)
+{
+    slot_.SetCatalog(BuildExtendedProtocolCatalog());
+    std::unique_ptr<JsonAdapter> message = JsonAdapter::Parse(R"({
+        "components": [
+            {
+                "id": "root",
+                "component": "Image",
+                "src": "res://app.media.icon",
+                "styles": {
+                    "fillColor": { "call": "resolveColor", "args": { "mode": "static" } }
+                }
+            }
+        ]
+    })");
+    ASSERT_NE(message, nullptr);
+    ASSERT_TRUE(slot_.UpdateComponents(message->GetRoot()));
+
+    std::shared_ptr<ExtendedImageComponent> image =
+        std::dynamic_pointer_cast<ExtendedImageComponent>(slot_.FindComponentById("root"));
+    ASSERT_NE(image, nullptr);
+    EXPECT_FALSE(image->HasFillColorForTest());
+}
+
+TEST_F(ExtendedImageComponentTest, L1_should_fallback_when_path_binding_resolves_to_invalid_color)
+{
+    slot_.SetCatalog(BuildExtendedProtocolCatalog());
+    std::unique_ptr<JsonAdapter> dataModel = JsonAdapter::Parse(R"({
+        "path": "/iconColor",
+        "value": "not-a-color"
+    })");
+    ASSERT_NE(dataModel, nullptr);
+    ASSERT_TRUE(slot_.UpdateDataModel(dataModel->GetRoot()));
+
+    std::unique_ptr<JsonAdapter> message = JsonAdapter::Parse(R"({
+        "components": [
+            {
+                "id": "root",
+                "component": "Image",
+                "src": "res://app.media.icon",
+                "styles": {
+                    "fillColor": { "path": "/iconColor" }
+                }
+            }
+        ]
+    })");
+    ASSERT_NE(message, nullptr);
+    ASSERT_TRUE(slot_.UpdateComponents(message->GetRoot()));
+
+    std::shared_ptr<ExtendedImageComponent> image =
+        std::dynamic_pointer_cast<ExtendedImageComponent>(slot_.FindComponentById("root"));
+    ASSERT_NE(image, nullptr);
+    EXPECT_FALSE(image->HasFillColorForTest());
+}
+
+TEST_F(ExtendedImageComponentSchemaWarningTest, L0_should_validate_fill_color_schema_via_validate_method)
+{
+    TestableExtendedImageComponent component;
+    component.SetRenderId(1109);
+    component.SetSurfaceId("surface-image-fillcolor-validate-schema");
+    component.SetComponentId("root");
+
+    std::unique_ptr<JsonAdapter> invalidType = JsonAdapter::Parse(R"({
+        "fillColor": true
+    })");
+    ASSERT_NE(invalidType, nullptr);
+    component.ValidateComponentSpecificStylesSchema(invalidType->GetRoot());
+    EXPECT_GE(TestHelpers::CountWarningRequests(mockNapiPtr_, "ERROR_CODE_TYPE_MISMATCH", "styles.fillColor"), 1U);
+
+    std::unique_ptr<JsonAdapter> invalidValue = JsonAdapter::Parse(R"({
+        "fillColor": "not-a-color"
+    })");
+    ASSERT_NE(invalidValue, nullptr);
+    component.ValidateComponentSpecificStylesSchema(invalidValue->GetRoot());
+    EXPECT_GE(TestHelpers::CountWarningRequests(mockNapiPtr_, "ERROR_CODE_INVALID_VALUE", "styles.fillColor"), 1U);
+
+    std::unique_ptr<JsonAdapter> validString = JsonAdapter::Parse(R"({
+        "fillColor": "#FFFF0000"
+    })");
+    ASSERT_NE(validString, nullptr);
+    size_t previousWarningCount =
+        TestHelpers::CountWarningRequests(mockNapiPtr_, "ERROR_CODE_TYPE_MISMATCH", "styles.fillColor") +
+        TestHelpers::CountWarningRequests(mockNapiPtr_, "ERROR_CODE_INVALID_VALUE", "styles.fillColor");
+    component.ValidateComponentSpecificStylesSchema(validString->GetRoot());
+    size_t newWarningCount =
+        TestHelpers::CountWarningRequests(mockNapiPtr_, "ERROR_CODE_TYPE_MISMATCH", "styles.fillColor") +
+        TestHelpers::CountWarningRequests(mockNapiPtr_, "ERROR_CODE_INVALID_VALUE", "styles.fillColor");
+    EXPECT_EQ(newWarningCount, previousWarningCount);
+
+    std::unique_ptr<JsonAdapter> validNumber = JsonAdapter::Parse(R"({
+        "fillColor": 4278190335
+    })");
+    ASSERT_NE(validNumber, nullptr);
+    previousWarningCount = newWarningCount;
+    component.ValidateComponentSpecificStylesSchema(validNumber->GetRoot());
+    newWarningCount = TestHelpers::CountWarningRequests(mockNapiPtr_, "ERROR_CODE_TYPE_MISMATCH", "styles.fillColor") +
+                      TestHelpers::CountWarningRequests(mockNapiPtr_, "ERROR_CODE_INVALID_VALUE", "styles.fillColor");
+    EXPECT_EQ(newWarningCount, previousWarningCount);
+
+    std::unique_ptr<JsonAdapter> dynamicBinding = JsonAdapter::Parse(R"({
+        "fillColor": { "path": "/color" }
+    })");
+    ASSERT_NE(dynamicBinding, nullptr);
+    previousWarningCount = newWarningCount;
+    component.ValidateComponentSpecificStylesSchema(dynamicBinding->GetRoot());
+    newWarningCount = TestHelpers::CountWarningRequests(mockNapiPtr_, "ERROR_CODE_TYPE_MISMATCH", "styles.fillColor") +
+                      TestHelpers::CountWarningRequests(mockNapiPtr_, "ERROR_CODE_INVALID_VALUE", "styles.fillColor");
+    EXPECT_EQ(newWarningCount, previousWarningCount);
+
+    std::unique_ptr<JsonAdapter> expressionBinding = JsonAdapter::Parse(R"({
+        "fillColor": "{{ color }}"
+    })");
+    ASSERT_NE(expressionBinding, nullptr);
+    previousWarningCount = newWarningCount;
+    component.ValidateComponentSpecificStylesSchema(expressionBinding->GetRoot());
+    newWarningCount = TestHelpers::CountWarningRequests(mockNapiPtr_, "ERROR_CODE_TYPE_MISMATCH", "styles.fillColor") +
+                      TestHelpers::CountWarningRequests(mockNapiPtr_, "ERROR_CODE_INVALID_VALUE", "styles.fillColor");
+    EXPECT_EQ(newWarningCount, previousWarningCount);
+}
+
+TEST_F(ExtendedImageComponentTest, L1_should_resolve_object_fit_via_path_binding)
+{
+    slot_.SetCatalog(BuildExtendedProtocolCatalog());
+    std::unique_ptr<JsonAdapter> dataModel = JsonAdapter::Parse(R"({
+        "path": "/fitMode",
+        "value": "contain"
+    })");
+    ASSERT_NE(dataModel, nullptr);
+    ASSERT_TRUE(slot_.UpdateDataModel(dataModel->GetRoot()));
+
+    std::unique_ptr<JsonAdapter> message = JsonAdapter::Parse(R"({
+        "components": [
+            {
+                "id": "root",
+                "component": "Image",
+                "src": "res://app.media.icon",
+                "styles": {
+                    "objectFit": { "path": "/fitMode" }
+                }
+            }
+        ]
+    })");
+    ASSERT_NE(message, nullptr);
+    ASSERT_TRUE(slot_.UpdateComponents(message->GetRoot()));
+
+    std::shared_ptr<ExtendedImageComponent> image =
+        std::dynamic_pointer_cast<ExtendedImageComponent>(slot_.FindComponentById("root"));
+    ASSERT_NE(image, nullptr);
+    EXPECT_EQ(image->GetObjectFitForTest(), ToA2UIObjectFitValue(A2UIObjectFit::CONTAIN));
+}
+
+TEST_F(ExtendedImageComponentTest, L1_should_refresh_object_fit_when_path_binding_data_updates)
+{
+    slot_.SetCatalog(BuildExtendedProtocolCatalog());
+    std::unique_ptr<JsonAdapter> dataModel = JsonAdapter::Parse(R"({
+        "path": "/fitMode",
+        "value": "contain"
+    })");
+    ASSERT_NE(dataModel, nullptr);
+    ASSERT_TRUE(slot_.UpdateDataModel(dataModel->GetRoot()));
+
+    std::unique_ptr<JsonAdapter> message = JsonAdapter::Parse(R"({
+        "components": [
+            {
+                "id": "root",
+                "component": "Image",
+                "src": "res://app.media.icon",
+                "styles": {
+                    "objectFit": { "path": "/fitMode" }
+                }
+            }
+        ]
+    })");
+    ASSERT_NE(message, nullptr);
+    ASSERT_TRUE(slot_.UpdateComponents(message->GetRoot()));
+
+    std::shared_ptr<ExtendedImageComponent> image =
+        std::dynamic_pointer_cast<ExtendedImageComponent>(slot_.FindComponentById("root"));
+    ASSERT_NE(image, nullptr);
+    EXPECT_EQ(image->GetObjectFitForTest(), ToA2UIObjectFitValue(A2UIObjectFit::CONTAIN));
+
+    std::unique_ptr<JsonAdapter> update = JsonAdapter::Parse(R"({
+        "path": "/fitMode",
+        "value": "cover"
+    })");
+    ASSERT_NE(update, nullptr);
+    ASSERT_TRUE(slot_.UpdateDataModel(update->GetRoot()));
+
+    image = std::dynamic_pointer_cast<ExtendedImageComponent>(slot_.FindComponentById("root"));
+    ASSERT_NE(image, nullptr);
+    EXPECT_EQ(image->GetObjectFitForTest(), ToA2UIObjectFitValue(A2UIObjectFit::COVER));
+}
+
+#ifdef ENABLE_EXPRESSION_ENGINE
+TEST_F(ExtendedImageComponentTest, L1_should_accept_object_fit_expression_binding_shape)
+{
+    slot_.SetCatalog(BuildExtendedProtocolCatalog());
+    std::unique_ptr<JsonAdapter> message = JsonAdapter::Parse(R"({
+        "components": [
+            {
+                "id": "root",
+                "component": "Image",
+                "src": "res://app.media.icon",
+                "styles": {
+                    "objectFit": "{{ \"contain\" }}"
+                }
+            }
+        ]
+    })");
+    ASSERT_NE(message, nullptr);
+    ASSERT_TRUE(slot_.UpdateComponents(message->GetRoot()));
+
+    std::shared_ptr<ExtendedImageComponent> image =
+        std::dynamic_pointer_cast<ExtendedImageComponent>(slot_.FindComponentById("root"));
+    ASSERT_NE(image, nullptr);
+    // Expression binding for objectFit is not yet fully implemented
+    // This test verifies the binding shape is accepted without errors
+    EXPECT_EQ(image->GetObjectFitForTest(), ToA2UIObjectFitValue(A2UIObjectFit::COVER));
+}
+#endif
+
+TEST_F(ExtendedImageComponentTest, L1_should_accept_object_fit_function_call_binding_shape)
+{
+    slot_.SetCatalog(BuildExtendedProtocolCatalog());
+    std::unique_ptr<JsonAdapter> message = JsonAdapter::Parse(R"({
+        "components": [
+            {
+                "id": "root",
+                "component": "Image",
+                "src": "res://app.media.icon",
+                "styles": {
+                    "objectFit": { "call": "resolveFit", "args": { "mode": "static" } }
+                }
+            }
+        ]
+    })");
+    ASSERT_NE(message, nullptr);
+    ASSERT_TRUE(slot_.UpdateComponents(message->GetRoot()));
+
+    std::shared_ptr<ExtendedImageComponent> image =
+        std::dynamic_pointer_cast<ExtendedImageComponent>(slot_.FindComponentById("root"));
+    ASSERT_NE(image, nullptr);
+    EXPECT_EQ(image->GetObjectFitForTest(), ToA2UIObjectFitValue(A2UIObjectFit::COVER));
+}
+
+TEST_F(ExtendedImageComponentTest, L1_should_accept_src_function_call_binding_shape)
+{
+    slot_.SetCatalog(BuildExtendedProtocolCatalog());
+    std::unique_ptr<JsonAdapter> message = JsonAdapter::Parse(R"({
+        "components": [
+            {
+                "id": "root",
+                "component": "Image",
+                "src": { "call": "resolveSrc", "args": { "name": "icon" } }
+            }
+        ]
+    })");
+    ASSERT_NE(message, nullptr);
+    ASSERT_TRUE(slot_.UpdateComponents(message->GetRoot()));
+
+    std::shared_ptr<ExtendedImageComponent> image =
+        std::dynamic_pointer_cast<ExtendedImageComponent>(slot_.FindComponentById("root"));
+    ASSERT_NE(image, nullptr);
+    EXPECT_EQ(image->GetSrcValueForTest(), "");
 }
 
 } // namespace

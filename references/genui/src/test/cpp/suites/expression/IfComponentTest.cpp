@@ -18,6 +18,7 @@
 #include <string>
 
 #define private public
+#include "components/A2UI/A2UIComponent.h"
 #include "components/extended/if/IfComponent.h"
 #include "composition/ChildListDescriptor.h"
 #include "utils/JsonAdapter.h"
@@ -107,6 +108,16 @@ public:
     }
 };
 
+class NativeA2UIComponent : public A2UIComponent {
+public:
+    explicit NativeA2UIComponent(ArkUI_NodeHandle nativeView) : A2UIComponent(nativeView, false, false) {}
+
+    std::string GetType() const override
+    {
+        return "NativeA2UITest";
+    }
+};
+
 struct PassthroughCallTracker {
     std::vector<std::tuple<ArkUI_NodeHandle, ArkUI_NodeHandle, int32_t>> insertChildAtCalls;
     std::vector<std::pair<ArkUI_NodeHandle, ArkUI_NodeHandle>> removeChildCalls;
@@ -176,6 +187,20 @@ public:
     size_t RemoveChildCallCount() const
     {
         return g_passthroughTracker.removeChildCalls.size();
+    }
+
+    void ClearCalls()
+    {
+        g_passthroughTracker = {};
+    }
+
+    std::vector<std::tuple<ArkUI_NodeHandle, ArkUI_NodeHandle, int32_t>> LastInsertChildAtCalls(size_t count) const
+    {
+        if (count > g_passthroughTracker.insertChildAtCalls.size()) {
+            return {};
+        }
+        auto begin = g_passthroughTracker.insertChildAtCalls.end() - static_cast<ptrdiff_t>(count);
+        return { begin, g_passthroughTracker.insertChildAtCalls.end() };
     }
 
 private:
@@ -281,6 +306,49 @@ TEST_F(IfComponentTest, should_dispatchSchemaWarning_when_initialConditionEvalua
 
     EXPECT_EQ(
         TestHelpers::CountWarningRequests(mockNapiPtr_, "ERROR_CODE_INVALID_VALUE", "ifEvalWarning.condition"), 1U);
+}
+
+TEST_F(IfComponentTest, should_keepElseBranchWithoutWarning_when_memberEvaluationReturnsUndefined)
+{
+    TestHelpers::RegisterWarningDispatchCallback(mockNapiPtr_);
+
+    auto comp = std::make_shared<IfComponent>();
+    RenderContext ctx = RenderContext::Create(1005, "if-warning-surface", nullptr, nullptr, 1.0F, 0, ThemeMode::LIGHT);
+    auto descriptor = BuildIfDescriptor("ifUndefinedCondition", "{{ missingVar.field }}", { "childA" }, { "childB" });
+
+    comp->InitFromDescriptor(descriptor, ctx);
+
+    EXPECT_FALSE(comp->currentBranch_);
+    EXPECT_EQ(
+        TestHelpers::CountWarningRequests(mockNapiPtr_, "ERROR_CODE_INVALID_VALUE", "ifUndefinedCondition.condition"),
+        0U);
+}
+
+TEST_F(IfComponentTest, should_deferMissingDataModelConditionWithoutWarning_untilDataIsAvailable)
+{
+    TestHelpers::RegisterWarningDispatchCallback(mockNapiPtr_);
+
+    SurfaceSlot& slot = CreateManagedSurface("if-data-model-unavailable");
+    auto comp = std::make_shared<IfComponent>();
+    auto descriptor =
+        BuildIfDescriptor("ifDataModelUnavailable", "{{ $__dataModel.isLoggedIn }}", { "childA" }, { "childB" });
+
+    comp->InitFromDescriptor(descriptor, BuildRenderContext(slot));
+    slot.GetBindingEngine()->RegisterComponent(comp);
+
+    EXPECT_FALSE(comp->currentBranch_);
+    EXPECT_EQ(
+        TestHelpers::CountWarningRequests(mockNapiPtr_, "ERROR_CODE_INVALID_VALUE", "ifDataModelUnavailable.condition"),
+        0U);
+
+    auto data = JsonAdapter::Parse(R"({"value":{"isLoggedIn":true}})");
+    ASSERT_NE(data, nullptr);
+    ASSERT_TRUE(slot.UpdateDataModel(data->GetRoot()));
+
+    EXPECT_TRUE(comp->currentBranch_);
+    EXPECT_EQ(
+        TestHelpers::CountWarningRequests(mockNapiPtr_, "ERROR_CODE_INVALID_VALUE", "ifDataModelUnavailable.condition"),
+        0U);
 }
 
 TEST_F(IfComponentTest, should_dispatchSchemaWarning_when_conditionEvaluatesToInvalidFalsyNonBoolean)
@@ -672,7 +740,7 @@ TEST_F(IfComponentTest, should_preserveCurrentBranch_when_subsequentEvaluationFa
     EXPECT_TRUE(comp->currentBranch_);
     EXPECT_EQ("ifChild", comp->GetChildListDescriptor().staticChildIds.front());
 
-    comp->conditionExpression_ = "undefinedVar == 42";
+    comp->conditionExpression_ = "$undefinedVar == 42";
     comp->ReevaluateAndSwitch();
     EXPECT_TRUE(comp->currentBranch_);
     EXPECT_EQ("ifChild", comp->GetChildListDescriptor().staticChildIds.front());
@@ -681,7 +749,7 @@ TEST_F(IfComponentTest, should_preserveCurrentBranch_when_subsequentEvaluationFa
 TEST_F(IfComponentTest, should_switchToElseOnFirstFailure_when_initialEvaluationFails)
 {
     auto comp = std::make_shared<IfComponent>();
-    auto descriptor = BuildIfDescriptor("if26", "undefinedVar == 42", { "ifChild" }, { "elseChild" });
+    auto descriptor = BuildIfDescriptor("if26", "$undefinedVar == 42", { "ifChild" }, { "elseChild" });
     RenderContext ctx;
     comp->InitFromDescriptor(descriptor, ctx);
     EXPECT_FALSE(comp->currentBranch_);
@@ -1472,6 +1540,156 @@ TEST_F(IfComponentTest, should_offsetByVirtualNativeDescendants_when_addSiblingA
     ifComp->AddChildAt(sibling, 1);
 
     EXPECT_TRUE(tracker.HasInsertChildAtCall(ancestorView, siblingView, 2));
+}
+
+TEST_F(IfComponentTest, should_addBranchOffsetAfterVirtualIfSibling_when_addingBranchChildren)
+{
+    NativeApiTrackerScope tracker;
+
+    auto ancestorView = reinterpret_cast<ArkUI_NodeHandle>(0x1000);
+    auto firstAncestorChildView = reinterpret_cast<ArkUI_NodeHandle>(0x2000);
+    auto firstBranchChildView = reinterpret_cast<ArkUI_NodeHandle>(0x3000);
+    auto secondBranchChildView = reinterpret_cast<ArkUI_NodeHandle>(0x4000);
+    auto trailingAncestorChildView = reinterpret_cast<ArkUI_NodeHandle>(0x5000);
+
+    auto ancestor = std::make_shared<NativeA2UIComponent>(ancestorView);
+    auto firstAncestorChild = std::make_shared<NativeViewComponent>(firstAncestorChildView);
+    auto ifComp = std::make_shared<IfComponent>();
+    auto firstBranchChild = std::make_shared<NativeViewComponent>(firstBranchChildView);
+    auto secondBranchChild = std::make_shared<NativeViewComponent>(secondBranchChildView);
+    auto trailingAncestorChild = std::make_shared<NativeViewComponent>(trailingAncestorChildView);
+
+    ancestor->AddChild(firstAncestorChild);
+    ancestor->AddChild(ifComp);
+    ancestor->AddChild(trailingAncestorChild);
+    ifComp->AddChild(firstBranchChild);
+    ifComp->AddChild(secondBranchChild);
+
+    EXPECT_FALSE(tracker.HasRemoveChildCall(ancestorView, firstAncestorChildView));
+    EXPECT_FALSE(tracker.HasRemoveChildCall(ancestorView, trailingAncestorChildView));
+    EXPECT_FALSE(tracker.HasRemoveChildCall(ancestorView, firstBranchChildView));
+    EXPECT_FALSE(tracker.HasRemoveChildCall(ancestorView, secondBranchChildView));
+    EXPECT_TRUE(tracker.HasInsertChildAtCall(ancestorView, firstBranchChildView, 1));
+    EXPECT_TRUE(tracker.HasInsertChildAtCall(ancestorView, secondBranchChildView, 2));
+}
+
+TEST_F(IfComponentTest, should_resolveNativeIndexAfterVirtualChild_when_addingNativeSibling)
+{
+    NativeApiTrackerScope tracker;
+
+    auto ancestorView = reinterpret_cast<ArkUI_NodeHandle>(0x1000);
+    auto c22View = reinterpret_cast<ArkUI_NodeHandle>(0x2000);
+    auto firstBranchChildView = reinterpret_cast<ArkUI_NodeHandle>(0x3000);
+    auto secondBranchChildView = reinterpret_cast<ArkUI_NodeHandle>(0x3100);
+    auto c24View = reinterpret_cast<ArkUI_NodeHandle>(0x4000);
+    auto c25View = reinterpret_cast<ArkUI_NodeHandle>(0x5000);
+
+    auto ancestor = std::make_shared<NativeA2UIComponent>(ancestorView);
+    auto ifComp = std::make_shared<IfComponent>();
+    ifComp->AddChild(std::make_shared<NativeViewComponent>(firstBranchChildView));
+    ifComp->AddChild(std::make_shared<NativeViewComponent>(secondBranchChildView));
+
+    ancestor->AddChild(std::make_shared<NativeViewComponent>(c22View));
+    ancestor->AddChild(ifComp);
+    tracker.ClearCalls();
+
+    ancestor->AddChild(std::make_shared<NativeViewComponent>(c24View));
+    ancestor->AddChild(std::make_shared<NativeViewComponent>(c25View));
+
+    EXPECT_TRUE(tracker.HasInsertChildAtCall(ancestorView, c24View, 3));
+    EXPECT_TRUE(tracker.HasInsertChildAtCall(ancestorView, c25View, 4));
+    EXPECT_FALSE(tracker.HasInsertChildAtCall(ancestorView, c24View, 2));
+    EXPECT_FALSE(tracker.HasInsertChildAtCall(ancestorView, c25View, 3));
+}
+
+TEST_F(IfComponentTest, should_preserveAscendingBranchOrder_when_virtualIfHasNineChildrenBetweenSiblings)
+{
+    NativeApiTrackerScope tracker;
+
+    auto ancestorView = reinterpret_cast<ArkUI_NodeHandle>(0x1000);
+    auto c22View = reinterpret_cast<ArkUI_NodeHandle>(0x2000);
+    auto c24View = reinterpret_cast<ArkUI_NodeHandle>(0x4000);
+    auto c25View = reinterpret_cast<ArkUI_NodeHandle>(0x5000);
+    const std::vector<ArkUI_NodeHandle> branchViews = {
+        reinterpret_cast<ArkUI_NodeHandle>(0x3000),
+        reinterpret_cast<ArkUI_NodeHandle>(0x3100),
+        reinterpret_cast<ArkUI_NodeHandle>(0x3200),
+        reinterpret_cast<ArkUI_NodeHandle>(0x3300),
+        reinterpret_cast<ArkUI_NodeHandle>(0x3400),
+        reinterpret_cast<ArkUI_NodeHandle>(0x3500),
+        reinterpret_cast<ArkUI_NodeHandle>(0x3600),
+        reinterpret_cast<ArkUI_NodeHandle>(0x3700),
+        reinterpret_cast<ArkUI_NodeHandle>(0x3800),
+    };
+
+    auto ancestor = std::make_shared<NativeA2UIComponent>(ancestorView);
+    auto ifComp = std::make_shared<IfComponent>();
+    ancestor->AddChild(std::make_shared<NativeViewComponent>(c22View));
+    ancestor->AddChild(ifComp);
+    ancestor->AddChild(std::make_shared<NativeViewComponent>(c24View));
+    ancestor->AddChild(std::make_shared<NativeViewComponent>(c25View));
+    tracker.ClearCalls();
+
+    for (ArkUI_NodeHandle branchView : branchViews) {
+        ifComp->AddChild(std::make_shared<NativeViewComponent>(branchView));
+    }
+
+    EXPECT_EQ(9u, tracker.InsertChildAtCallCount());
+    EXPECT_EQ(0u, tracker.RemoveChildCallCount());
+
+    const std::vector<ArkUI_NodeHandle> expectedBranchOrder = {
+        branchViews[0],
+        branchViews[1],
+        branchViews[2],
+        branchViews[3],
+        branchViews[4],
+        branchViews[5],
+        branchViews[6],
+        branchViews[7],
+        branchViews[8],
+    };
+    auto finalInsertCalls = tracker.LastInsertChildAtCalls(expectedBranchOrder.size());
+    ASSERT_EQ(expectedBranchOrder.size(), finalInsertCalls.size());
+    for (size_t index = 0; index < expectedBranchOrder.size(); ++index) {
+        EXPECT_EQ(ancestorView, std::get<0>(finalInsertCalls[index]));
+        EXPECT_EQ(expectedBranchOrder[index], std::get<1>(finalInsertCalls[index]));
+        EXPECT_EQ(static_cast<int32_t>(index + 1), std::get<2>(finalInsertCalls[index]));
+    }
+    EXPECT_FALSE(tracker.HasRemoveChildCall(ancestorView, c22View));
+    EXPECT_FALSE(tracker.HasRemoveChildCall(ancestorView, c24View));
+    EXPECT_FALSE(tracker.HasRemoveChildCall(ancestorView, c25View));
+    EXPECT_FALSE(tracker.HasInsertChildAtCall(ancestorView, c22View, 0));
+    EXPECT_FALSE(tracker.HasInsertChildAtCall(ancestorView, c24View, 10));
+    EXPECT_FALSE(tracker.HasInsertChildAtCall(ancestorView, c25View, 11));
+}
+
+TEST_F(IfComponentTest, should_moveAllNativeDescendants_when_movingVirtualIfSibling)
+{
+    NativeApiTrackerScope tracker;
+
+    auto ancestorView = reinterpret_cast<ArkUI_NodeHandle>(0x1000);
+    auto firstSiblingView = reinterpret_cast<ArkUI_NodeHandle>(0x2000);
+    auto firstBranchChildView = reinterpret_cast<ArkUI_NodeHandle>(0x3000);
+    auto secondBranchChildView = reinterpret_cast<ArkUI_NodeHandle>(0x3100);
+    auto secondSiblingView = reinterpret_cast<ArkUI_NodeHandle>(0x4000);
+
+    auto ancestor = std::make_shared<NativeA2UIComponent>(ancestorView);
+    auto ifComp = std::make_shared<IfComponent>();
+    ifComp->AddChild(std::make_shared<NativeViewComponent>(firstBranchChildView));
+    ifComp->AddChild(std::make_shared<NativeViewComponent>(secondBranchChildView));
+    ancestor->AddChild(std::make_shared<NativeViewComponent>(firstSiblingView));
+    ancestor->AddChild(ifComp);
+    ancestor->AddChild(std::make_shared<NativeViewComponent>(secondSiblingView));
+    tracker.ClearCalls();
+
+    ancestor->AddChildAt(ifComp, 3);
+
+    EXPECT_TRUE(tracker.HasRemoveChildCall(ancestorView, firstBranchChildView));
+    EXPECT_TRUE(tracker.HasRemoveChildCall(ancestorView, secondBranchChildView));
+    EXPECT_TRUE(tracker.HasInsertChildAtCall(ancestorView, firstBranchChildView, 2));
+    EXPECT_TRUE(tracker.HasInsertChildAtCall(ancestorView, secondBranchChildView, 3));
+    EXPECT_FALSE(tracker.HasRemoveChildCall(ancestorView, firstSiblingView));
+    EXPECT_FALSE(tracker.HasRemoveChildCall(ancestorView, secondSiblingView));
 }
 
 TEST_F(IfComponentTest, should_removeNativeDescendants_when_clearChildrenWithVirtualChild)

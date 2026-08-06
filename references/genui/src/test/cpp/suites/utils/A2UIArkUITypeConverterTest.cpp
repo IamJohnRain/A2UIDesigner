@@ -17,8 +17,39 @@
 
 #include <gtest/gtest.h>
 
+#include "theme/ThemeBase.h"
+
 namespace NativeModule {
 namespace {
+
+TEST(A2UIArkUITypeConverterTest, ShouldMapEverySupportedNodeType)
+{
+    EXPECT_EQ(A2UIArkUITypeConverter::ToArkUINodeType(A2UINodeType::TEXT), ARKUI_NODE_TEXT);
+    EXPECT_EQ(A2UIArkUITypeConverter::ToArkUINodeType(A2UINodeType::COLUMN), ARKUI_NODE_COLUMN);
+    EXPECT_EQ(A2UIArkUITypeConverter::ToArkUINodeType(A2UINodeType::ROW), ARKUI_NODE_ROW);
+    EXPECT_EQ(A2UIArkUITypeConverter::ToArkUINodeType(A2UINodeType::BUTTON), ARKUI_NODE_BUTTON);
+    EXPECT_EQ(A2UIArkUITypeConverter::ToArkUINodeType(A2UINodeType::IMAGE), ARKUI_NODE_IMAGE);
+    EXPECT_EQ(A2UIArkUITypeConverter::ToArkUINodeType(A2UINodeType::LIST), ARKUI_NODE_LIST);
+    EXPECT_EQ(A2UIArkUITypeConverter::ToArkUINodeType(A2UINodeType::LIST_ITEM), ARKUI_NODE_LIST_ITEM);
+    EXPECT_EQ(A2UIArkUITypeConverter::ToArkUINodeType(A2UINodeType::TEXT_INPUT), ARKUI_NODE_TEXT_INPUT);
+    EXPECT_EQ(A2UIArkUITypeConverter::ToArkUINodeType(A2UINodeType::CHECKBOX), ARKUI_NODE_CHECKBOX);
+    EXPECT_EQ(A2UIArkUITypeConverter::ToArkUINodeType(A2UINodeType::SLIDER), ARKUI_NODE_SLIDER);
+    EXPECT_EQ(A2UIArkUITypeConverter::ToArkUINodeType(A2UINodeType::SCROLL), ARKUI_NODE_SCROLL);
+    EXPECT_EQ(A2UIArkUITypeConverter::ToArkUINodeType(A2UINodeType::STACK), ARKUI_NODE_STACK);
+    EXPECT_EQ(A2UIArkUITypeConverter::ToArkUINodeType(A2UINodeType::TEXT_AREA), ARKUI_NODE_TEXT_AREA);
+    EXPECT_EQ(A2UIArkUITypeConverter::ToArkUINodeType(A2UINodeType::RADIO), ARKUI_NODE_RADIO);
+    EXPECT_EQ(A2UIArkUITypeConverter::ToArkUINodeType(A2UINodeType::PROGRESS), ARKUI_NODE_PROGRESS);
+    EXPECT_EQ(A2UIArkUITypeConverter::ToArkUINodeType(A2UINodeType::GRID), ARKUI_NODE_GRID);
+    EXPECT_EQ(A2UIArkUITypeConverter::ToArkUINodeType(A2UINodeType::GRID_ITEM), ARKUI_NODE_GRID_ITEM);
+    EXPECT_EQ(A2UIArkUITypeConverter::ToArkUINodeType(A2UINodeType::TOGGLE), ARKUI_NODE_TOGGLE);
+    EXPECT_EQ(A2UIArkUITypeConverter::ToArkUINodeType(A2UINodeType::FLEX), ARKUI_NODE_FLEX);
+    EXPECT_EQ(A2UIArkUITypeConverter::ToArkUINodeType(A2UINodeType::CHECKBOX_GROUP), ARKUI_NODE_CHECKBOX_GROUP);
+#ifdef ARKUI_NODE_DIVIDER
+    EXPECT_EQ(A2UIArkUITypeConverter::ToArkUINodeType(A2UINodeType::DIVIDER), ARKUI_NODE_DIVIDER);
+#else
+    EXPECT_EQ(A2UIArkUITypeConverter::ToArkUINodeType(A2UINodeType::DIVIDER), ARKUI_NODE_ROW);
+#endif
+}
 
 TEST(A2UIArkUITypeConverterTest, ShouldMapFlexAlignmentToRealArkUIValues)
 {
@@ -256,6 +287,8 @@ TEST(A2UIArkUITypeConverterTest, ShouldMapNodeEventAndAttributeEnumsExplicitly)
     EXPECT_EQ(
         A2UIArkUITypeConverter::ToArkUINodeEventType(A2UINodeEventType::TEXT_AREA_ON_CHANGE), NODE_TEXT_AREA_ON_CHANGE);
     EXPECT_EQ(A2UIArkUITypeConverter::ToArkUINodeEventType(A2UINodeEventType::ON_APPEAR), NODE_EVENT_ON_APPEAR);
+    EXPECT_EQ(
+        A2UIArkUITypeConverter::ToArkUINodeEventType(A2UINodeEventType::ON_AREA_CHANGE), NODE_EVENT_ON_AREA_CHANGE);
     EXPECT_EQ(A2UIArkUITypeConverter::ToArkUINodeEventType(A2UINodeEventType::ON_CLICK_EVENT), NODE_ON_CLICK_EVENT);
     EXPECT_EQ(A2UIArkUITypeConverter::ToArkUINodeEventType(A2UINodeEventType::TOGGLE_ON_CHANGE), NODE_TOGGLE_ON_CHANGE);
     EXPECT_EQ(
@@ -268,12 +301,15 @@ TEST(A2UIArkUITypeConverterTest, ShouldMapNodeEventAndAttributeEnumsExplicitly)
         NODE_SCROLL_EVENT_ON_REACH_START);
     EXPECT_EQ(A2UIArkUITypeConverter::ToArkUINodeEventType(A2UINodeEventType::SCROLL_ON_REACH_END),
         NODE_SCROLL_EVENT_ON_REACH_END);
+    EXPECT_EQ(A2UIArkUITypeConverter::ToArkUINodeEventType(A2UINodeEventType::ON_SIZE_CHANGE), NODE_ON_SIZE_CHANGE);
     EXPECT_EQ(A2UIArkUITypeConverter::FromArkUINodeEventType(NODE_ON_CLICK), A2UINodeEventType::ON_CLICK);
     EXPECT_EQ(A2UIArkUITypeConverter::FromArkUINodeEventType(NODE_TEXT_INPUT_ON_CHANGE),
         A2UINodeEventType::TEXT_INPUT_ON_CHANGE);
     EXPECT_EQ(A2UIArkUITypeConverter::FromArkUINodeEventType(NODE_TEXT_AREA_ON_CHANGE),
         A2UINodeEventType::TEXT_AREA_ON_CHANGE);
     EXPECT_EQ(A2UIArkUITypeConverter::FromArkUINodeEventType(NODE_EVENT_ON_APPEAR), A2UINodeEventType::ON_APPEAR);
+    EXPECT_EQ(
+        A2UIArkUITypeConverter::FromArkUINodeEventType(NODE_EVENT_ON_AREA_CHANGE), A2UINodeEventType::ON_AREA_CHANGE);
     EXPECT_EQ(A2UIArkUITypeConverter::FromArkUINodeEventType(NODE_ON_CLICK_EVENT), A2UINodeEventType::ON_CLICK_EVENT);
     EXPECT_EQ(
         A2UIArkUITypeConverter::FromArkUINodeEventType(NODE_TOGGLE_ON_CHANGE), A2UINodeEventType::TOGGLE_ON_CHANGE);
@@ -287,6 +323,7 @@ TEST(A2UIArkUITypeConverterTest, ShouldMapNodeEventAndAttributeEnumsExplicitly)
         A2UINodeEventType::SCROLL_ON_REACH_START);
     EXPECT_EQ(A2UIArkUITypeConverter::FromArkUINodeEventType(NODE_SCROLL_EVENT_ON_REACH_END),
         A2UINodeEventType::SCROLL_ON_REACH_END);
+    EXPECT_EQ(A2UIArkUITypeConverter::FromArkUINodeEventType(NODE_ON_SIZE_CHANGE), A2UINodeEventType::ON_SIZE_CHANGE);
     EXPECT_EQ(A2UIArkUITypeConverter::FromArkUINodeAdapterEventType(NODE_ADAPTER_EVENT_WILL_ATTACH_TO_NODE),
         A2UINodeAdapterEventType::WILL_ATTACH_TO_NODE);
     EXPECT_EQ(A2UIArkUITypeConverter::FromArkUINodeAdapterEventType(NODE_ADAPTER_EVENT_WILL_DETACH_FROM_NODE),
@@ -319,9 +356,25 @@ TEST(A2UIArkUITypeConverterTest, ShouldMapNodeEventAndAttributeEnumsExplicitly)
     EXPECT_EQ(A2UIArkUITypeConverter::ToArkUIDialogAlignment(A2UIAlignment::BOTTOM_END), ARKUI_ALIGNMENT_BOTTOM_END);
 }
 
+TEST(A2UIArkUITypeConverterTest, ShouldResolveBreakpointFromWidthUsingRepositoryThresholds)
+{
+    EXPECT_EQ(ResolveBreakpointFromWidth(0.1F), Breakpoint::XS);
+    EXPECT_EQ(ResolveBreakpointFromWidth(319.9F), Breakpoint::XS);
+    EXPECT_EQ(ResolveBreakpointFromWidth(320.0F), Breakpoint::SM);
+    EXPECT_EQ(ResolveBreakpointFromWidth(599.9F), Breakpoint::SM);
+    EXPECT_EQ(ResolveBreakpointFromWidth(600.0F), Breakpoint::MD);
+    EXPECT_EQ(ResolveBreakpointFromWidth(839.9F), Breakpoint::MD);
+    EXPECT_EQ(ResolveBreakpointFromWidth(840.0F), Breakpoint::LG);
+    EXPECT_EQ(ResolveBreakpointFromWidth(1439.9F), Breakpoint::LG);
+    EXPECT_EQ(ResolveBreakpointFromWidth(1440.0F), Breakpoint::XL);
+}
+
 TEST(A2UIArkUITypeConverterTest, ShouldFallbackForUnknownEnumValues)
 {
     EXPECT_EQ(A2UIArkUITypeConverter::ToArkUINodeType(static_cast<A2UINodeType>(-1)), ARKUI_NODE_TEXT);
+    EXPECT_EQ(A2UIArkUITypeConverter::ToArkUINodeType(static_cast<A2UINodeType>(19)), ARKUI_NODE_TEXT);
+    EXPECT_EQ(A2UIArkUITypeConverter::ToArkUINodeType(static_cast<A2UINodeType>(20)), ARKUI_NODE_TEXT);
+    EXPECT_EQ(A2UIArkUITypeConverter::ToArkUINodeType(static_cast<A2UINodeType>(1001)), ARKUI_NODE_TEXT);
     EXPECT_EQ(A2UIArkUITypeConverter::ToArkUIButtonType(static_cast<A2UIButtonType>(-1)), ARKUI_BUTTON_TYPE_NORMAL);
     EXPECT_EQ(
         A2UIArkUITypeConverter::ToArkUIFlexAlignment(static_cast<A2UIFlexAlignment>(-1)), ARKUI_FLEX_ALIGNMENT_START);

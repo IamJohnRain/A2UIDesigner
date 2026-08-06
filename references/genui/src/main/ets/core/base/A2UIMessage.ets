@@ -25,10 +25,10 @@ export enum A2UIMessageType {
 type A2UIJsonField = ESObject | string | number | boolean | Object | null | undefined;
 
 export class A2UIMessage {
-  version: string;
-  surfaceId: string;
-  type: A2UIMessageType;
-  messageBody?: string;
+  public version: string;
+  public surfaceId: string;
+  public type: A2UIMessageType;
+  public messageBody?: string;
 
   constructor(versionNum: string, surfaceId: string, type: A2UIMessageType, body: ESObject | string | undefined) {
     this.version = versionNum;

@@ -153,11 +153,11 @@ bool TryParseStringArrayIndex(const std::string& rawValue, double& numericIndex)
         return false;
     }
 
-    const char* beginPtr = rawValue.c_str() + begin;
+    std::string trimmed = rawValue.substr(begin);
     char* endPtr = nullptr;
     errno = 0;
-    numericIndex = std::strtod(beginPtr, &endPtr);
-    if (endPtr == beginPtr || errno == ERANGE) {
+    numericIndex = std::strtod(trimmed.c_str(), &endPtr);
+    if (endPtr == trimmed.c_str() || errno == ERANGE) {
         return false;
     }
 
@@ -260,35 +260,8 @@ EvalResult Evaluator::EvaluateBinary(const std::shared_ptr<BinaryExpression>& no
         return EvalResult::Undefined();
     }
 
-    // Short-circuit for logical operators
-    if (node->op == BinaryOp::AND) {
-        auto left = Evaluate(node->left, context);
-        if (left.IsUndefined()) {
-            return left;
-        }
-        if (!left.AsBool()) {
-            return EvalResult::FromBool(false);
-        }
-        auto right = Evaluate(node->right, context);
-        if (right.IsUndefined()) {
-            return right;
-        }
-        return EvalResult::FromBool(right.AsBool());
-    }
-
-    if (node->op == BinaryOp::OR) {
-        auto left = Evaluate(node->left, context);
-        if (left.IsUndefined()) {
-            return left;
-        }
-        if (left.AsBool()) {
-            return EvalResult::FromBool(true);
-        }
-        auto right = Evaluate(node->right, context);
-        if (right.IsUndefined()) {
-            return right;
-        }
-        return EvalResult::FromBool(right.AsBool());
+    if (node->op == BinaryOp::AND || node->op == BinaryOp::OR) {
+        return EvaluateLogicalBinary(node, context);
     }
 
     auto left = Evaluate(node->left, context);
@@ -300,7 +273,34 @@ EvalResult Evaluator::EvaluateBinary(const std::shared_ptr<BinaryExpression>& no
         return right;
     }
 
-    switch (node->op) {
+    return EvaluateResolvedBinary(node->op, left, right, context);
+}
+
+EvalResult Evaluator::EvaluateLogicalBinary(const std::shared_ptr<BinaryExpression>& node, EvaluationContext& context)
+{
+    auto left = Evaluate(node->left, context);
+    if (left.IsUndefined()) {
+        return left;
+    }
+
+    if (node->op == BinaryOp::AND && !left.AsBool()) {
+        return left;
+    }
+    if (node->op == BinaryOp::OR && left.AsBool()) {
+        return left;
+    }
+
+    auto right = Evaluate(node->right, context);
+    if (right.IsUndefined()) {
+        return right;
+    }
+    return right;
+}
+
+EvalResult Evaluator::EvaluateResolvedBinary(
+    BinaryOp op, const EvalResult& left, const EvalResult& right, EvaluationContext& context)
+{
+    switch (op) {
         case BinaryOp::PLUS:
             if (left.IsString() || right.IsString()) {
                 return EvalResult::FromString(left.AsString() + right.AsString());
@@ -387,47 +387,14 @@ EvalResult Evaluator::EvaluateGrouped(const std::shared_ptr<GroupedExpression>& 
 
 EvalResult Evaluator::EvaluateFunctionCall(const std::shared_ptr<FunctionCall>& node, EvaluationContext& context)
 {
-    std::string dataPath;
-    if (TryGetJsonPointerIntrinsicPath(node, dataPath)) {
-        if (!Sandbox::IsDataModelPathAllowed(dataPath)) {
-            return EvalResult::FromString("");
-        }
-        return ResolveDataModelPath(dataPath, context);
+    if (node->name == ExpressionIntrinsics::JSON_POINTER) {
+        return EvaluateJsonPointerIntrinsic(node, context);
     }
-
-    std::string fragmentExpression;
-    if (TryGetFragmentIntrinsicExpression(node, fragmentExpression)) {
-        EvaluationContext fragmentContext = context;
-        EvalResult result =
-            ExpressionEngine::GetInstance().Evaluate("{{ " + fragmentExpression + " }}", fragmentContext);
-        if (fragmentContext.lastError != ExpressionError::NONE && context.lastError == ExpressionError::NONE) {
-            context.SetError(fragmentContext.lastError, fragmentContext.errorMessage, fragmentContext.errorPosition);
-        }
-        if (result.IsUndefined()) {
-            return EvalResult::FromString("");
-        }
-        return result;
+    if (node->name == ExpressionIntrinsics::FRAGMENT) {
+        return EvaluateFragmentIntrinsic(node, context);
     }
-
-    std::string sizeArgumentExpression;
-    if (TryGetSizeFragmentIntrinsicExpression(node, sizeArgumentExpression)) {
-        std::string trimmedExpression = TrimWhitespace(sizeArgumentExpression);
-        if (trimmedExpression.empty()) {
-            context.SetError(
-                ExpressionError::PARSE_UNEXPECTED_TOKEN, "illegal expression: size() requires exactly one argument");
-            return EvalResult::FromNumber(0.0);
-        }
-
-        EvaluationContext sizeContext = context;
-        JsonValue sizeValue =
-            ExpressionEngine::GetInstance().EvaluateAsJsonValue("{{ " + trimmedExpression + " }}", sizeContext);
-        if (sizeContext.lastError != ExpressionError::NONE && context.lastError == ExpressionError::NONE) {
-            context.SetError(sizeContext.lastError, sizeContext.errorMessage, sizeContext.errorPosition);
-        }
-        if (sizeValue.IsArray()) {
-            return EvalResult::FromNumber(static_cast<double>(sizeValue.GetArraySize()));
-        }
-        return EvalResult::FromNumber(0.0);
+    if (node->name == ExpressionIntrinsics::SIZE_FRAGMENT) {
+        return EvaluateSizeFragmentIntrinsic(node, context);
     }
 
     if (!functions_.Has(node->name)) {
@@ -435,27 +402,110 @@ EvalResult Evaluator::EvaluateFunctionCall(const std::shared_ptr<FunctionCall>& 
         return EvalResult::Undefined();
     }
 
+    bool hasUndefinedArgument = false;
+    std::vector<EvalResult> args = EvaluateFunctionArguments(node, context, hasUndefinedArgument);
+    if (hasUndefinedArgument) {
+        return EvalResult::Undefined();
+    }
+    return functions_.Call(node->name, args, context);
+}
+
+EvalResult Evaluator::EvaluateJsonPointerIntrinsic(
+    const std::shared_ptr<FunctionCall>& node, EvaluationContext& context)
+{
+    std::string dataPath;
+    if (!TryGetJsonPointerIntrinsicPath(node, dataPath)) {
+        context.SetError(ExpressionError::PARSE_UNEXPECTED_TOKEN, "unknown function: " + node->name);
+        return EvalResult::Undefined();
+    }
+    if (!Sandbox::IsDataModelPathAllowed(dataPath)) {
+        return EvalResult::FromString("");
+    }
+    return ResolveDataModelPath(dataPath, context);
+}
+
+EvalResult Evaluator::EvaluateFragmentIntrinsic(const std::shared_ptr<FunctionCall>& node, EvaluationContext& context)
+{
+    std::string fragmentExpression;
+    if (!TryGetFragmentIntrinsicExpression(node, fragmentExpression)) {
+        context.SetError(ExpressionError::PARSE_UNEXPECTED_TOKEN, "unknown function: " + node->name);
+        return EvalResult::Undefined();
+    }
+
+    EvaluationContext fragmentContext = context;
+    EvalResult result = ExpressionEngine::GetInstance().Evaluate("{{ " + fragmentExpression + " }}", fragmentContext);
+    if (fragmentContext.lastError != ExpressionError::NONE && context.lastError == ExpressionError::NONE) {
+        context.SetError(fragmentContext.lastError, fragmentContext.errorMessage, fragmentContext.errorPosition);
+    }
+    if (result.IsUndefined()) {
+        return EvalResult::FromString("");
+    }
+    return result;
+}
+
+EvalResult Evaluator::EvaluateSizeFragmentIntrinsic(
+    const std::shared_ptr<FunctionCall>& node, EvaluationContext& context)
+{
+    std::string sizeArgumentExpression;
+    if (!TryGetSizeFragmentIntrinsicExpression(node, sizeArgumentExpression)) {
+        context.SetError(ExpressionError::PARSE_UNEXPECTED_TOKEN, "unknown function: " + node->name);
+        return EvalResult::Undefined();
+    }
+
+    std::string trimmedExpression = TrimWhitespace(sizeArgumentExpression);
+    if (trimmedExpression.empty()) {
+        context.SetError(
+            ExpressionError::PARSE_UNEXPECTED_TOKEN, "illegal expression: size() requires exactly one argument");
+        return EvalResult::FromNumber(0.0);
+    }
+
+    EvaluationContext sizeContext = context;
+    JsonValue sizeValue =
+        ExpressionEngine::GetInstance().EvaluateAsJsonValue("{{ " + trimmedExpression + " }}", sizeContext);
+    if (sizeContext.lastError != ExpressionError::NONE && context.lastError == ExpressionError::NONE) {
+        context.SetError(sizeContext.lastError, sizeContext.errorMessage, sizeContext.errorPosition);
+    }
+    if (sizeValue.IsArray()) {
+        return EvalResult::FromNumber(static_cast<double>(sizeValue.GetArraySize()));
+    }
+    if (context.lastError == ExpressionError::NONE) {
+        context.SetError(ExpressionError::PARSE_UNEXPECTED_TOKEN, "Built-in function size() expects an array argument");
+    }
+    return EvalResult::FromNumber(0.0);
+}
+
+std::vector<EvalResult> Evaluator::EvaluateFunctionArguments(
+    const std::shared_ptr<FunctionCall>& node, EvaluationContext& context, bool& hasUndefinedArgument)
+{
     std::vector<EvalResult> args;
+    hasUndefinedArgument = false;
     args.reserve(node->arguments.size());
     for (const auto& arg : node->arguments) {
         EvaluationContext argContext = context;
         argContext.allowContainerResults = true;
-        auto result = Evaluate(arg, argContext);
+        EvalResult result = Evaluate(arg, argContext);
         if (argContext.lastError != ExpressionError::NONE && context.lastError == ExpressionError::NONE) {
             context.SetError(argContext.lastError, argContext.errorMessage, argContext.errorPosition);
         }
         if (result.IsUndefined()) {
-            return result;
+            hasUndefinedArgument = true;
+            return args;
         }
         args.push_back(std::move(result));
     }
-
-    return functions_.Call(node->name, args, context);
+    return args;
 }
 
 EvalResult Evaluator::EvaluateVariableReference(
     const std::shared_ptr<VariableReference>& node, EvaluationContext& context)
 {
+    if (!node->isAbsolute) {
+        context.SetError(ExpressionError::PARSE_UNEXPECTED_TOKEN, "illegal expression: unquoted string: " + node->name);
+        EvalResult fallback = EvalResult::FromString("");
+        fallback.hasEvaluationError = true;
+        return fallback;
+    }
+
     EvalResult result = context.ResolveVariable(node->name);
     if (result.IsDefined()) {
         return result;
@@ -469,12 +519,29 @@ namespace {
 
 static constexpr size_t MAX_MEMBER_ACCESS_DEPTH = 128;
 
+static bool IsAbsoluteDataModelVariableReference(const std::shared_ptr<AstNode>& node)
+{
+    if (node == nullptr || node->type != AstNodeType::VARIABLE_REFERENCE) {
+        return false;
+    }
+    auto variableReference = std::static_pointer_cast<VariableReference>(node);
+    return variableReference->isAbsolute && variableReference->name == "__dataModel";
+}
+
+bool IsRecoveredJsonPointerBracket(const std::shared_ptr<AstNode>& bracketKey)
+{
+    if (bracketKey == nullptr || bracketKey->type != AstNodeType::STRING_LITERAL) {
+        return false;
+    }
+    const auto& value = static_cast<const StringLiteral&>(*bracketKey).value;
+    return !value.empty() && value[0] == '/';
+}
+
 bool IsIllegalDataModelPathSyntax(const std::shared_ptr<AstNode>& node, size_t maxDepth)
 {
     std::shared_ptr<AstNode> current = node;
     size_t depth = 0;
     bool sawMemberAccess = false;
-    bool hasInvalidBracketSegment = false;
     while (current != nullptr && current->type == AstNodeType::MEMBER_ACCESS) {
         if (depth >= maxDepth) {
             return false;
@@ -482,10 +549,14 @@ bool IsIllegalDataModelPathSyntax(const std::shared_ptr<AstNode>& node, size_t m
 
         sawMemberAccess = true;
         auto member = std::static_pointer_cast<MemberAccess>(current);
+        if (member->isBracket && member->bracketKey == nullptr) {
+            return false;
+        }
         if (member->isBracket) {
             std::string segment;
             if (!DataModelPathUtils::TryExtractBracketSegment(member->bracketKey, segment)) {
-                hasInvalidBracketSegment = true;
+                return IsRecoveredJsonPointerBracket(member->bracketKey) ||
+                       IsAbsoluteDataModelVariableReference(member->object);
             }
         }
 
@@ -493,8 +564,7 @@ bool IsIllegalDataModelPathSyntax(const std::shared_ptr<AstNode>& node, size_t m
         ++depth;
     }
 
-    if (!hasInvalidBracketSegment || !sawMemberAccess || current == nullptr ||
-        current->type != AstNodeType::VARIABLE_REFERENCE) {
+    if (!sawMemberAccess || current == nullptr || current->type != AstNodeType::VARIABLE_REFERENCE) {
         return false;
     }
 
@@ -547,34 +617,39 @@ EvalResult ResolveDataModelPath(const std::string& path, EvaluationContext& cont
     return EvalResult::FromJson(value);
 }
 
+JsonValue ResolveBracketMember(const JsonValue& objectValue, const EvalResult& bracketKey)
+{
+    if (objectValue.IsArray()) {
+        int index = -1;
+        if (!TryConvertToArrayIndex(bracketKey, index)) {
+            return JsonValue();
+        }
+        return objectValue.GetArrayItem(index);
+    }
+    if (objectValue.IsObject() && bracketKey.IsString()) {
+        return objectValue.GetItem(bracketKey.AsString());
+    }
+    return JsonValue();
+}
+
+EvalResult MakeMemberAccessEvaluationErrorResult()
+{
+    EvalResult result = EvalResult::FromString("");
+    result.hasEvaluationError = true;
+    return result;
+}
+
 } // namespace
 
 EvalResult Evaluator::EvaluateMemberAccess(const std::shared_ptr<MemberAccess>& node, EvaluationContext& context)
 {
-    std::string dataPath = DataModelPathUtils::TryExtractDataModelPath(node, MAX_MEMBER_ACCESS_DEPTH);
-    if (!dataPath.empty()) {
-        if (!Sandbox::IsDataModelPathAllowed(dataPath)) {
-            EvalResult result = EvalResult::FromString("");
-            result.hasEvaluationError = true;
-            return result;
-        }
-        return ResolveDataModelPath(dataPath, context);
+    bool handled = false;
+    EvalResult dataModelResult = TryEvaluateDataModelMemberAccess(node, context, handled);
+    if (handled) {
+        return dataModelResult;
     }
 
-    if (context.lastError == ExpressionError::NONE && IsIllegalDataModelPathSyntax(node, MAX_MEMBER_ACCESS_DEPTH)) {
-        context.SetError(
-            ExpressionError::PARSE_UNEXPECTED_TOKEN, "illegal expression: unsupported $__dataModel path syntax");
-        EvalResult result = EvalResult::FromString("");
-        result.hasEvaluationError = true;
-        return result;
-    }
-
-    EvaluationContext objectContext = context;
-    objectContext.allowContainerResults = true;
-    auto object = Evaluate(node->object, objectContext);
-    if (objectContext.lastError != ExpressionError::NONE && context.lastError == ExpressionError::NONE) {
-        context.SetError(objectContext.lastError, objectContext.errorMessage, objectContext.errorPosition);
-    }
+    auto object = EvaluateMemberObject(node, context);
     if (object.IsUndefined()) {
         return object;
     }
@@ -588,44 +663,83 @@ EvalResult Evaluator::EvaluateMemberAccess(const std::shared_ptr<MemberAccess>& 
     }
 
     if (object.IsJson()) {
-        const JsonValue& objectValue = object.AsJson();
-        if (!node->isBracket && objectValue.IsObject()) {
-            JsonValue memberValue = objectValue.GetItem(node->property);
-            if (memberValue.IsValid()) {
-                return EvalResult::FromJson(memberValue);
-            }
-            context.SetError(
-                ExpressionError::EVAL_UNDEFINED_VARIABLE, "member access not supported: ." + node->property);
-            return EvalResult::Undefined();
-        }
-
-        if (node->isBracket && node->bracketKey != nullptr) {
-            EvalResult bracketKey = Evaluate(node->bracketKey, context);
-            if (bracketKey.IsUndefined()) {
-                return bracketKey;
-            }
-
-            if (objectValue.IsArray()) {
-                int index = -1;
-                if (TryConvertToArrayIndex(bracketKey, index)) {
-                    JsonValue memberValue = objectValue.GetArrayItem(index);
-                    if (memberValue.IsValid()) {
-                        return EvalResult::FromJson(memberValue);
-                    }
-                }
-            } else if (objectValue.IsObject() && bracketKey.IsString()) {
-                JsonValue memberValue = objectValue.GetItem(bracketKey.AsString());
-                if (memberValue.IsValid()) {
-                    return EvalResult::FromJson(memberValue);
-                }
-            }
-
-            context.SetError(
-                ExpressionError::EVAL_UNDEFINED_VARIABLE, "member access not supported: ." + node->property);
-            return EvalResult::Undefined();
+        bool jsonMemberHandled = false;
+        EvalResult jsonMember = EvaluateJsonMemberValue(node, object.AsJson(), context, jsonMemberHandled);
+        if (jsonMemberHandled) {
+            return jsonMember;
         }
     }
 
+    return EvaluateUnsupportedMemberAccess(node, context);
+}
+
+EvalResult Evaluator::TryEvaluateDataModelMemberAccess(
+    const std::shared_ptr<MemberAccess>& node, EvaluationContext& context, bool& handled)
+{
+    handled = false;
+    std::string dataPath = DataModelPathUtils::TryExtractDataModelPath(node, MAX_MEMBER_ACCESS_DEPTH);
+    if (!dataPath.empty()) {
+        handled = true;
+        if (!Sandbox::IsDataModelPathAllowed(dataPath)) {
+            return MakeMemberAccessEvaluationErrorResult();
+        }
+        return ResolveDataModelPath(dataPath, context);
+    }
+
+    if (context.lastError == ExpressionError::NONE && IsIllegalDataModelPathSyntax(node, MAX_MEMBER_ACCESS_DEPTH)) {
+        handled = true;
+        context.SetError(
+            ExpressionError::PARSE_UNEXPECTED_TOKEN, "illegal expression: unsupported $__dataModel path syntax");
+        return MakeMemberAccessEvaluationErrorResult();
+    }
+    return EvalResult::Undefined();
+}
+
+EvalResult Evaluator::EvaluateMemberObject(const std::shared_ptr<MemberAccess>& node, EvaluationContext& context)
+{
+    EvaluationContext objectContext = context;
+    objectContext.allowContainerResults = true;
+    auto object = Evaluate(node->object, objectContext);
+    if (objectContext.lastError != ExpressionError::NONE && context.lastError == ExpressionError::NONE) {
+        context.SetError(objectContext.lastError, objectContext.errorMessage, objectContext.errorPosition);
+    }
+    return object;
+}
+
+EvalResult Evaluator::EvaluateJsonMemberValue(
+    const std::shared_ptr<MemberAccess>& node, const JsonValue& objectValue, EvaluationContext& context, bool& handled)
+{
+    handled = false;
+    if (!node->isBracket && objectValue.IsObject()) {
+        handled = true;
+        JsonValue memberValue = objectValue.GetItem(node->property);
+        if (memberValue.IsValid()) {
+            return EvalResult::FromJson(memberValue);
+        }
+        context.SetError(ExpressionError::EVAL_UNDEFINED_VARIABLE, "member access not supported: ." + node->property);
+        return EvalResult::Undefined();
+    }
+
+    if (node->isBracket && node->bracketKey != nullptr) {
+        handled = true;
+        EvalResult bracketKey = Evaluate(node->bracketKey, context);
+        if (bracketKey.IsUndefined()) {
+            return bracketKey;
+        }
+
+        JsonValue memberValue = ResolveBracketMember(objectValue, bracketKey);
+        if (memberValue.IsValid()) {
+            return EvalResult::FromJson(memberValue);
+        }
+    }
+
+    context.SetError(ExpressionError::EVAL_UNDEFINED_VARIABLE, "member access not supported: ." + node->property);
+    return EvalResult::Undefined();
+}
+
+EvalResult Evaluator::EvaluateUnsupportedMemberAccess(
+    const std::shared_ptr<MemberAccess>& node, EvaluationContext& context) const
+{
     const VariableReference* rootVariable = FindRootAbsoluteVariableReference(node);
     if (rootVariable != nullptr && rootVariable->name.size() >= 2 && rootVariable->name[0] == '_' &&
         rootVariable->name[1] == '_') {
@@ -633,9 +747,7 @@ EvalResult Evaluator::EvaluateMemberAccess(const std::shared_ptr<MemberAccess>& 
             context.SetError(
                 ExpressionError::EVAL_UNDEFINED_VARIABLE, "member access not supported: ." + node->property);
         }
-        EvalResult result = EvalResult::FromString("");
-        result.hasEvaluationError = true;
-        return result;
+        return MakeMemberAccessEvaluationErrorResult();
     }
 
     context.SetError(ExpressionError::EVAL_UNDEFINED_VARIABLE, "member access not supported: ." + node->property);

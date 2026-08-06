@@ -18,6 +18,7 @@
 #include <limits>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "catalog/Catalog.h"
@@ -38,6 +39,7 @@
 #include "components/extended/ExtendedTextInputComponent.h"
 #include "components/extended/RenderContext.h"
 #include "data/BindingEngine.h"
+#include "styles/StyleResolver.h"
 #include "utils/JsonAdapter.h"
 
 #include "ArkUINodeApiAdapter.h"
@@ -707,6 +709,73 @@ TEST_F(ExtendedCoverageTest, TextInput_WordBreak)
     EXPECT_EQ(ti->GetWordBreakForTest(), 1);
 }
 
+TEST_F(ExtendedCoverageTest, TextInput_InlineStyleOnlyForValidMaxLinesOrNonDefaultWordBreak)
+{
+    slot_.SetCatalog(BuildExtendedCatalog({ "TextInput" }));
+    std::string message =
+        WrapComponents(R"({"id":"valid-max-lines","component":"TextInput","styles":{"maxLines":1}},)"
+                       R"({"id":"non-default-word-break","component":"TextInput","styles":{"wordBreak":"breakAll"}},)"
+                       R"({"id":"normal-word-break","component":"TextInput","styles":{"wordBreak":"normal"}},)"
+                       R"({"id":"invalid-word-break","component":"TextInput","styles":{"wordBreak":"invalid"}},)"
+                       R"({"id":"zero-max-lines","component":"TextInput","styles":{"maxLines":0}},)"
+                       R"({"id":"string-max-lines","component":"TextInput","styles":{"maxLines":"2"}},)"
+                       R"({"id":"fractional-max-lines","component":"TextInput","styles":{"maxLines":1.5}},)"
+                       R"({"id":"invalid-max-lines","component":"TextInput","styles":{"maxLines":-1}},)"
+                       R"({"id":"default-style","component":"TextInput","styles":{"fontSize":16}}))");
+    auto adapter = JsonAdapter::Parse(message);
+    ASSERT_NE(adapter, nullptr);
+    ASSERT_TRUE(slot_.UpdateComponents(adapter->GetRoot()));
+
+    for (const auto& expected : { std::pair<const char*, int32_t> { "valid-max-lines", ARKUI_TEXTINPUT_STYLE_INLINE },
+             { "non-default-word-break", ARKUI_TEXTINPUT_STYLE_INLINE },
+             { "normal-word-break", ARKUI_TEXTINPUT_STYLE_DEFAULT },
+             { "invalid-word-break", ARKUI_TEXTINPUT_STYLE_DEFAULT },
+             { "zero-max-lines", ARKUI_TEXTINPUT_STYLE_DEFAULT }, { "string-max-lines", ARKUI_TEXTINPUT_STYLE_DEFAULT },
+             { "fractional-max-lines", ARKUI_TEXTINPUT_STYLE_DEFAULT },
+             { "invalid-max-lines", ARKUI_TEXTINPUT_STYLE_DEFAULT },
+             { "default-style", ARKUI_TEXTINPUT_STYLE_DEFAULT } }) {
+        auto input = std::dynamic_pointer_cast<ExtendedTextInputComponent>(slot_.FindComponentById(expected.first));
+        ASSERT_NE(input, nullptr);
+        int32_t style = -1;
+        for (auto iter = mockArkUIPtr_->setAttributeRecords_.rbegin();
+             iter != mockArkUIPtr_->setAttributeRecords_.rend(); ++iter) {
+            if (iter->nodeHandle == input->GetNativeView() && iter->attribute == NODE_TEXT_INPUT_STYLE) {
+                ASSERT_FALSE(iter->values.empty());
+                style = iter->values[0].i32;
+                break;
+            }
+        }
+        EXPECT_EQ(style, expected.second);
+    }
+}
+
+TEST_F(ExtendedCoverageTest, TextInput_InlineStylePreservedWhenUnrelatedStyleUpdates)
+{
+    slot_.SetCatalog(BuildExtendedCatalog({ "TextInput" }));
+    auto adapter =
+        JsonAdapter::Parse(WrapComponents(R"({"id":"root","component":"TextInput","styles":{"maxLines":2}})"));
+    ASSERT_NE(adapter, nullptr);
+    ASSERT_TRUE(slot_.UpdateComponents(adapter->GetRoot()));
+
+    auto input = std::dynamic_pointer_cast<ExtendedTextInputComponent>(slot_.FindComponentById("root"));
+    ASSERT_NE(input, nullptr);
+    auto fontSize = JsonAdapter::Parse("16");
+    ASSERT_NE(fontSize, nullptr);
+    std::static_pointer_cast<Component>(input)->OnDataUpdate(
+        StyleResolver::BuildStyleBindingProperty("fontSize"), fontSize->GetRoot());
+
+    int32_t style = -1;
+    for (auto iter = mockArkUIPtr_->setAttributeRecords_.rbegin(); iter != mockArkUIPtr_->setAttributeRecords_.rend();
+         ++iter) {
+        if (iter->nodeHandle == input->GetNativeView() && iter->attribute == NODE_TEXT_INPUT_STYLE) {
+            ASSERT_FALSE(iter->values.empty());
+            style = iter->values[0].i32;
+            break;
+        }
+    }
+    EXPECT_EQ(style, ARKUI_TEXTINPUT_STYLE_INLINE);
+}
+
 TEST_F(ExtendedCoverageTest, TextInput_Styles)
 {
     slot_.SetCatalog(BuildExtendedCatalog({ "TextInput" }));
@@ -1120,7 +1189,7 @@ TEST_F(ExtendedCoverageTest, StyleResolver_BackgroundImageLowercase)
 {
     slot_.SetCatalog(BuildExtendedCatalog({ "Text" }));
     std::string msg = WrapComponents(
-        R"({"id":"root","component":"Text","content":"test","styles":{"backgroundimage":"https://example.com/bg.png"}})");
+        R"({"id":"root","component":"Text","content":"test","styles":{"backgroundImage":"https://example.com/bg.png"}})");
     auto adapter = JsonAdapter::Parse(msg);
     ASSERT_NE(adapter, nullptr);
     ASSERT_TRUE(slot_.UpdateComponents(adapter->GetRoot()));

@@ -405,6 +405,18 @@ public:
         return hasBackgroundImageSizeWithStyle_ || HasRecordedAttribute(NODE_BACKGROUND_IMAGE_SIZE_WITH_STYLE);
     }
 
+    std::vector<ArkUI_NumberValue> GetBackgroundImageSizeValues() const
+    {
+        // SetNodeBackgroundImageSize routes through the native mock (MockSetAttribute), which records
+        // the attribute in setAttributeRecords_ with its ArkUI_NumberValue array. The SetNodeNumberArray
+        // override is not invoked on this path, so read the values from the recording provider.
+        const auto* record = FindLastSetAttribute(NODE_BACKGROUND_IMAGE_SIZE);
+        if (record != nullptr) {
+            return record->values;
+        }
+        return {};
+    }
+
     bool HasHeight() const
     {
         return hasHeight_ || HasRecordedAttribute(NODE_HEIGHT);
@@ -638,6 +650,25 @@ TEST(StyleApplyUtilsTest, StyleApplyUtilsTest007)
 }
 
 /**
+ * @tc.name: StyleApplyUtilsTest008
+ * @tc.desc: Verify ParseColor accepts only string color values.
+ * @tc.type: FUNC
+ */
+TEST(StyleApplyUtilsTest, StyleApplyUtilsTest008)
+{
+    uint32_t color = 0;
+    auto numberAdapter = JsonAdapter::Parse("4278190080");
+    ASSERT_NE(numberAdapter, nullptr);
+
+    EXPECT_FALSE(StyleApplyUtils::ParseColor(numberAdapter->GetRoot(), color));
+
+    auto stringAdapter = JsonAdapter::Parse(R"("#FF000000")");
+    ASSERT_NE(stringAdapter, nullptr);
+    EXPECT_TRUE(StyleApplyUtils::ParseColor(stringAdapter->GetRoot(), color));
+    EXPECT_EQ(color, 0xFF000000U);
+}
+
+/**
  * @tc.name: ExtendedStyleResolverCommonStyleTest005
  * @tc.desc: Verify custom shadow object without radius is rejected.
  * @tc.type: FUNC
@@ -842,7 +873,7 @@ TEST(ExtendedStyleResolverCommonStyleTest, ExtendedStyleResolverCommonStyleTest0
 
 /**
  * @tc.name: ExtendedStyleResolverCommonStyleTest016
- * @tc.desc: Verify Reset for backgroundImageSize resets BACKGROUND_IMAGE_SIZE_WITH_STYLE.
+ * @tc.desc: Verify Reset for backgroundImageSize restores BACKGROUND_IMAGE_SIZE_WITH_STYLE to auto.
  * @tc.type: FUNC
  */
 TEST(ExtendedStyleResolverCommonStyleTest, ExtendedStyleResolverCommonStyleTest016)
@@ -851,7 +882,7 @@ TEST(ExtendedStyleResolverCommonStyleTest, ExtendedStyleResolverCommonStyleTest0
     ExtendedStyleResolver::Reset({ "backgroundImageSize", StylePropertyName::BACKGROUND_IMAGE_SIZE }, applier);
 
     EXPECT_TRUE(applier.WasAttributeReset(NODE_BACKGROUND_IMAGE_SIZE));
-    EXPECT_TRUE(applier.WasAttributeReset(NODE_BACKGROUND_IMAGE_SIZE_WITH_STYLE));
+    EXPECT_TRUE(applier.HasBackgroundImageSizeWithStyle());
 }
 
 /**
@@ -926,7 +957,7 @@ TEST(ExtendedStyleResolverCommonStyleTest, ExtendedStyleResolverCommonStyleTest0
 TEST(ExtendedStyleResolverCommonStyleTest, ExtendedStyleResolverCommonStyleTest020)
 {
     auto adapter = JsonAdapter::Parse(R"({
-        "backgroundimageSizeWithStyle": {"width": "80vp", "height": "40vp"}
+        "backgroundImageSizeWithStyle": {"width": "80vp", "height": "40vp"}
     })");
     ASSERT_NE(adapter, nullptr);
 
@@ -934,6 +965,55 @@ TEST(ExtendedStyleResolverCommonStyleTest, ExtendedStyleResolverCommonStyleTest0
     ExtendedStyleResolver::ResolveAndApply(adapter->GetRoot(), applier);
 
     EXPECT_TRUE(applier.HasBackgroundImageSize());
+}
+
+/**
+ * @tc.name: ExtendedStyleResolverCommonStyleTest031
+ * @tc.desc: Verify backgroundImageSizeWithStyle treats an empty-string width as LENGTH 0 (derived by
+ *           source aspect ratio) instead of falling back to ImageSize.Auto. Consistent with
+ *           NODE_BACKGROUND_IMAGE_SIZE where ParseJsDimensionVp("") resolves to value=0/unit=LENGTH.
+ * @tc.type: FUNC
+ */
+TEST(ExtendedStyleResolverCommonStyleTest, ExtendedStyleResolverCommonStyleTest031)
+{
+    auto adapter = JsonAdapter::Parse(R"({
+        "backgroundImageSizeWithStyle": {"width": "", "height": "60vp"}
+    })");
+    ASSERT_NE(adapter, nullptr);
+
+    RecordingCommonStyleApplier applier;
+    ExtendedStyleResolver::ResolveAndApply(adapter->GetRoot(), applier);
+
+    EXPECT_TRUE(applier.HasBackgroundImageSize());
+    EXPECT_FALSE(applier.HasBackgroundImageSizeWithStyle());
+    auto values = applier.GetBackgroundImageSizeValues();
+    ASSERT_EQ(values.size(), 2U);
+    EXPECT_FLOAT_EQ(values[0].f32, 0.0F);
+    EXPECT_FLOAT_EQ(values[1].f32, 60.0F);
+}
+
+/**
+ * @tc.name: ExtendedStyleResolverCommonStyleTest032
+ * @tc.desc: Verify backgroundImageSizeWithStyle treats an empty-string height as LENGTH 0 (derived by
+ *           source aspect ratio), symmetric to the empty-width case.
+ * @tc.type: FUNC
+ */
+TEST(ExtendedStyleResolverCommonStyleTest, ExtendedStyleResolverCommonStyleTest032)
+{
+    auto adapter = JsonAdapter::Parse(R"({
+        "backgroundImageSizeWithStyle": {"width": "60vp", "height": ""}
+    })");
+    ASSERT_NE(adapter, nullptr);
+
+    RecordingCommonStyleApplier applier;
+    ExtendedStyleResolver::ResolveAndApply(adapter->GetRoot(), applier);
+
+    EXPECT_TRUE(applier.HasBackgroundImageSize());
+    EXPECT_FALSE(applier.HasBackgroundImageSizeWithStyle());
+    auto values = applier.GetBackgroundImageSizeValues();
+    ASSERT_EQ(values.size(), 2U);
+    EXPECT_FLOAT_EQ(values[0].f32, 60.0F);
+    EXPECT_FLOAT_EQ(values[1].f32, 0.0F);
 }
 
 /**
@@ -1355,13 +1435,13 @@ TEST(ExtendedStyleResolverTest, ExtendedStyleResolverTest019)
 
 /**
  * @tc.name: ExtendedStyleResolverTest020
- * @tc.desc: Verify Reset for backgroundimage resets NODE_BACKGROUND_IMAGE.
+ * @tc.desc: Verify Reset for backgroundImage resets NODE_BACKGROUND_IMAGE.
  * @tc.type: FUNC
  */
 TEST(ExtendedStyleResolverTest, ExtendedStyleResolverTest020)
 {
     RecordingCommonStyleApplier applier;
-    ExtendedStyleResolver::Reset({ "backgroundimage", StylePropertyName::BACKGROUND_IMAGE }, applier);
+    ExtendedStyleResolver::Reset({ "backgroundImage", StylePropertyName::BACKGROUND_IMAGE }, applier);
     EXPECT_TRUE(applier.WasAttributeReset(NODE_BACKGROUND_IMAGE));
 }
 
@@ -1452,7 +1532,7 @@ TEST(ExtendedStyleResolverTest, ExtendedStyleResolverTest027)
 
 /**
  * @tc.name: ExtendedStyleResolverTest028
- * @tc.desc: Verify Reset for flexShrink resets NODE_FLEX_SHRINK.
+ * @tc.desc: Verify Reset for flexShrink delegates to ArkUI when the parent type is unknown.
  * @tc.type: FUNC
  */
 TEST(ExtendedStyleResolverTest, ExtendedStyleResolverTest028)
@@ -1823,15 +1903,22 @@ TEST(StyleApplyUtilsEffectsTest, StyleApplyUtilsEffectsTest018)
 
 /**
  * @tc.name: StyleApplyUtilsEffectsTest019
- * @tc.desc: Verify ParseFlexShrink rejects out-of-range values.
- * @tc.type: FUNC
+ * @tc.desc: Verify ParseFlexShrink accepts finite values in [0, +infinity) and rejects negative values.
+ * @tc.type:
+ * FUNC
  */
 TEST(StyleApplyUtilsEffectsTest, StyleApplyUtilsEffectsTest019)
 {
     float flexShrink = 0.0F;
-    auto adapter = JsonAdapter::Parse(R"(2.0)");
+    auto adapter = JsonAdapter::Parse(R"(0.5)");
     ASSERT_NE(adapter, nullptr);
-    EXPECT_FALSE(StyleApplyUtils::ParseFlexShrink(adapter->GetRoot(), flexShrink));
+    EXPECT_TRUE(StyleApplyUtils::ParseFlexShrink(adapter->GetRoot(), flexShrink));
+    EXPECT_FLOAT_EQ(flexShrink, 0.5F);
+
+    auto greaterThanOneAdapter = JsonAdapter::Parse(R"(2.6)");
+    ASSERT_NE(greaterThanOneAdapter, nullptr);
+    EXPECT_TRUE(StyleApplyUtils::ParseFlexShrink(greaterThanOneAdapter->GetRoot(), flexShrink));
+    EXPECT_FLOAT_EQ(flexShrink, 2.6F);
 
     auto negAdapter = JsonAdapter::Parse(R"(-0.5)");
     ASSERT_NE(negAdapter, nullptr);
@@ -2419,9 +2506,7 @@ TEST(StyleParserTest, StyleParserTest002)
     EXPECT_EQ(StyleParser::ToPropertyName("width"), StylePropertyName::WIDTH);
     EXPECT_EQ(StyleParser::ToPropertyName("height"), StylePropertyName::HEIGHT);
     EXPECT_EQ(StyleParser::ToPropertyName("padding"), StylePropertyName::PADDING);
-    EXPECT_EQ(StyleParser::ToPropertyName("paddingTop"), StylePropertyName::PADDING);
     EXPECT_EQ(StyleParser::ToPropertyName("margin"), StylePropertyName::MARGIN);
-    EXPECT_EQ(StyleParser::ToPropertyName("marginTop"), StylePropertyName::MARGIN);
     EXPECT_EQ(StyleParser::ToPropertyName("backgroundColor"), StylePropertyName::BACKGROUND_COLOR);
     EXPECT_EQ(StyleParser::ToPropertyName("borderRadius"), StylePropertyName::BORDER_RADIUS);
     EXPECT_EQ(StyleParser::ToPropertyName("borderWidth"), StylePropertyName::BORDER_WIDTH);
@@ -2478,15 +2563,8 @@ TEST(StyleParserTest, StyleParserTest004)
         "width": 100,
         "height": 50,
         "padding": 10,
-        "paddingTop": 5,
-        "paddingRight": 5,
-        "paddingBottom": 5,
-        "paddingLeft": 5,
         "margin": 8,
         "marginTop": 4,
-        "marginRight": 4,
-        "marginBottom": 4,
-        "marginLeft": 4,
         "backgroundColor": "#FF0000",
         "borderRadius": 10,
         "borderWidth": 2,
@@ -2509,9 +2587,7 @@ TEST(StyleParserTest, StyleParserTest004)
         "shadow": {},
         "flexShrink": 1,
         "backgroundImage": "test.png",
-        "backgroundimage": "test2.png",
         "backgroundImageSizeWithStyle": 1,
-        "backgroundimageSizeWithStyle": 1,
         "clip": true,
         "layoutWeight": 2,
         "constraintSize": {"minWidth": 10}
@@ -2557,8 +2633,9 @@ TEST(StyleParserTest, StyleParserTest006)
  */
 TEST(StyleParserTest, StyleParserTest007)
 {
-    EXPECT_EQ(StyleParser::ToPropertyName("backgroundImageSize"), StylePropertyName::BACKGROUND_IMAGE_SIZE);
-    EXPECT_EQ(StyleParser::ToPropertyName("backgroundimageSize"), StylePropertyName::BACKGROUND_IMAGE_SIZE);
+    // backgroundImageSize is no longer registered in the name map (alias-removal); the resolver
+    // still applies it through its raw JSON key, so ToPropertyName resolves it to UNKNOWN.
+    EXPECT_EQ(StyleParser::ToPropertyName("backgroundImageSize"), StylePropertyName::UNKNOWN);
     EXPECT_EQ(StyleParser::ToPropertyName("linearGradient"), StylePropertyName::LINEAR_GRADIENT);
     EXPECT_EQ(StyleParser::ToPropertyName("unknownProperty"), StylePropertyName::UNKNOWN);
 }
@@ -3185,14 +3262,14 @@ TEST(ExtendedStyleResolverTest, ExtendedStyleResolverTest064)
 
 /**
  * @tc.name: ExtendedStyleResolverTest065
- * @tc.desc: Verify backgroundimageSizeWithStyle via ResolveAndApply.
+ * @tc.desc: Verify backgroundImageSizeWithStyle via ResolveAndApply.
  * @tc.type: FUNC
  */
 TEST(ExtendedStyleResolverTest, ExtendedStyleResolverTest065)
 {
     RecordingCommonStyleApplier applier;
     auto adapter = JsonAdapter::Parse(R"({
-        "backgroundimageSizeWithStyle": 1
+        "backgroundImageSizeWithStyle": 1
     })");
     ASSERT_NE(adapter, nullptr);
     ExtendedStyleResolver::ResolveAndApply(adapter->GetRoot(), applier);
@@ -3276,14 +3353,14 @@ TEST(ExtendedStyleResolverTest, ExtendedStyleResolverTest069)
 
 /**
  * @tc.name: ExtendedStyleResolverTest070
- * @tc.desc: Verify ResolveAndApply with backgroundimage (lowercase i).
+ * @tc.desc: Verify ResolveAndApply with backgroundImage (lowercase i).
  * @tc.type: FUNC
  */
 TEST(ExtendedStyleResolverTest, ExtendedStyleResolverTest070)
 {
     RecordingCommonStyleApplier applier;
     auto adapter = JsonAdapter::Parse(R"({
-        "backgroundimage": "test.png"
+        "backgroundImage": "test.png"
     })");
     ASSERT_NE(adapter, nullptr);
     ExtendedStyleResolver::ResolveAndApply(adapter->GetRoot(), applier);
@@ -3898,6 +3975,11 @@ TEST(StyleApplyUtilsTextTest, StyleApplyUtilsTextTest001)
     ASSERT_NE(fractionalValue, nullptr);
     EXPECT_FALSE(StyleApplyUtils::ParseMaxLines(fractionalValue->GetRoot(), maxLines));
 
+    auto truncatableValue = JsonAdapter::Parse("1.5");
+    ASSERT_NE(truncatableValue, nullptr);
+    EXPECT_TRUE(StyleApplyUtils::ParseMaxLines(truncatableValue->GetRoot(), maxLines));
+    EXPECT_EQ(maxLines, 1);
+
     auto boolValue = JsonAdapter::Parse("true");
     ASSERT_NE(boolValue, nullptr);
     EXPECT_FALSE(StyleApplyUtils::ParseMaxLines(boolValue->GetRoot(), maxLines));
@@ -3917,6 +3999,15 @@ TEST(StyleApplyUtilsTextTest, StyleApplyUtilsTextTest001)
     EXPECT_TRUE(StyleApplyUtils::ParseMaxLines(validValue->GetRoot(), maxLines));
     EXPECT_EQ(maxLines, 2);
 
+    auto maxInt32Value = JsonAdapter::Parse("2147483647");
+    ASSERT_NE(maxInt32Value, nullptr);
+    EXPECT_TRUE(StyleApplyUtils::ParseMaxLines(maxInt32Value->GetRoot(), maxLines));
+    EXPECT_EQ(maxLines, std::numeric_limits<int32_t>::max());
+
+    auto overMaxInt32Value = JsonAdapter::Parse("2147483648");
+    ASSERT_NE(overMaxInt32Value, nullptr);
+    EXPECT_FALSE(StyleApplyUtils::ParseMaxLines(overMaxInt32Value->GetRoot(), maxLines));
+
     auto invalidStringValue = JsonAdapter::Parse(R"("bad")");
     ASSERT_NE(invalidStringValue, nullptr);
     EXPECT_FALSE(StyleApplyUtils::ParseMaxLines(invalidStringValue->GetRoot(), maxLines));
@@ -3925,6 +4016,15 @@ TEST(StyleApplyUtilsTextTest, StyleApplyUtilsTextTest001)
     ASSERT_NE(validStringValue, nullptr);
     EXPECT_TRUE(StyleApplyUtils::ParseMaxLines(validStringValue->GetRoot(), maxLines));
     EXPECT_EQ(maxLines, 3);
+
+    auto fractionalStringValue = JsonAdapter::Parse(R"("1.5")");
+    ASSERT_NE(fractionalStringValue, nullptr);
+    EXPECT_TRUE(StyleApplyUtils::ParseMaxLines(fractionalStringValue->GetRoot(), maxLines));
+    EXPECT_EQ(maxLines, 1);
+
+    auto overMaxInt32StringValue = JsonAdapter::Parse(R"("2147483648")");
+    ASSERT_NE(overMaxInt32StringValue, nullptr);
+    EXPECT_FALSE(StyleApplyUtils::ParseMaxLines(overMaxInt32StringValue->GetRoot(), maxLines));
 }
 
 TEST(StyleApplyUtilsTextTest, StyleApplyUtilsTextTest002)

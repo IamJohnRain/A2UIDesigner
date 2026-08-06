@@ -31,6 +31,13 @@ public:
 private:
     std::string ResolveTemplate(const std::string& templateStr, const DynamicResolveContext& context);
     int FindMatchingBrace(const std::string& s, int start);
+    bool ParseFunctionCallArgs(
+        const std::string& argsPart, JsonValue& argsObject, const DynamicResolveContext& context);
+    bool ParseSingleArgValue(const std::string& argsPart, size_t valStart, const DynamicResolveContext& context,
+        JsonValue& argValue, size_t& nextPos);
+    std::string ResolveFunctionCall(
+        const std::string& funcName, const std::string& argsPart, const DynamicResolveContext& context);
+    std::string ResolveDataPathExpression(const std::string& expr, const DynamicResolveContext& context);
 };
 
 } // namespace NativeModule

@@ -16,7 +16,7 @@
 import { A2UICheckRule } from './CheckRule'
 
 export class A2UICheckable {
-  checks?: A2UICheckRule[]
+  public checks?: A2UICheckRule[]
 
   static schema(): string {
     return `{

@@ -200,7 +200,7 @@ export function extendedRadioBuilder(attribute: CustomComponentAttribute): void 
 
 export function createRadioDefinition(): CustomComponentDefinition {
   const schemaProvider: SchemaProvider = (_version: string): string => {
-    return SchemaResourceLoader.loadSchema('schema/A2UI/extendedComponents/Radio.json');
+    return SchemaResourceLoader.loadSchema('schema/Extended/components/ExtendedRadio.json');
   };
 
   return {

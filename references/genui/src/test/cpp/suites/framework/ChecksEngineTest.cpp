@@ -192,6 +192,20 @@ TEST_F(ChecksEngineTest, should_parse_checks_and_collect_binding_paths)
     EXPECT_EQ(engine.checks_.size(), 2U);
 }
 
+TEST_F(ChecksEngineTest, should_collect_nested_binding_paths_and_ignore_invalid_path_values)
+{
+    auto descriptor =
+        ParseJson(R"({"outer":[{"path":"/user/name"},{"nested":{"path":"/user/name"}},{"path":7},{"path":""}]})");
+    ASSERT_NE(descriptor, nullptr);
+
+    ChecksEngine engine(nullptr);
+    std::unordered_set<std::string> paths;
+    engine.CollectCheckBindingPaths(descriptor->GetRoot(), paths);
+
+    EXPECT_EQ(paths.size(), 1U);
+    EXPECT_EQ(paths.count("/user/name"), 1U);
+}
+
 TEST_F(ChecksEngineTest, should_clear_state_and_skip_invalid_check_items)
 {
     auto validDescriptor =

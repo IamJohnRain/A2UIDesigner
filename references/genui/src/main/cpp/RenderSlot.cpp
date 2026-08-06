@@ -16,6 +16,7 @@
 #include "RenderSlot.h"
 
 #include "utils/LogA2UI.h"
+#include "utils/SystemProperties.h"
 
 #include "SurfaceManager.h"
 #include "SurfaceSlot.h"
@@ -74,17 +75,12 @@ float RenderSlot::GetFontSizeScale() const
 
 void RenderSlot::SetApiVersion(int32_t apiVersion)
 {
-    if (surfaceManager_ != nullptr) {
-        surfaceManager_->SetApiVersion(apiVersion);
-    }
+    SystemProperties::GetInstance().SetApiVersion(apiVersion);
 }
 
 int32_t RenderSlot::GetApiVersion() const
 {
-    if (surfaceManager_ != nullptr) {
-        return surfaceManager_->GetApiVersion();
-    }
-    return 0;
+    return SystemProperties::GetInstance().GetApiVersion();
 }
 
 void RenderSlot::Dispose()
