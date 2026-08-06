@@ -21,6 +21,10 @@
 
 https://iamjohnrain.github.io/A2UIDesigner/
 
+## ALT 生成（浏览器内转换）
+
+「ALT 生成」页签在浏览器本地完成 TaskSpec + ALT + ASC → DSL 转换，转换内核为 `scripts/alt_to_dsl_converter.py`，由 Pyodide 在浏览器内执行。运行时（core 0.26.4，含时区补丁）首次点击「编译并渲染」时从 `https://iamjohnrain.github.io/a2ui-pyodide/` 懒加载，主源不可用时自动回退到 `raw.githubusercontent.com/IamJohnRain/a2ui-pyodide/master/`。详见 `docs/alt-protocol-pyodide-plan.md`。
+
 ## CLI 渲染器
 
 [GitHub Release](https://github.com/IamJohnRain/A2UIDesigner/releases/latest) 提供 Linux x64 和 ARM64 的两类版本：
