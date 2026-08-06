@@ -1096,17 +1096,16 @@
       const text = document.createElement('span');
       text.className = 'checkbox-label';
       text.textContent = label;
-      text.style.minWidth = '0';
-      text.style.flex = '1';
       text.style.marginLeft = `${preset.labelSpacing}px`;
       text.style.fontSize = `${preset.labelFontSize}px`;
       text.style.fontWeight = 400;
       text.style.color = cssColor('#E5000000');
-      text.style.overflow = 'hidden';
-      text.style.textOverflow = 'ellipsis';
+      // GenUI keeps the checkbox label at intrinsic content width inside an
+      // overflow-visible Row (ExtendedCheckboxComponent.cpp only sets
+      // maxLines=1 + textOverflow=ELLIPSIS, with no width/flex constraints),
+      // so the label never shrinks or ellipsizes; it overflows the box.
+      text.style.flex = 'none';
       text.style.whiteSpace = 'nowrap';
-      text.dataset.genuiCheckboxLabel = 'true';
-      text.dataset.genuiCheckboxText = label;
       element.appendChild(text);
     }
   }
@@ -1168,33 +1167,6 @@
         visible = candidate;
       }
       element.textContent = visible;
-    });
-    root.querySelectorAll('[data-genui-checkbox-label="true"]').forEach(element => {
-      const original = element.dataset.genuiCheckboxText || '';
-      const available = Math.max(0, element.clientWidth - 4);
-      if (!original || available <= 0) return;
-      const widthOf = text => {
-        element.textContent = text;
-        const range = document.createRange();
-        range.selectNodeContents(element);
-        const elementWidth = element.getBoundingClientRect().width;
-        const scaleX = element.clientWidth > 0 && elementWidth > 0
-          ? elementWidth / element.clientWidth : 1;
-        const width = range.getBoundingClientRect().width / scaleX;
-        range.detach();
-        return width;
-      };
-      if (widthOf(original) <= available) {
-        element.textContent = original;
-        return;
-      }
-      const ellipsis = '...';
-      let visible = '';
-      for (const segment of [...original]) {
-        if (widthOf(visible + segment + ellipsis) > available) break;
-        visible += segment;
-      }
-      element.textContent = visible + ellipsis;
     });
     root.querySelectorAll('[data-genui-list-scroll-bar]').forEach(list => {
       list.querySelector('.genui-list-scroll-indicator')?.remove();

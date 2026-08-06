@@ -9,9 +9,8 @@
         "gradient": {
           "direction": "RightBottom",
           "colors": [
-            ["#FFFFFFFF", 0],
-            ["#FFF4F8FF", 0.56],
-            ["#FFE4EDFF", 1]
+            ["#FFC9D6FF", 0],
+            ["#FFE2E2E2", 1]
           ]
         },
         "border": "1/#1A3B6FC4"
@@ -64,9 +63,8 @@
         "gradient": {
           "direction": "RightBottom",
           "colors": [
-            ["#FFF9FCFC", 0],
-            ["#FFEAF5F3", 0.54],
-            ["#FFDCECED", 1]
+            ["#FFE8D5FF", 0],
+            ["#FFA4C7FF", 1]
           ]
         },
         "border": "1/#1A2A8693"
@@ -119,9 +117,9 @@
         "gradient": {
           "direction": "RightBottom",
           "colors": [
-            ["#FF292641", 0],
-            ["#FF1B1C2A", 0.54],
-            ["#FF111218", 1]
+            ["#FF191970", 0],
+            ["#FF4169E1", 0.5],
+            ["#FF6495ED", 1]
           ]
         },
         "border": "1/#337A74D7"

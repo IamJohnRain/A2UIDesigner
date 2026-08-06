@@ -2798,6 +2798,14 @@ def auto_gap(node: AltNode, depth: int, density: str) -> int:
     return int(spacing.get("nestedGap", 6))
 
 
+def checkbox_leaf_group(node: AltNode) -> bool:
+    """True when a Row/Column directly holds >=2 Checkbox leaf children."""
+    children = node.children
+    if len(children) < 2:
+        return False
+    return all(child.component == "Checkbox" for child in children)
+
+
 def rounded_dimension(value: float) -> int:
     return max(1, int(math.ceil(value - 1e-9)))
 
@@ -3120,7 +3128,10 @@ def auto_layout_document(
                         f"Button label {measure_value.content!r} needs {width_value:g}x{height_value:g}vp but only {available_width:g}x{available_height:g}vp is available",
                     )
                 )
-            width_value = min(width_value, available_width)
+            if parent is not None and parent.component == "Column":
+                width_value = available_width
+            else:
+                width_value = min(width_value, available_width)
             height_value = min(height_value, available_height)
             chars = max(
                 1,
@@ -3273,9 +3284,13 @@ def auto_layout_document(
                 and all(child.component in {"Image", "Text"} for child in children)
                 and all(auto_role(child) in {"asset", "title", "status", "support", "meta"} for child in children)
             )
-            node.attrs.update(
-                {"gap": gap, "main": "center" if centered_compact_header else "start", "cross": "center"}
-            )
+            if checkbox_leaf_group(node):
+                node.attrs.update({"main": "between", "cross": "start"})
+                node.attrs.pop("gap", None)
+            else:
+                node.attrs.update(
+                    {"gap": gap, "main": "center" if centered_compact_header else "start", "cross": "center"}
+                )
             for child, child_width in zip(children, child_widths):
                 child_height = content_height if child.component in CONTAINERS | VIRTUAL_COMPONENTS else min(
                     content_height, measures[child.node_id].preferred_height
@@ -3342,7 +3357,13 @@ def auto_layout_document(
                 )
             has_bottom_action = children[-1].component == "Button"
             anchor_action = has_bottom_action and len(children) >= 3
-            if (
+            if checkbox_leaf_group(node):
+                node.attrs.update({"main": "between", "cross": "start"})
+                node.attrs.pop("gap", None)
+            elif root_node and node.component == "Column":
+                node.attrs.update({"main": "between", "cross": "center"})
+                node.attrs.pop("gap", None)
+            elif (
                 sum(preferred_heights) + gap_total
                 < content_height - COLUMN_BOTTOM_ACTION_ANCHOR_GAP
                 and anchor_action
@@ -3362,9 +3383,12 @@ def auto_layout_document(
                     }
                 )
             for child, child_height in zip(children, child_heights):
-                if child.component in CONTAINERS | VIRTUAL_COMPONENTS or child.component in {"Text", "Progress", "Divider"}:
-                    child_width = content_width
-                elif child.component == "Button" and root_node:
+                if child.component in CONTAINERS | VIRTUAL_COMPONENTS or child.component in {
+                    "Text",
+                    "Progress",
+                    "Divider",
+                    "Button",
+                }:
                     child_width = content_width
                 else:
                     child_width = min(content_width, measures[child.node_id].preferred_width)

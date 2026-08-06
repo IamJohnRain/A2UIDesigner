@@ -3,5 +3,19 @@
   "forbidRawTokenNames": true,
   "maxPrimaryColorFamilies": 1,
   "tokenNamePattern": "^(brand|warning|alert|confirm|font_|icon_|background_|comp_|interactive_|multi_color_)",
-  "sceneExtensions": []
+  "sceneExtensions": [
+    {
+      "scene": "alt_theme_surface_gradient",
+      "usage": "ALT 自动布局主题 surface.gradient 场景拓展色（ohmycolor 渐变方案映射）",
+      "hex": [
+        "#ffc9d6ff",
+        "#ffe2e2e2",
+        "#ffe8d5ff",
+        "#ffa4c7ff",
+        "#ff191970",
+        "#ff4169e1",
+        "#ff6495ed"
+      ]
+    }
+  ]
 }

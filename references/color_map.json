@@ -1,0 +1,128 @@
+{
+  "title": "9组高级感渐变色配色方案",
+  "source": "Loyel 2025 Color Matching",
+  "palettes": [
+    {
+      "id": 1,
+      "name": "Ocean Voyage",
+      "name_cn": "海洋远航",
+      "description": "深邃到清澈的海蓝渐变，像清晨从海底望向天空",
+      "colors": [
+        { "hex": "#163D5A", "name": "Midnight Tide" },
+        { "hex": "#2A5D8A", "name": "Twilight Deep" },
+        { "hex": "#549AC2", "name": "Cerulean Drift" },
+        { "hex": "#7DC1F0", "name": "Sky Reflection" },
+        { "hex": "#B5DCF9", "name": "Pearl Mist" }
+      ]
+    },
+    {
+      "id": 2,
+      "name": "Slate Reverie",
+      "name_cn": "板岩遐思",
+      "description": "灰蓝冷调，安静克制的高级质感",
+      "colors": [
+        { "hex": "#A1A0A4", "name": "Misty Marble" },
+        { "hex": "#7A8DA0", "name": "Stormy Horizon" },
+        { "hex": "#6289A8", "name": "Foggy Pier" },
+        { "hex": "#5B8FB1", "name": "Slate Stream" },
+        { "hex": "#BAD5E0", "name": "Cloud Veil" }
+      ]
+    },
+    {
+      "id": 3,
+      "name": "Abyss Glow",
+      "name_cn": "深渊幽光",
+      "description": "深海到浅滩的青绿光谱，沉静而有力量",
+      "colors": [
+        { "hex": "#082834", "name": "Abyssal Ink" },
+        { "hex": "#003D55", "name": "Ocean Abyss" },
+        { "hex": "#006783", "name": "Deep Lagoon" },
+        { "hex": "#41B0CB", "name": "Coral Wave" },
+        { "hex": "#87CFDC", "name": "Sea Foam" }
+      ]
+    },
+    {
+      "id": 4,
+      "name": "Sky Cascade",
+      "name_cn": "天空倾泻",
+      "description": "深邃蓝层层化作柔软的棉云",
+      "colors": [
+        { "hex": "#163D5A", "name": "Midnight Tide" },
+        { "hex": "#1F64A5", "name": "Atlantic Blue" },
+        { "hex": "#4790C9", "name": "Pacific Splash" },
+        { "hex": "#82B6D6", "name": "Soft Sky" },
+        { "hex": "#B6D6DF", "name": "Cotton Cloud" }
+      ]
+    },
+    {
+      "id": 5,
+      "name": "Lagoon Jewel",
+      "name_cn": "礁湖宝石",
+      "description": "暗礁湖般的青绿色，珠宝般的光泽",
+      "colors": [
+        { "hex": "#285465", "name": "Hidden Cove" },
+        { "hex": "#317589", "name": "Reef Shadow" },
+        { "hex": "#4792A1", "name": "Bay Treasure" },
+        { "hex": "#8EB7BB", "name": "Pearl Whisper" },
+        { "hex": "#BCD8DA", "name": "Sea Salt" }
+      ]
+    },
+    {
+      "id": 6,
+      "name": "Mint Whisper",
+      "name_cn": "薄荷低语",
+      "description": "清新的薄荷青绿，呼吸都变得轻盈",
+      "colors": [
+        { "hex": "#1A8B98", "name": "Verdant Depth" },
+        { "hex": "#2BA38D", "name": "Mint Stream" },
+        { "hex": "#5DBE9D", "name": "Sage Whisper" },
+        { "hex": "#89D2B0", "name": "Soft Jade" },
+        { "hex": "#B8E8C9", "name": "Cotton Mint" }
+      ]
+    },
+    {
+      "id": 7,
+      "name": "Forest Mist",
+      "name_cn": "森林晨雾",
+      "description": "从密林深处走入晨雾的清新之旅",
+      "colors": [
+        { "hex": "#173849", "name": "Pine Abyss" },
+        { "hex": "#275A4E", "name": "Forest Veil" },
+        { "hex": "#385B58", "name": "Mossy Trail" },
+        { "hex": "#76C8C5", "name": "Morning Dew" },
+        { "hex": "#C0F1E7", "name": "Mint Frost" }
+      ]
+    },
+    {
+      "id": 8,
+      "name": "Meadow Bloom",
+      "name_cn": "草地花开",
+      "description": "从夜空走入春日草原的奇妙旅程",
+      "colors": [
+        { "hex": "#48354A", "name": "Plum Dusk" },
+        { "hex": "#56AAA0", "name": "Teal Spring" },
+        { "hex": "#94C296", "name": "Fresh Sprout" },
+        { "hex": "#A4D797", "name": "Tender Leaf" },
+        { "hex": "#C8DDA5", "name": "Sunlit Bloom" }
+      ]
+    },
+    {
+      "id": 9,
+      "name": "Lavender Dream",
+      "name_cn": "薰衣草梦境",
+      "description": "蓝紫到粉紫的柔美梦境",
+      "colors": [
+        { "hex": "#4885A4", "name": "Dusky Blue" },
+        { "hex": "#7C97BD", "name": "Wisteria Haze" },
+        { "hex": "#A57EC0", "name": "Iris Bloom" },
+        { "hex": "#BDA8C5", "name": "Lilac Cloud" },
+        { "hex": "#D5AACE", "name": "Rose Mist" }
+      ]
+    }
+  ],
+  "summary": {
+    "totalPalettes": 9,
+    "totalColors": 45,
+    "mood": "高级感、治愈系、莫兰迪倾向"
+  }
+}
