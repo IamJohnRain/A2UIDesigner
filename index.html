@@ -25,12 +25,40 @@
   <main class="workspace">
     <aside class="source-panel panel">
       <div class="panel-head"><div><h2>DSL 源码</h2><p>粘贴三行 JSONL，或打开本地文件</p></div><span id="parseState" class="status muted">等待输入</span></div>
-      <div class="source-tabs" role="tablist" aria-label="编辑视图"><button class="source-tab active" data-source-tab="code" role="tab" aria-selected="true">源码</button><button class="source-tab" data-source-tab="tree" role="tab" aria-selected="false">布局</button></div>
+      <div class="source-tabs" role="tablist" aria-label="编辑视图"><button class="source-tab active" data-source-tab="code" role="tab" aria-selected="true">源码</button><button class="source-tab" data-source-tab="tree" role="tab" aria-selected="false">布局</button><button class="source-tab" data-source-tab="alt" role="tab" aria-selected="false">ALT 生成</button></div>
       <div id="sourceCodePanel" class="source-tab-panel"><textarea id="dslInput" spellcheck="false" placeholder='{"version":"v0.9","createSurface":{...}}&#10;{"version":"v0.9","updateComponents":{...}}&#10;{"version":"v0.9","updateDataModel":{...}}'></textarea>
       <div id="errorBox" class="error-box" hidden></div>
       <div class="source-actions"><button id="formatBtn" class="ghost">格式化</button><button id="renderBtn" class="primary grow">渲染卡片</button></div>
       </div>
       <div id="sourceTreePanel" class="source-tab-panel layout-tree-panel" hidden><p class="tree-help">点击节点即可在画布和属性栏中编辑；警告表示未挂载或无效引用。</p><div id="layoutTree" class="layout-tree" role="tree"></div></div>
+      <div id="sourceAltPanel" class="source-tab-panel alt-tab-panel" hidden>
+        <div class="alt-fields">
+          <label class="alt-field"><span>TaskSpec（JSON）</span>
+            <textarea id="altTaskSpec" spellcheck="false" placeholder='{"userQuery":"...","size":"2x2",...}'></textarea>
+          </label>
+          <label class="alt-field"><span>ALT 结构（card.alt.txt）</span>
+            <textarea id="altInput" spellcheck="false" placeholder='Column root card=2x2 theme=neutral-light&#10;  Text title role=title'></textarea>
+          </label>
+          <label class="alt-field"><span>ASC 语义（card.asc.txt）</span>
+            <textarea id="ascInput" spellcheck="false" placeholder='Text title text=今日用电'></textarea>
+          </label>
+        </div>
+        <div class="alt-options">
+          <label class="alt-option"><span>主题</span>
+            <select id="altTheme"></select>
+          </label>
+          <label class="alt-option"><span>宽度（vp）</span>
+            <input id="altWidth" type="number" min="1" step="1" placeholder="140">
+          </label>
+          <label class="alt-option"><span>高度（vp）</span>
+            <input id="altHeight" type="number" min="1" step="1" placeholder="140">
+          </label>
+        </div>
+        <div class="source-actions">
+          <button id="altCompileBtn" class="primary grow">编译并渲染</button>
+        </div>
+        <div id="altReport" class="error-box" hidden></div>
+      </div>
     </aside>
 
     <section class="stage-panel panel">
@@ -60,6 +88,16 @@
     </aside>
   </main>
   <div id="toast" class="toast"></div>
+  <div id="altLoading" class="alt-loading" hidden>
+    <div class="alt-loading-card" role="status" aria-live="polite">
+      <div class="alt-loading-title">正在下载转换引擎</div>
+      <div class="alt-loading-desc">首次使用需要在本地下载 Python 转换运行时（约 7MB），仅首次需要。下载与转换都在浏览器本地完成，你的内容不会上传。请稍候，下载完成后将自动编译并渲染。</div>
+      <div class="alt-loading-track"><div id="altLoadingBar" class="alt-loading-bar"></div></div>
+      <div id="altLoadingText" class="alt-loading-text">0%（0 B / 0 B）</div>
+      <div id="altLoadingError" class="alt-loading-error" hidden></div>
+      <button id="altLoadingRetry" class="primary" hidden>重试</button>
+    </div>
+  </div>
   <div id="assetDialog" class="modal-backdrop" hidden>
     <section class="asset-dialog" role="dialog" aria-modal="true" aria-labelledby="assetDialogTitle">
       <header><div><h2 id="assetDialogTitle">选择图片素材</h2><p>选择素材后再插入，避免创建不可见图片组件。</p></div><button id="closeAssetDialog" class="icon-btn" type="button" aria-label="关闭">×</button></header>

@@ -185,7 +185,174 @@
   select=function(id,rerender=true){baseSelect(id,rerender);renderLayoutTree();updateAddControls()};
   deselect=function(){baseDeselect();renderLayoutTree();updateAddControls()};
   document.querySelectorAll('[data-add]').forEach(button=>button.onclick=()=>{const type=button.dataset.add;if(type==='Image')showAssetDialog();else addComponentSafely(type)});
-  document.querySelectorAll('[data-source-tab]').forEach(tab=>tab.onclick=()=>{const tree=tab.dataset.sourceTab==='tree';$('#sourceCodePanel').hidden=tree;$('#sourceTreePanel').hidden=!tree;document.querySelectorAll('[data-source-tab]').forEach(x=>{const active=x===tab;x.classList.toggle('active',active);x.setAttribute('aria-selected',String(active))});if(tree)renderLayoutTree()});
+  document.querySelectorAll('[data-source-tab]').forEach(tab=>tab.onclick=()=>{const name=tab.dataset.sourceTab;$('#sourceCodePanel').hidden=name!=='code';$('#sourceTreePanel').hidden=name!=='tree';$('#sourceAltPanel').hidden=name!=='alt';document.querySelectorAll('[data-source-tab]').forEach(x=>{const active=x===tab;x.classList.toggle('active',active);x.setAttribute('aria-selected',String(active))});if(name==='tree')renderLayoutTree();if(name==='alt')initAltTab()});
   $('#closeAssetDialog').onclick=closeAssetDialog;$('#cancelAssetDialog').onclick=closeAssetDialog;$('#assetDialog').onclick=e=>{if(e.target===$('#assetDialog'))closeAssetDialog()};$('#insertAssetBtn').onclick=()=>{if(!pendingAssetSrc)return;const src=pendingAssetSrc;closeAssetDialog();addComponentSafely('Image',src)};
   updateAddControls();renderLayoutTree();
+
+  // ---- ALT 生成页签 ----
+  const ALT_THEMES_URL='scripts/config/alt-themes.json';
+  let altThemesReady=null;
+  function initAltTab(){
+    if(!altThemesReady){
+      altThemesReady=fetch(ALT_THEMES_URL).then(r=>{if(!r.ok)throw Error('主题配置加载失败');return r.json()}).then(cfg=>{
+        if(!cfg||!cfg.themes||typeof cfg.themes!=='object')throw Error('主题配置格式错误');
+        const select=$('#altTheme');
+        select.innerHTML='<option value="">跟随 ALT（默认）</option>'+Object.keys(cfg.themes).map(t=>`<option value="${t}">${t}</option>`).join('');
+        select.value='';
+      }).catch(e=>{altThemesReady=null;throw e});
+    }
+    return altThemesReady;
+  }
+  function syncSizePlaceholders(){
+    let size=null;
+    try{size=JSON.parse($('#altTaskSpec').value||'{}').size}catch(e){/* keep current */ }
+    const d=size==='2x4'?[300,140]:[140,140];
+    $('#altWidth').placeholder=d[0];
+    $('#altHeight').placeholder=d[1];
+  }
+  $('#altTaskSpec').addEventListener('input',syncSizePlaceholders);
+  syncSizePlaceholders();
+
+  function fmtBytes(n){
+    if(n<1024)return n+' B';
+    if(n<1048576)return (n/1024).toFixed(1)+' KB';
+    return (n/1048576).toFixed(1)+' MB';
+  }
+  function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+
+  let pyodidePromise=null;
+  let pyodideLoading=false;
+  const ALT_CORE_FILES=['pyodide.asm.wasm','python_stdlib.zip','pyodide.asm.js','pyodide.js','pyodide-lock.json'];
+  let altProgress={loaded:0,total:0};
+
+  function installDownloadProgress(){
+    const nativeFetch=window.fetch.bind(window);
+    window.fetch=async(input,init)=>{
+      const response=await nativeFetch(input,init);
+      const url=typeof input==='string'?input:(input&&input.url)||'';
+      if(!response.ok||!response.body||!ALT_CORE_FILES.some(f=>url.includes(f)))return response;
+      const total=Number(response.headers.get('content-length'))||0;
+      altProgress.total+=total;
+      const reader=response.body.getReader();
+      const stream=new ReadableStream({
+        start(controller){
+          let loaded=0;
+          (function pump(){
+            reader.read().then(({done,value})=>{
+              if(done){altProgress.loaded+=loaded;controller.close();updateAltProgress();return}
+              loaded+=value.byteLength;
+              controller.enqueue(value);
+              pump();
+            }).catch(err=>controller.error(err));
+          })();
+        }
+      });
+      return new Response(stream,response);
+    };
+  }
+
+  function updateAltProgress(){
+    const percent=altProgress.total?Math.min(100,Math.round(altProgress.loaded/altProgress.total*100)):0;
+    const bar=$('#altLoadingBar'),text=$('#altLoadingText');
+    if(bar)bar.style.width=percent+'%';
+    if(text)text.textContent=`${percent}%（${fmtBytes(altProgress.loaded)} / ${fmtBytes(altProgress.total)}）`;
+  }
+
+  function loadPyodideLoader(){
+    return new Promise((resolve,reject)=>{
+      if(window.loadPyodide)return resolve();
+      const script=document.createElement('script');
+      script.src='vendor/pyodide/pyodide.js';
+      script.onload=()=>resolve();
+      script.onerror=()=>reject(new Error('Pyodide loader 下载失败'));
+      document.head.appendChild(script);
+    });
+  }
+
+  async function ensurePyodide(){
+    if(!pyodidePromise){
+      pyodideLoading=true;
+      showAltLoading();
+      pyodidePromise=(async()=>{
+        installDownloadProgress();
+        await loadPyodideLoader();
+        const py=await loadPyodide({indexURL:'vendor/pyodide/'});
+        let converterSrc=await (await fetch('scripts/alt_to_dsl_converter.py')).text();
+        converterSrc=converterSrc.replace(/\r?\nif __name__ == "__main__":\s*raise SystemExit\(main\(\)\)\s*$/,'');
+        const cfg1=await (await fetch('scripts/config/alt-themes.json')).text();
+        const cfg2=await (await fetch('scripts/config/alt-layout-profile.json')).text();
+        const cfg3=await (await fetch('scripts/config/alt-tuning.json')).text();
+        await py.runPythonAsync(converterSrc);
+        await py.runPythonAsync(`import json; configure_runtime(${JSON.stringify(cfg1)},${JSON.stringify(cfg2)},${JSON.stringify(cfg3)})`);
+        return py;
+      })().catch(err=>{pyodidePromise=null;throw err}).finally(()=>{pyodideLoading=false;hideAltLoading()});
+    }
+    return pyodidePromise;
+  }
+
+  async function compileAlt(taskSpecText,altText,ascText,theme,width,height){
+    const py=await ensurePyodide();
+    py.globals.set('__t',taskSpecText);
+    py.globals.set('__a',altText);
+    py.globals.set('__s',ascText);
+    py.globals.set('__theme',theme===''?null:theme);
+    py.globals.set('__w',width===''?null:Number(width));
+    py.globals.set('__h',height===''?null:Number(height));
+    const result=await py.runPythonAsync('browser_convert(__t,__a,__s,__theme,__w,__h)');
+    return JSON.parse(result);
+  }
+
+  let altLoadingTimer=null;
+  function showAltLoading(){
+    $('#altLoading').hidden=false;
+    $('#altLoadingError').hidden=true;
+    $('#altLoadingRetry').hidden=true;
+    altProgress={loaded:0,total:0};
+    updateAltProgress();
+    altLoadingTimer=setTimeout(()=>$('#altLoadingBar').classList.add('indeterminate'),2000);
+  }
+  function hideAltLoading(){
+    clearTimeout(altLoadingTimer);
+    const overlay=$('#altLoading');
+    if(overlay)overlay.hidden=true;
+    $('#altLoadingBar').classList.remove('indeterminate');
+  }
+  function showAltReport(title,lines){
+    const box=$('#altReport');
+    box.hidden=false;
+    box.innerHTML=`<strong>${escapeHtml(title)}</strong><ul>${lines.map(l=>`<li>${escapeHtml(l)}</li>`).join('')}</ul>`;
+  }
+
+  async function compileAltAndRender(){
+    try{
+      await initAltTab();
+      $('#altReport').hidden=true;
+      const result=await compileAlt(
+        $('#altTaskSpec').value,$('#altInput').value,$('#ascInput').value,
+        $('#altTheme').value,$('#altWidth').value,$('#altHeight').value
+      );
+      if(result.errors&&result.errors.length){
+        showAltReport('编译失败（hard error）',result.errors);
+        return;
+      }
+      if(result.warnings&&result.warnings.length){
+        showAltReport('已编译，含警告',result.warnings);
+      }
+      if(result.dsl){
+        els.input.value=result.dsl;
+        renderInput();
+      }
+    }catch(e){
+      if(pyodideLoading){
+        $('#altLoadingError').textContent='下载失败：'+(e.message||e);
+        $('#altLoadingError').hidden=false;
+        $('#altLoadingRetry').hidden=false;
+        $('#altLoadingBar').classList.add('indeterminate');
+      }else{
+        showAltReport('编译异常',[e.message||String(e)]);
+      }
+    }
+  }
+  $('#altCompileBtn').onclick=compileAltAndRender;
+  $('#altLoadingRetry').onclick=()=>{pyodidePromise=null;compileAltAndRender()};
 })();
