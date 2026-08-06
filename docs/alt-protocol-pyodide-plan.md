@@ -179,7 +179,7 @@ def browser_convert(
 | `python_stdlib.zip` | 标准库（≈6MB，含 unicodedata/ast/dataclasses 等） |
 | `pyodide-lock.json` | 包锁文件（必需） |
 
-获取方式：从 Pyodide GitHub Release 下载 `pyodide-core-<version>.tar.bz2`（当前稳定版如 `v0.26.x`），只解出上述 5 个文件。**不要带 full 包（200MB+）**。运行时已托管在独立仓库 [IamJohnRain/a2ui-pyodide](https://github.com/IamJohnRain/a2ui-pyodide)：GitHub Pages 主源 `https://iamjohnrain.github.io/a2ui-pyodide/` + raw 兜底 `https://raw.githubusercontent.com/IamJohnRain/a2ui-pyodide/master/`，两者均返回 `Access-Control-Allow-Origin: *`；主仓库不再包含运行时。
+获取方式：从 Pyodide GitHub Release 下载 `pyodide-core-<version>.tar.bz2`（当前稳定版如 `v0.26.x`），只解出上述 5 个文件。**不要带 full 包（200MB+）**。运行时已托管在独立仓库 [IamJohnRain/a2ui-pyodide](https://github.com/IamJohnRain/a2ui-pyodide)：raw 主源 `https://raw.githubusercontent.com/IamJohnRain/a2ui-pyodide/master/`（实测 ~3 倍于 Pages 的下载速度）+ GitHub Pages 兜底 `https://iamjohnrain.github.io/a2ui-pyodide/`，两者均返回 `Access-Control-Allow-Origin: *`；主仓库不再包含运行时。
 
 > 运行时补丁：`a2ui-pyodide/pyodide.asm.js` 的 `__tzset_js` 在部分区域设置（如 zh 语言 + `GMT+8` 时区）下，`toLocaleTimeString(...,{timeZoneName:"short"})` 返回的时区名会与时间粘连（如 `GMT+820:35:30`），`.split(" ")[1]` 得到 `undefined`，导致 `stringToUTF8` 抛 `Cannot read properties of undefined (reading 'length')`，Pyodide 启动即崩溃。已在外部仓库用 `patch-tzset.py` 将 `extractZone` 改为带兜底的稳健提取（`p[1]`，否则去掉尾随时分秒，否则 `"UTC"`），升级 Pyodide 后需重新运行该脚本。
 
@@ -191,8 +191,8 @@ def browser_convert(
 let pyodidePromise = null;
 let pyodideLoading = false;
 const PYODIDE_BASES = [
-  'https://iamjohnrain.github.io/a2ui-pyodide/',
-  'https://raw.githubusercontent.com/IamJohnRain/a2ui-pyodide/master/'
+  'https://raw.githubusercontent.com/IamJohnRain/a2ui-pyodide/master/',
+  'https://iamjohnrain.github.io/a2ui-pyodide/'
 ];
 
 function loadPyodideLoader() {
@@ -540,7 +540,7 @@ $('#altLoadingRetry').onclick = () => {
 5. **控制台**：无 JS 报错；首次加载提示与状态正常。
 6. **参数回归**：CLI `--theme` / `--width` / `--height` 与浏览器入口传入相同值时输出一致；缺省（不传）输出与旧行为完全一致（已用 60 样例验证）；非法主题 / 非正宽高应报错且不输出 DSL。
 7. **占位符行为**：宽高输入框默认显示尺寸默认值阴影（140/140 或 300/140）；输入后阴影消失显示用户值；清空回退默认。
-8. **首次加载体验**：页面打开时 Network 面板**无任何 Pyodide 运行时请求**（严格懒加载）；首次点击「编译并渲染」从 `PYODIDE_BASES` 主源下载并出现原因提示 + 进度条，进度与下载字节一致；主源失败自动切 raw 兜底；下载完成自动编译并渲染；断网/加载失败显示错误与「重试」，重试成功；二次访问（浏览器缓存命中）不再出现加载遮罩。
+8. **首次加载体验**：页面打开时 Network 面板**无任何 Pyodide 运行时请求**（严格懒加载）；首次点击「编译并渲染」从 `PYODIDE_BASES` 主源（raw）下载并出现原因提示 + 进度条，进度与下载字节一致；主源失败自动切 Pages 兜底；下载完成自动编译并渲染；断网/加载失败显示错误与「重试」，重试成功；二次访问（浏览器缓存命中）不再出现加载遮罩。
 
 > **已验证（本方案落地时）**：用 `tmp/run_luna_v4` 60 个 Case 在真实页面自动化（无头 Chrome）逐例执行「填三份文本 → 编译并渲染」，页面输出 DSL 与当前 CLI **60/60 逐字节一致**；主题下拉（lagoon-jewel）+ 宽高输入（200×120）与 CLI 同参数输出一致；首次编译显示原因提示 + 进度条，页面打开零 pyodide 请求，后续编译毫秒级。注：`run_luna_v4` 参考 DSL/PNG 由旧主题色板生成，与工作区新版 `alt-themes.json` 存在预期色差。
 

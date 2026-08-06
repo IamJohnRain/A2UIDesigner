@@ -13,6 +13,7 @@ This repository is a dependency-free, static Harmony Card DSL editor.
 - `references/harmony-card-generation-datamodel-first/` documents the supported protocol and validation rules.
 - `scripts/alt_to_dsl_converter.py` is the standalone ALT→DSL converter (TaskSpec + ALT + ASC in, DSL out; supports `--theme/--width/--height`). It is pure Python stdlib and is also executed in-browser via Pyodide.
 - `scripts/config/` holds the ALT themes/layout/tuning JSON consumed both by the CLI and by the browser runtime through `configure_runtime`.
+- `scripts/subset_fonts.py` regenerates the subsetted HarmonyOS Sans SC fonts under `references/fonts/` (full TTFs are ~8 MB each; the subset is ~1.7 MB each and renders pixel-identically). Requires `pip install fonttools`.
 
 The Pyodide runtime is **not vendored**: `vendor/pyodide/` was removed to keep the GitHub Pages artifact small. The browser ALT tab lazy-loads the pinned runtime (core 0.26.4, including a `__tzset_js` locale patch) from the separate repo `IamJohnRain/a2ui-pyodide` — GitHub Pages primary source plus `raw.githubusercontent.com` fallback, both selected in `app.js` via `PYODIDE_BASES`. Upgrading/syncing that runtime is documented in the runtime repo's README and in `docs/alt-protocol-pyodide-plan.md` (section 5.2); the patch is reproducible with `patch-tzset.py` from that repo.
 

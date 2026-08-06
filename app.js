@@ -224,8 +224,8 @@
   let pyodideLoading=false;
   const ALT_CORE_FILES=['pyodide.asm.wasm','python_stdlib.zip','pyodide.asm.js','pyodide.js','pyodide-lock.json'];
   const PYODIDE_BASES=[
-    'https://iamjohnrain.github.io/a2ui-pyodide/',
-    'https://raw.githubusercontent.com/IamJohnRain/a2ui-pyodide/master/'
+    'https://raw.githubusercontent.com/IamJohnRain/a2ui-pyodide/master/',
+    'https://iamjohnrain.github.io/a2ui-pyodide/'
   ];
   let altProgress={loaded:0,total:0};
 
