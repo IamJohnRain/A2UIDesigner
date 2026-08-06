@@ -40,6 +40,8 @@ The first command validates JavaScript syntax; the second detects whitespace err
 
 The in-browser ALT conversion needs network access on first use: clicking "编译并渲染" downloads ~7 MB of Pyodide runtime from `a2ui-pyodide` (GitHub Pages, falling back to raw). The rest of the editor works fully offline.
 
+The Pages deploy only packages the site runtime files (see `.github/workflows/pages.yml` "Stage site files"): `index.html`, `app.js`, the CSS files, `genui-renderer.js`, `references/media/` (preview assets + `assets.js`), `references/fonts/` (subsetted fonts), `scripts/alt_to_dsl_converter.py` and `scripts/config/`. Everything else in the repo — including reference source such as `references/genui/`, `docs/`, `cli/`, tests and `__pycache__` — stays in git but is intentionally excluded from the deployed artifact.
+
 ## Coding Style & Naming Conventions
 
 Use two-space indentation in HTML, CSS, and JavaScript. Prefer `camelCase` for JavaScript variables and functions, descriptive component IDs such as `action_button`, and kebab-case CSS classes such as `.color-picker`. Keep the project dependency-free and browser-native. Preserve DSL protocol values rather than introducing editor-only fields.

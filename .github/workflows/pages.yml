@@ -23,12 +23,19 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Stage site files
+        run: |
+          mkdir -p _site/references _site/scripts
+          cp index.html app.js styles.css color-picker.css add-ui.css genui-renderer.js _site/
+          cp -r references/media references/fonts _site/references/
+          cp -r scripts/config _site/scripts/
+          cp scripts/alt_to_dsl_converter.py _site/scripts/
       - name: Setup Pages
         uses: actions/configure-pages@v5
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: .
+          path: _site
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
