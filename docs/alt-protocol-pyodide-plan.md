@@ -181,6 +181,8 @@ def browser_convert(
 
 获取方式：从 Pyodide GitHub Release 下载 `pyodide-core-<version>.tar.bz2`（当前稳定版如 `v0.26.x`），只解出上述 5 个文件。**不要带 full 包（200MB+）**。
 
+> 运行时补丁：`vendor/pyodide/pyodide.asm.js` 的 `__tzset_js` 在部分区域设置（如 zh 语言 + `GMT+8` 时区）下，`toLocaleTimeString(...,{timeZoneName:"short"})` 返回的时区名会与时间粘连（如 `GMT+820:35:30`），`.split(" ")[1]` 得到 `undefined`，导致 `stringToUTF8` 抛 `Cannot read properties of undefined (reading 'length')`，Pyodide 启动即崩溃。已在 vendored 文件中将 `extractZone` 改为带兜底的稳健提取（`p[1]`，否则去掉尾随时分秒，否则 `"UTC"`），升级 Pyodide 后需重新应用该补丁。
+
 **加载策略（严格懒加载，不拖慢首屏）**：
 
 页面打开**不下载任何 Pyodide 文件**（连 loader `pyodide.js` 也不预载，index.html 不写 `<script src="vendor/pyodide/pyodide.js">`）；只有用户首次点击「编译并渲染」时才注入 loader 并下载 core 包（约 7MB 压缩传输）。加载期间显示原因提示 + 真实下载进度条（见 5.3），完成后自动继续编译并渲染；同一会话后续转换毫秒级。
