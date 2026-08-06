@@ -223,6 +223,10 @@
   let pyodidePromise=null;
   let pyodideLoading=false;
   const ALT_CORE_FILES=['pyodide.asm.wasm','python_stdlib.zip','pyodide.asm.js','pyodide.js','pyodide-lock.json'];
+  const PYODIDE_BASES=[
+    'https://iamjohnrain.github.io/a2ui-pyodide/',
+    'https://raw.githubusercontent.com/IamJohnRain/a2ui-pyodide/master/'
+  ];
   let altProgress={loaded:0,total:0};
 
   function installDownloadProgress(){
@@ -261,11 +265,15 @@
   function loadPyodideLoader(){
     return new Promise((resolve,reject)=>{
       if(window.loadPyodide)return resolve();
-      const script=document.createElement('script');
-      script.src='vendor/pyodide/pyodide.js';
-      script.onload=()=>resolve();
-      script.onerror=()=>reject(new Error('Pyodide loader 下载失败'));
-      document.head.appendChild(script);
+      const tryBase=index=>{
+        if(index>=PYODIDE_BASES.length){reject(new Error('Pyodide loader 下载失败'));return}
+        const script=document.createElement('script');
+        script.src=PYODIDE_BASES[index]+'pyodide.js';
+        script.onload=()=>resolve();
+        script.onerror=()=>{script.remove();tryBase(index+1)};
+        document.head.appendChild(script);
+      };
+      tryBase(0);
     });
   }
 
@@ -276,15 +284,21 @@
       pyodidePromise=(async()=>{
         installDownloadProgress();
         await loadPyodideLoader();
-        const py=await loadPyodide({indexURL:'vendor/pyodide/'});
-        let converterSrc=await (await fetch('scripts/alt_to_dsl_converter.py')).text();
-        converterSrc=converterSrc.replace(/\r?\nif __name__ == "__main__":\s*raise SystemExit\(main\(\)\)\s*$/,'');
-        const cfg1=await (await fetch('scripts/config/alt-themes.json')).text();
-        const cfg2=await (await fetch('scripts/config/alt-layout-profile.json')).text();
-        const cfg3=await (await fetch('scripts/config/alt-tuning.json')).text();
-        await py.runPythonAsync(converterSrc);
-        await py.runPythonAsync(`import json; configure_runtime(${JSON.stringify(cfg1)},${JSON.stringify(cfg2)},${JSON.stringify(cfg3)})`);
-        return py;
+        let lastError=null;
+        for(const base of PYODIDE_BASES){
+          try{
+            const py=await loadPyodide({indexURL:base});
+            let converterSrc=await (await fetch('scripts/alt_to_dsl_converter.py')).text();
+            converterSrc=converterSrc.replace(/\r?\nif __name__ == "__main__":\s*raise SystemExit\(main\(\)\)\s*$/,'');
+            const cfg1=await (await fetch('scripts/config/alt-themes.json')).text();
+            const cfg2=await (await fetch('scripts/config/alt-layout-profile.json')).text();
+            const cfg3=await (await fetch('scripts/config/alt-tuning.json')).text();
+            await py.runPythonAsync(converterSrc);
+            await py.runPythonAsync(`import json; configure_runtime(${JSON.stringify(cfg1)},${JSON.stringify(cfg2)},${JSON.stringify(cfg3)})`);
+            return py;
+          }catch(e){lastError=e;}
+        }
+        throw lastError||new Error('Pyodide 加载失败');
       })().catch(err=>{pyodidePromise=null;throw err}).finally(()=>{pyodideLoading=false;hideAltLoading()});
     }
     return pyodidePromise;

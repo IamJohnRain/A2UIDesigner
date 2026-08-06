@@ -4,7 +4,7 @@
 > 变更 v1.1：目标 Python 脚本由 `scripts/alt_converter.py` 替换为独立单卡转换器 `scripts/alt_to_dsl_converter.py`（仅 t2d 方向、单卡 CLI）
 > 变更 v1.2：脚本新增 `--theme` / `--width` / `--height`（缺省保留默认）；`parse_alt_text` / `compile_t2d` / `browser_convert` 已落地；ALT 面板设计新增主题下拉 + 宽高输入（占位符即默认值）
 > 变更 v1.3：Pyodide core 包改为**严格懒加载**（页面打开零下载，仅首次点击「编译并渲染」时下载）；加载期间显示原因提示 + 真实下载进度条，失败可重试
-> 变更 v1.4：方案已实现——`index.html` 第三页签与 ALT 面板、`add-ui.css` 样式、`app.js` 懒加载/进度条/编译渲染、脚本 `configure_runtime` 配置注入全部落地；主题下拉默认「跟随 ALT」；`vendor/pyodide/`（core 0.26.4）已入库
+> 变更 v1.5：运行时改为外部仓库托管——core 0.26.4（含 `__tzset_js` 补丁）已迁至 `IamJohnRain/a2ui-pyodide`（GitHub Pages 主源 + raw 兜底），主仓库删除 `vendor/pyodide/`，部署产物恢复 <1MB；`app.js` 以 `PYODIDE_BASES` 多源加载；补丁可复现（`patch-tzset.py`）。
 > 关联文档：[ALT 协议](a2ui-layout-tree-protocol.md) ｜ [转换器深度分析](alt-converter-deep-analysis.md) ｜ [调参指南](alt-tuning-parameters.md)
 
 ## 1. 方案定位
@@ -64,7 +64,7 @@
 ```
 ┌─ GitHub Pages 仓库（master 根）─────────────────────────────┐
 │  index.html / app.js / genui-renderer.js  （现有，零改动）    │
-│  vendor/pyodide/  （core 包，~13MB 原始 / ~7MB 压缩传输）      │
+│  a2ui-pyodide 外部仓库托管（core ~13MB 原始 / ~7MB 压缩）     │
 │  scripts/config/*.json （fetch 注入）                        │
 │  scripts/alt_to_dsl_converter.py （fetch 源码文本运行）        │
 │  .nojekyll （阻止 Jekyll 处理二进制）                        │
@@ -72,7 +72,7 @@
         │ 静态托管（.wasm MIME 已支持）
         ▼
 ┌─ 浏览器 ─────────────────────────────────────────────────────┐
-│  loadPyodide({ indexURL:'vendor/pyodide/' })  ← 懒加载       │
+│  loadPyodide({ indexURL: PYODIDE_BASES[i] })  ← 懒加载       │
 │  runPythonAsync(alt_to_dsl_converter.py 源码)                │
 │  主线程执行 browser_convert(taskSpecJson, altText, ascText)  │
 │  → 返回 { dslText, warnings, issues }                        │
@@ -167,7 +167,7 @@ def browser_convert(
 
 本脚本源自 `alt_converter.py` 的 t2d 分支，已是单卡形态，`compile_t2d` 抽取后与 `browser_convert` 一一对应。
 
-### 5.2 Pyodide 集成（`vendor/pyodide/`）
+### 5.2 Pyodide 集成（外部仓库 `IamJohnRain/a2ui-pyodide`）
 
 **文件清单（core 包，非 full）**：
 
@@ -179,27 +179,35 @@ def browser_convert(
 | `python_stdlib.zip` | 标准库（≈6MB，含 unicodedata/ast/dataclasses 等） |
 | `pyodide-lock.json` | 包锁文件（必需） |
 
-获取方式：从 Pyodide GitHub Release 下载 `pyodide-core-<version>.tar.bz2`（当前稳定版如 `v0.26.x`），只解出上述 5 个文件。**不要带 full 包（200MB+）**。
+获取方式：从 Pyodide GitHub Release 下载 `pyodide-core-<version>.tar.bz2`（当前稳定版如 `v0.26.x`），只解出上述 5 个文件。**不要带 full 包（200MB+）**。运行时已托管在独立仓库 [IamJohnRain/a2ui-pyodide](https://github.com/IamJohnRain/a2ui-pyodide)：GitHub Pages 主源 `https://iamjohnrain.github.io/a2ui-pyodide/` + raw 兜底 `https://raw.githubusercontent.com/IamJohnRain/a2ui-pyodide/master/`，两者均返回 `Access-Control-Allow-Origin: *`；主仓库不再包含运行时。
 
-> 运行时补丁：`vendor/pyodide/pyodide.asm.js` 的 `__tzset_js` 在部分区域设置（如 zh 语言 + `GMT+8` 时区）下，`toLocaleTimeString(...,{timeZoneName:"short"})` 返回的时区名会与时间粘连（如 `GMT+820:35:30`），`.split(" ")[1]` 得到 `undefined`，导致 `stringToUTF8` 抛 `Cannot read properties of undefined (reading 'length')`，Pyodide 启动即崩溃。已在 vendored 文件中将 `extractZone` 改为带兜底的稳健提取（`p[1]`，否则去掉尾随时分秒，否则 `"UTC"`），升级 Pyodide 后需重新应用该补丁。
+> 运行时补丁：`a2ui-pyodide/pyodide.asm.js` 的 `__tzset_js` 在部分区域设置（如 zh 语言 + `GMT+8` 时区）下，`toLocaleTimeString(...,{timeZoneName:"short"})` 返回的时区名会与时间粘连（如 `GMT+820:35:30`），`.split(" ")[1]` 得到 `undefined`，导致 `stringToUTF8` 抛 `Cannot read properties of undefined (reading 'length')`，Pyodide 启动即崩溃。已在外部仓库用 `patch-tzset.py` 将 `extractZone` 改为带兜底的稳健提取（`p[1]`，否则去掉尾随时分秒，否则 `"UTC"`），升级 Pyodide 后需重新运行该脚本。
 
 **加载策略（严格懒加载，不拖慢首屏）**：
 
-页面打开**不下载任何 Pyodide 文件**（连 loader `pyodide.js` 也不预载，index.html 不写 `<script src="vendor/pyodide/pyodide.js">`）；只有用户首次点击「编译并渲染」时才注入 loader 并下载 core 包（约 7MB 压缩传输）。加载期间显示原因提示 + 真实下载进度条（见 5.3），完成后自动继续编译并渲染；同一会话后续转换毫秒级。
+页面打开**不下载任何 Pyodide 文件**（连 loader `pyodide.js` 也不预载，index.html 不写任何外部脚本）；只有用户首次点击「编译并渲染」时才从 `PYODIDE_BASES` 注入 loader 并下载 core 包（约 7MB 压缩传输）。加载期间显示原因提示 + 真实下载进度条（见 5.3），完成后自动继续编译并渲染；同一会话后续转换毫秒级。
 
 ```js
 let pyodidePromise = null;
 let pyodideLoading = false;
+const PYODIDE_BASES = [
+  'https://iamjohnrain.github.io/a2ui-pyodide/',
+  'https://raw.githubusercontent.com/IamJohnRain/a2ui-pyodide/master/'
+];
 
 function loadPyodideLoader() {
   // 首次点击时才动态注入 loader，避免页面打开即下载
   return new Promise((resolve, reject) => {
     if (window.loadPyodide) return resolve();
-    const script = document.createElement('script');
-    script.src = 'vendor/pyodide/pyodide.js';
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error('Pyodide loader 下载失败'));
-    document.head.appendChild(script);
+    const tryBase = index => {
+      if (index >= PYODIDE_BASES.length) return reject(new Error('Pyodide loader 下载失败'));
+      const script = document.createElement('script');
+      script.src = PYODIDE_BASES[index] + 'pyodide.js';
+      script.onload = () => resolve();
+      script.onerror = () => { script.remove(); tryBase(index + 1); };
+      document.head.appendChild(script);
+    };
+    tryBase(0);
   });
 }
 
@@ -210,16 +218,22 @@ async function ensurePyodide() {
     pyodidePromise = (async () => {
       installDownloadProgress();            // 拦截 fetch，统计 5 个 core 文件字节
       await loadPyodideLoader();
-      const py = await loadPyodide({ indexURL: 'vendor/pyodide/' });
-      const converterSrc = await (await fetch('scripts/alt_to_dsl_converter.py')).text();
-      const cfg1 = await (await fetch('scripts/config/alt-themes.json')).text();
-      const cfg2 = await (await fetch('scripts/config/alt-layout-profile.json')).text();
-      const cfg3 = await (await fetch('scripts/config/alt-tuning.json')).text();
-      await py.runPythonAsync(converterSrc);
-      await py.runPythonAsync(
-        `import json; configure_runtime(${JSON.stringify(cfg1)}, ${JSON.stringify(cfg2)}, ${JSON.stringify(cfg3)})`
-      );
-      return py;
+      let lastError = null;
+      for (const base of PYODIDE_BASES) {
+        try {
+          const py = await loadPyodide({ indexURL: base });
+          const converterSrc = await (await fetch('scripts/alt_to_dsl_converter.py')).text();
+          const cfg1 = await (await fetch('scripts/config/alt-themes.json')).text();
+          const cfg2 = await (await fetch('scripts/config/alt-layout-profile.json')).text();
+          const cfg3 = await (await fetch('scripts/config/alt-tuning.json')).text();
+          await py.runPythonAsync(converterSrc);
+          await py.runPythonAsync(
+            `import json; configure_runtime(${JSON.stringify(cfg1)}, ${JSON.stringify(cfg2)}, ${JSON.stringify(cfg3)})`
+          );
+          return py;
+        } catch (error) { lastError = error; }
+      }
+      throw lastError || new Error('Pyodide 加载失败');
     })().catch(err => {
       pyodidePromise = null;
       throw err;
@@ -494,12 +508,12 @@ $('#altLoadingRetry').onclick = () => {
 | `.nojekyll` | 仓库根新增空文件，阻止 Jekyll 处理 `vendor/` 二进制 |
 | 相对路径 | 所有资源引用保持相对路径（现有项目已是） |
 | MIME | `.wasm` GitHub Pages 返回 `application/wasm`，已支持；异常时 Pyodide 有非流式编译 fallback |
-| 体积 | 仓库新增约 13MB（core 包），远低于单文件 100MB / 仓库 1GB 限制 |
+| 体积 | 主仓库不含运行时；外部仓库新增约 13MB（core 包），远低于单文件 100MB / 仓库 1GB 限制 |
 | 缓存 | 浏览器缓存后二次访问零下载；GitHub Pages 无法自定义 Cache-Control，接受默认策略 |
 
 ### 5.5 升级 alt_to_dsl_converter.py 后的维护
 
-同一仓库同步发布即可：`alt_to_dsl_converter.py` 与 `vendor/pyodide/` 都在 master 根，GitHub Pages 自动发布新版本。若 Pyodide 升级（新 CPython），重新下载 core 包替换 `vendor/pyodide/` 下 5 个文件。
+转换器与前端在 `A2UIDesigner` master 根，GitHub Pages 自动发布（产物 <1MB）；运行时在 `a2ui-pyodide` 独立仓库（Pages/raw 双源，改文件即生效）。升级 Pyodide：下载新版 core 包 → 解压 5 个文件 → 运行 `patch-tzset.py pyodide.asm.js` → push `a2ui-pyodide` master；主仓库无需改动（若 loader API 变化再同步改 `app.js`）。
 
 ---
 
@@ -509,7 +523,7 @@ $('#altLoadingRetry').onclick = () => {
 | --- | --- | --- |
 | `scripts/alt_to_dsl_converter.py` | 配置注入双轨（含 `alt-tuning.json`）、`parse_alt_text` / `compile_t2d` / `browser_convert`、`--theme` / `--width` / `--height` | ✅ 已完成 |
 | `scripts/alt_to_dsl_converter.py` | 单测：60 样例 CLI 与浏览器入口输出对比 | ✅ 已完成 |
-| `vendor/pyodide/` | 下载 core 包 5 文件（pyodide 0.26.4） | ✅ 已完成 |
+| `IamJohnRain/a2ui-pyodide` | 外部仓库托管 core 0.26.4（含 tzset 补丁）+ Pages/raw 双源 | ✅ 已完成 |
 | `index.html` | 第三页签 + ALT 面板（主题下拉 + 宽高输入）+ 加载遮罩/进度条 DOM（不写预载 script 标签） | ✅ 已完成 |
 | `add-ui.css` | tabs 三列 + 面板样式 + `.alt-options` + 加载遮罩/进度条样式 | ✅ 已完成 |
 | `app.js` | tab 切换扩展 + 主题下拉填充 + 宽高占位符同步 + 懒加载 loader 注入 + fetch 进度拦截 + 加载遮罩/重试 handler + 编译按钮 handler + pyodide 调用 | ✅ 已完成 |
@@ -526,7 +540,7 @@ $('#altLoadingRetry').onclick = () => {
 5. **控制台**：无 JS 报错；首次加载提示与状态正常。
 6. **参数回归**：CLI `--theme` / `--width` / `--height` 与浏览器入口传入相同值时输出一致；缺省（不传）输出与旧行为完全一致（已用 60 样例验证）；非法主题 / 非正宽高应报错且不输出 DSL。
 7. **占位符行为**：宽高输入框默认显示尺寸默认值阴影（140/140 或 300/140）；输入后阴影消失显示用户值；清空回退默认。
-8. **首次加载体验**：页面打开时 Network 面板**无任何 `vendor/pyodide/` 请求**（严格懒加载）；首次点击「编译并渲染」出现原因提示 + 进度条，进度与下载字节一致；下载完成自动编译并渲染；断网/加载失败显示错误与「重试」，重试成功；二次访问（浏览器缓存命中）不再出现加载遮罩。
+8. **首次加载体验**：页面打开时 Network 面板**无任何 Pyodide 运行时请求**（严格懒加载）；首次点击「编译并渲染」从 `PYODIDE_BASES` 主源下载并出现原因提示 + 进度条，进度与下载字节一致；主源失败自动切 raw 兜底；下载完成自动编译并渲染；断网/加载失败显示错误与「重试」，重试成功；二次访问（浏览器缓存命中）不再出现加载遮罩。
 
 > **已验证（本方案落地时）**：用 `tmp/run_luna_v4` 60 个 Case 在真实页面自动化（无头 Chrome）逐例执行「填三份文本 → 编译并渲染」，页面输出 DSL 与当前 CLI **60/60 逐字节一致**；主题下拉（lagoon-jewel）+ 宽高输入（200×120）与 CLI 同参数输出一致；首次编译显示原因提示 + 进度条，页面打开零 pyodide 请求，后续编译毫秒级。注：`run_luna_v4` 参考 DSL/PNG 由旧主题色板生成，与工作区新版 `alt-themes.json` 存在预期色差。
 
@@ -542,7 +556,7 @@ $('#altLoadingRetry').onclick = () => {
 | `unicodedata` 等 stdlib 缺失 | 文本测量失败 | 已在 core 包内，无需额外加载；回归测试覆盖 |
 | `browser_convert` 与 `main()` 逻辑漂移 | 双端不一致 | 抽取共享 `compile_t2d`，同源复用 |
 | Pyodide 版本与脚本兼容 | 解释行为差异 | 锁定 core 包版本并记录于 README；升级需跑一致性回归 |
-| 仓库体积 +13MB | clone 变重 | 接受；终局方案 B 可移除 |
+| 运行时 13MB 托管于外部仓库 | 主仓库 clone 不受影响；外部仓库部署 14MB 可能较慢 | Pages/raw 双源保证可用；外部仓库低频变更，慢一次可接受 |
 
 ---
 
@@ -551,7 +565,7 @@ $('#altLoadingRetry').onclick = () => {
 | 方案 | 定位 | 与 A 的关系 |
 | --- | --- | --- |
 | A（本方案） | 快速上线验证 | 当前 |
-| B（JS 移植） | 终局：零运行时、秒开 | 以 A 验证的用例集为回归基准；切换后删除 `vendor/pyodide/` |
+| B（JS 移植） | 终局：零运行时、秒开 | 以 A 验证的用例集为回归基准；切换后移除 `a2ui-pyodide` 依赖 |
 | C（本地 HTTP 桥） | 仅调试 | A 开发期可临时用 C 快速联调 UI，再替换为 Pyodide |
 
 **迁移路径**：A 上线 → 用 A 的一致性用例集驱动 B 的移植回归 → B 通过后切换，移除 Pyodide 依赖与体积。
