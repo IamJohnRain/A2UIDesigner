@@ -163,6 +163,492 @@
         "warning": "#FFD94838",
         "error": "#FFDB6B42"
       }
+    },
+    "ocean-voyage": {
+      "mode": "light",
+      "surface": {
+        "root": "#FFB5DCF9",
+        "panel": "#FFB5DCF9",
+        "gradient": {
+          "direction": "RightBottom",
+          "colors": [
+            ["#FF7DC1F0", 0],
+            ["#FFB5DCF9", 1]
+          ]
+        },
+        "border": "1/#1A163D5A"
+      },
+      "text": {
+        "primary": "#E5000000",
+        "secondary": "#99000000",
+        "tertiary": "#66000000",
+        "onAccent": "#FFFFFFFF"
+      },
+      "icon": {
+        "primary": "#FF2A5D8A",
+        "secondary": "#99000000",
+        "onAccent": "#FFFFFFFF"
+      },
+      "action": {
+        "primaryBackground": "#FF163D5A",
+        "primaryText": "#FFFFFFFF",
+        "primaryGradient": {
+          "direction": "RightBottom",
+          "colors": [
+            ["#FF163D5A", 0],
+            ["#FF2A5D8A", 1]
+          ]
+        },
+        "secondaryBackground": "#0C000000",
+        "secondaryText": "#FF163D5A"
+      },
+      "progress": {
+        "fill": "#FF549AC2",
+        "track": "#19000000"
+      },
+      "selection": {
+        "selected": "#FF2A5D8A",
+        "unselected": "#33000000",
+        "mark": "#FFFFFFFF"
+      },
+      "divider": "#33000000",
+      "status": {
+        "success": "#FF64BB5C",
+        "warning": "#FFE84026",
+        "error": "#FFED6F21"
+      }
+    },
+    "slate-reverie": {
+      "mode": "light",
+      "surface": {
+        "root": "#FFBAD5E0",
+        "panel": "#FFBAD5E0",
+        "gradient": {
+          "direction": "RightBottom",
+          "colors": [
+            ["#FFA1A0A4", 0],
+            ["#FFBAD5E0", 1]
+          ]
+        },
+        "border": "1/#1A6289A8"
+      },
+      "text": {
+        "primary": "#E5000000",
+        "secondary": "#99000000",
+        "tertiary": "#66000000",
+        "onAccent": "#FFFFFFFF"
+      },
+      "icon": {
+        "primary": "#FF5B8FB1",
+        "secondary": "#99000000",
+        "onAccent": "#FFFFFFFF"
+      },
+      "action": {
+        "primaryBackground": "#FF6289A8",
+        "primaryText": "#FFFFFFFF",
+        "primaryGradient": {
+          "direction": "RightBottom",
+          "colors": [
+            ["#FF6289A8", 0],
+            ["#FF5B8FB1", 1]
+          ]
+        },
+        "secondaryBackground": "#0C000000",
+        "secondaryText": "#FF6289A8"
+      },
+      "progress": {
+        "fill": "#FF7A8DA0",
+        "track": "#19000000"
+      },
+      "selection": {
+        "selected": "#FF5B8FB1",
+        "unselected": "#33000000",
+        "mark": "#FFFFFFFF"
+      },
+      "divider": "#33000000",
+      "status": {
+        "success": "#FF64BB5C",
+        "warning": "#FFE84026",
+        "error": "#FFED6F21"
+      }
+    },
+    "abyss-glow": {
+      "mode": "light",
+      "surface": {
+        "root": "#FF87CFDC",
+        "panel": "#FF87CFDC",
+        "gradient": {
+          "direction": "RightBottom",
+          "colors": [
+            ["#FF41B0CB", 0],
+            ["#FF87CFDC", 1]
+          ]
+        },
+        "border": "1/#1A082834"
+      },
+      "text": {
+        "primary": "#E5000000",
+        "secondary": "#99000000",
+        "tertiary": "#66000000",
+        "onAccent": "#FFFFFFFF"
+      },
+      "icon": {
+        "primary": "#FF003D55",
+        "secondary": "#99000000",
+        "onAccent": "#FFFFFFFF"
+      },
+      "action": {
+        "primaryBackground": "#FF082834",
+        "primaryText": "#FFFFFFFF",
+        "primaryGradient": {
+          "direction": "RightBottom",
+          "colors": [
+            ["#FF082834", 0],
+            ["#FF003D55", 1]
+          ]
+        },
+        "secondaryBackground": "#0C000000",
+        "secondaryText": "#FF082834"
+      },
+      "progress": {
+        "fill": "#FF006783",
+        "track": "#19000000"
+      },
+      "selection": {
+        "selected": "#FF003D55",
+        "unselected": "#33000000",
+        "mark": "#FFFFFFFF"
+      },
+      "divider": "#33000000",
+      "status": {
+        "success": "#FF64BB5C",
+        "warning": "#FFE84026",
+        "error": "#FFED6F21"
+      }
+    },
+    "sky-cascade": {
+      "mode": "light",
+      "surface": {
+        "root": "#FFB6D6DF",
+        "panel": "#FFB6D6DF",
+        "gradient": {
+          "direction": "RightBottom",
+          "colors": [
+            ["#FF82B6D6", 0],
+            ["#FFB6D6DF", 1]
+          ]
+        },
+        "border": "1/#1A163D5A"
+      },
+      "text": {
+        "primary": "#E5000000",
+        "secondary": "#99000000",
+        "tertiary": "#66000000",
+        "onAccent": "#FFFFFFFF"
+      },
+      "icon": {
+        "primary": "#FF1F64A5",
+        "secondary": "#99000000",
+        "onAccent": "#FFFFFFFF"
+      },
+      "action": {
+        "primaryBackground": "#FF163D5A",
+        "primaryText": "#FFFFFFFF",
+        "primaryGradient": {
+          "direction": "RightBottom",
+          "colors": [
+            ["#FF163D5A", 0],
+            ["#FF1F64A5", 1]
+          ]
+        },
+        "secondaryBackground": "#0C000000",
+        "secondaryText": "#FF163D5A"
+      },
+      "progress": {
+        "fill": "#FF4790C9",
+        "track": "#19000000"
+      },
+      "selection": {
+        "selected": "#FF1F64A5",
+        "unselected": "#33000000",
+        "mark": "#FFFFFFFF"
+      },
+      "divider": "#33000000",
+      "status": {
+        "success": "#FF64BB5C",
+        "warning": "#FFE84026",
+        "error": "#FFED6F21"
+      }
+    },
+    "lagoon-jewel": {
+      "mode": "light",
+      "surface": {
+        "root": "#FFBCD8DA",
+        "panel": "#FFBCD8DA",
+        "gradient": {
+          "direction": "RightBottom",
+          "colors": [
+            ["#FF8EB7BB", 0],
+            ["#FFBCD8DA", 1]
+          ]
+        },
+        "border": "1/#1A285465"
+      },
+      "text": {
+        "primary": "#E5000000",
+        "secondary": "#99000000",
+        "tertiary": "#66000000",
+        "onAccent": "#FFFFFFFF"
+      },
+      "icon": {
+        "primary": "#FF317589",
+        "secondary": "#99000000",
+        "onAccent": "#FFFFFFFF"
+      },
+      "action": {
+        "primaryBackground": "#FF285465",
+        "primaryText": "#FFFFFFFF",
+        "primaryGradient": {
+          "direction": "RightBottom",
+          "colors": [
+            ["#FF285465", 0],
+            ["#FF317589", 1]
+          ]
+        },
+        "secondaryBackground": "#0C000000",
+        "secondaryText": "#FF285465"
+      },
+      "progress": {
+        "fill": "#FF4792A1",
+        "track": "#19000000"
+      },
+      "selection": {
+        "selected": "#FF317589",
+        "unselected": "#33000000",
+        "mark": "#FFFFFFFF"
+      },
+      "divider": "#33000000",
+      "status": {
+        "success": "#FF64BB5C",
+        "warning": "#FFE84026",
+        "error": "#FFED6F21"
+      }
+    },
+    "mint-whisper": {
+      "mode": "light",
+      "surface": {
+        "root": "#FFB8E8C9",
+        "panel": "#FFB8E8C9",
+        "gradient": {
+          "direction": "RightBottom",
+          "colors": [
+            ["#FF89D2B0", 0],
+            ["#FFB8E8C9", 1]
+          ]
+        },
+        "border": "1/#1A1A8B98"
+      },
+      "text": {
+        "primary": "#E5000000",
+        "secondary": "#99000000",
+        "tertiary": "#66000000",
+        "onAccent": "#FFFFFFFF"
+      },
+      "icon": {
+        "primary": "#FF2BA38D",
+        "secondary": "#99000000",
+        "onAccent": "#FFFFFFFF"
+      },
+      "action": {
+        "primaryBackground": "#FF1A8B98",
+        "primaryText": "#FFFFFFFF",
+        "primaryGradient": {
+          "direction": "RightBottom",
+          "colors": [
+            ["#FF1A8B98", 0],
+            ["#FF2BA38D", 1]
+          ]
+        },
+        "secondaryBackground": "#0C000000",
+        "secondaryText": "#FF1A8B98"
+      },
+      "progress": {
+        "fill": "#FF5DBE9D",
+        "track": "#19000000"
+      },
+      "selection": {
+        "selected": "#FF2BA38D",
+        "unselected": "#33000000",
+        "mark": "#FFFFFFFF"
+      },
+      "divider": "#33000000",
+      "status": {
+        "success": "#FF64BB5C",
+        "warning": "#FFE84026",
+        "error": "#FFED6F21"
+      }
+    },
+    "forest-mist": {
+      "mode": "light",
+      "surface": {
+        "root": "#FFC0F1E7",
+        "panel": "#FFC0F1E7",
+        "gradient": {
+          "direction": "RightBottom",
+          "colors": [
+            ["#FF76C8C5", 0],
+            ["#FFC0F1E7", 1]
+          ]
+        },
+        "border": "1/#1A173849"
+      },
+      "text": {
+        "primary": "#E5000000",
+        "secondary": "#99000000",
+        "tertiary": "#66000000",
+        "onAccent": "#FFFFFFFF"
+      },
+      "icon": {
+        "primary": "#FF275A4E",
+        "secondary": "#99000000",
+        "onAccent": "#FFFFFFFF"
+      },
+      "action": {
+        "primaryBackground": "#FF173849",
+        "primaryText": "#FFFFFFFF",
+        "primaryGradient": {
+          "direction": "RightBottom",
+          "colors": [
+            ["#FF173849", 0],
+            ["#FF275A4E", 1]
+          ]
+        },
+        "secondaryBackground": "#0C000000",
+        "secondaryText": "#FF173849"
+      },
+      "progress": {
+        "fill": "#FF385B58",
+        "track": "#19000000"
+      },
+      "selection": {
+        "selected": "#FF275A4E",
+        "unselected": "#33000000",
+        "mark": "#FFFFFFFF"
+      },
+      "divider": "#33000000",
+      "status": {
+        "success": "#FF64BB5C",
+        "warning": "#FFE84026",
+        "error": "#FFED6F21"
+      }
+    },
+    "meadow-bloom": {
+      "mode": "light",
+      "surface": {
+        "root": "#FFC8DDA5",
+        "panel": "#FFC8DDA5",
+        "gradient": {
+          "direction": "RightBottom",
+          "colors": [
+            ["#FFA4D797", 0],
+            ["#FFC8DDA5", 1]
+          ]
+        },
+        "border": "1/#1A48354A"
+      },
+      "text": {
+        "primary": "#E5000000",
+        "secondary": "#99000000",
+        "tertiary": "#66000000",
+        "onAccent": "#FFFFFFFF"
+      },
+      "icon": {
+        "primary": "#FF56AAA0",
+        "secondary": "#99000000",
+        "onAccent": "#FFFFFFFF"
+      },
+      "action": {
+        "primaryBackground": "#FF48354A",
+        "primaryText": "#FFFFFFFF",
+        "primaryGradient": {
+          "direction": "RightBottom",
+          "colors": [
+            ["#FF48354A", 0],
+            ["#FF56AAA0", 1]
+          ]
+        },
+        "secondaryBackground": "#0C000000",
+        "secondaryText": "#FF48354A"
+      },
+      "progress": {
+        "fill": "#FF94C296",
+        "track": "#19000000"
+      },
+      "selection": {
+        "selected": "#FF56AAA0",
+        "unselected": "#33000000",
+        "mark": "#FFFFFFFF"
+      },
+      "divider": "#33000000",
+      "status": {
+        "success": "#FF64BB5C",
+        "warning": "#FFE84026",
+        "error": "#FFED6F21"
+      }
+    },
+    "lavender-dream": {
+      "mode": "light",
+      "surface": {
+        "root": "#FFD5AACE",
+        "panel": "#FFD5AACE",
+        "gradient": {
+          "direction": "RightBottom",
+          "colors": [
+            ["#FFBDA8C5", 0],
+            ["#FFD5AACE", 1]
+          ]
+        },
+        "border": "1/#1A4885A4"
+      },
+      "text": {
+        "primary": "#E5000000",
+        "secondary": "#99000000",
+        "tertiary": "#66000000",
+        "onAccent": "#FFFFFFFF"
+      },
+      "icon": {
+        "primary": "#FFA57EC0",
+        "secondary": "#99000000",
+        "onAccent": "#FFFFFFFF"
+      },
+      "action": {
+        "primaryBackground": "#FF4885A4",
+        "primaryText": "#FFFFFFFF",
+        "primaryGradient": {
+          "direction": "RightBottom",
+          "colors": [
+            ["#FF4885A4", 0],
+            ["#FFA57EC0", 1]
+          ]
+        },
+        "secondaryBackground": "#0C000000",
+        "secondaryText": "#FF4885A4"
+      },
+      "progress": {
+        "fill": "#FF7C97BD",
+        "track": "#19000000"
+      },
+      "selection": {
+        "selected": "#FFA57EC0",
+        "unselected": "#33000000",
+        "mark": "#FFFFFFFF"
+      },
+      "divider": "#33000000",
+      "status": {
+        "success": "#FF64BB5C",
+        "warning": "#FFE84026",
+        "error": "#FFED6F21"
+      }
     }
   }
 }
