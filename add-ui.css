@@ -19,6 +19,8 @@
 .alt-option select:focus,.alt-option input:focus{border-color:#7475f3}
 .error-box ul{margin:6px 0 0;padding-left:18px}
 .error-box li{margin:2px 0}
+.alt-gen-row{margin:2px 0 10px}
+.alt-gen-row .primary[disabled]{opacity:.55;cursor:progress}
 
 /* ---- 首次加载遮罩与下载进度条 ---- */
 .alt-loading{position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45)}
@@ -32,3 +34,38 @@
 .alt-loading-error{margin-top:10px;font-size:13px;color:#d33}
 .alt-loading-card .primary{margin-top:10px}
 @keyframes alt-loading-slide{from{margin-left:0}to{margin-left:60%}}
+
+/* ---- 画布工具栏与渲染告警折叠区 ---- */
+.stage-toolbar-actions{display:flex;align-items:center;gap:10px}
+.stage-toolbar-actions .icon-btn{width:34px;height:34px;font-size:15px;border-radius:9px}
+.render-warnings{margin:12px 14px 0;border:1px solid var(--line);border-radius:10px;background:#fff;overflow:hidden}
+.render-warnings-head{width:100%;display:flex;align-items:center;gap:8px;border:0;background:transparent;padding:9px 12px;cursor:pointer;text-align:left;font-size:12px;color:#30384a}
+.render-warnings-head:hover{background:#f4f5fa}
+.render-warnings-title{font-weight:700}
+.render-warnings-badge{min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:#d98318;color:#fff;font-size:10px;line-height:18px;text-align:center}
+.render-warnings-caret{margin-left:auto;color:#7a8497;font-size:13px}
+.render-warnings-body{padding:0 12px 10px;border-top:1px solid var(--line);max-height:220px;overflow:auto}
+.render-warning{padding:8px 2px 2px;font-size:12px;color:#30384a}
+.render-warning+.render-warning{border-top:1px dashed #e5e7ef;margin-top:8px}
+.render-warning strong{display:block;font-size:12px}
+.render-warning ul{margin:4px 0 0;padding-left:18px;color:#596174}
+.render-warning li{margin:2px 0;line-height:1.5}
+.render-warning.is-error strong{color:#c0392b}
+
+/* ---- 大模型设置与口令解锁弹窗 ---- */
+.llm-dialog{width:min(520px,94vw);max-height:min(760px,calc(100vh - 48px));background:#fff;border-radius:14px;box-shadow:0 24px 70px #11182755;display:flex;flex-direction:column;overflow:hidden}
+.llm-unlock-dialog{width:min(400px,94vw)}
+.llm-dialog header,.llm-dialog footer{padding:14px 18px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line)}
+.llm-dialog header h2{font-size:15px;margin:0 0 3px}
+.llm-dialog header p{margin:0;color:var(--muted);font-size:11px;line-height:1.5}
+.llm-dialog footer{border-bottom:0;border-top:1px solid var(--line);justify-content:flex-end;gap:8px}
+.llm-body{padding:14px 18px;overflow:auto;display:flex;flex-direction:column;gap:11px}
+.llm-field{display:flex;flex-direction:column;gap:5px;font-size:12px;color:var(--muted)}
+.llm-field input,.llm-field select{width:100%;border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:#fff;color:#30384a;font:12px Consolas,monospace;outline:none}
+.llm-field input:focus,.llm-field select:focus{border-color:#7475f3}
+.llm-field small{color:#8b93a4;font-size:11px;line-height:1.5}
+.llm-tip{margin:0;font-size:11px;line-height:1.65;color:#8b93a4;background:#f6f7fa;border-radius:8px;padding:9px 11px}
+.llm-status{margin:0;font-size:12px;line-height:1.5;border-radius:8px;padding:9px 11px;background:#eef6ec;color:#2e7d32}
+.llm-status.err{background:#fdecea;color:#c0392b}
+.llm-inline-error{margin:0;font-size:12px;line-height:1.5;border-radius:8px;padding:8px 10px;background:#fdecea;color:#c0392b}
+.llm-footer-grow{flex:1}

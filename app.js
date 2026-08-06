@@ -125,7 +125,7 @@
   }
   function syncSource(){els.input.value=normalizeExportAssets(state.messages).map(x=>JSON.stringify(x)).join('\n')}
   function setStatus(t,cls){els.parse.textContent=t;els.parse.className='status '+cls;els.error.hidden=true}
-  function fail(e){els.error.textContent=e.message||e;els.error.hidden=false;els.parse.textContent='解析失败';els.parse.className='status bad'}
+  function fail(e){els.error.textContent=e.message||e;els.error.hidden=false;els.parse.textContent='解析失败';els.parse.className='status bad';pushRenderWarnings('渲染失败',[e.message||String(e)],'error')}
   function renderInput(){try{loadParsed(parseJsonl(els.input.value));if(window.innerWidth<=760)requestAnimationFrame(()=>els.stage.scrollIntoView({behavior:'smooth',block:'center'}))}catch(e){fail(e)}}
   function uniqueId(base){let id=base.toLowerCase(),n=1;while(state.map.has(id))id=base.toLowerCase()+'_'+n++;return id}
   function addComponent(type){if(!state.update)return toast('请先渲染一份 DSL');const id=uniqueId(type);const defs={Text:{content:'新文字',styles:{width:80,height:20,fontSize:14,fontColor:'#E5000000'}},Button:{label:'按钮',styles:{width:80,height:32,fontSize:14,fontColor:'#FFFFFFFF',backgroundColor:'#FF5B5CE2',borderRadius:16}},Image:{src:'',styles:{width:40,height:40,objectFit:'contain'}},Progress:{value:40,total:100,styles:{width:80,height:8,type:'linear',color:'#FF5B5CE2',backgroundColor:'#22000000',borderRadius:4}},Divider:{styles:{width:80,height:1,color:'#22000000'}},Row:{children:[],itemMargin:4,styles:{width:100,height:50,alignItems:'center'}},Column:{children:[],itemMargin:4,styles:{width:100,height:60}},Stack:{children:[],styles:{width:80,height:80,alignContent:'center'}}};const c={id,component:type,...defs[type]};let parent=state.map.get(state.selectedId);if(!parent||!containerTypes.has(parent.component))parent=findParent(state.selectedId)||state.map.get(state.update.updateComponents.root);mutate(()=>{state.components.push(c);parent.children=parent.children||[];parent.children.push(id)});select(id)}
@@ -331,16 +331,12 @@
     if(overlay)overlay.hidden=true;
     $('#altLoadingBar').classList.remove('indeterminate');
   }
-  function showAltReport(title,lines){
-    const box=$('#altReport');
-    box.hidden=false;
-    box.innerHTML=`<strong>${escapeHtml(title)}</strong><ul>${lines.map(l=>`<li>${escapeHtml(l)}</li>`).join('')}</ul>`;
-  }
+  function showAltReport(title,lines,kind='error'){pushRenderWarnings(title,lines,kind)}
 
   async function compileAltAndRender(){
     try{
       await initAltTab();
-      $('#altReport').hidden=true;
+      clearRenderWarnings();
       const result=await compileAlt(
         $('#altTaskSpec').value,$('#altInput').value,$('#ascInput').value,
         $('#altTheme').value,$('#altWidth').value,$('#altHeight').value
@@ -350,7 +346,7 @@
         return;
       }
       if(result.warnings&&result.warnings.length){
-        showAltReport('已编译，含警告',result.warnings);
+        showAltReport('已编译，含警告',result.warnings,'warn');
       }
       if(result.dsl){
         els.input.value=result.dsl;
@@ -369,4 +365,386 @@
   }
   $('#altCompileBtn').onclick=compileAltAndRender;
   $('#altLoadingRetry').onclick=()=>{pyodidePromise=null;compileAltAndRender()};
+
+  // ---- 渲染与编译告警（画布下方，可折叠） ----
+  const RENDER_WARNINGS_KEY='a2ui.renderWarnings.collapsed';
+  let renderWarningItems=[];
+  function updateRenderWarnings(){
+    const region=$('#renderWarnings'),body=$('#renderWarningsBody'),badge=$('#renderWarningsBadge'),caret=$('#renderWarningsCaret'),toggle=$('#renderWarningsToggle');
+    if(!region)return;
+    if(!renderWarningItems.length){region.hidden=true;return}
+    region.hidden=false;
+    badge.hidden=renderWarningItems.length<2;
+    badge.textContent=renderWarningItems.length;
+    const collapsed=localStorage.getItem(RENDER_WARNINGS_KEY)==='1';
+    body.hidden=collapsed;
+    caret.textContent=collapsed?'›':'⌄';
+    toggle.setAttribute('aria-expanded',String(!collapsed));
+    body.innerHTML=renderWarningItems.map(item=>`<div class="render-warning${item.kind==='error'?' is-error':''}"><strong>${escapeHtml(item.title)}</strong>${item.items.length?`<ul>${item.items.map(x=>`<li>${escapeHtml(x)}</li>`).join('')}</ul>`:''}</div>`).join('');
+  }
+  function pushRenderWarnings(title,items,kind='warn'){
+    renderWarningItems.push({title,items:Array.isArray(items)?items:[items],kind});
+    if(renderWarningItems.length>50)renderWarningItems.shift();
+    updateRenderWarnings();
+  }
+  function clearRenderWarnings(){renderWarningItems=[];updateRenderWarnings()}
+  $('#renderWarningsToggle').onclick=()=>{
+    const body=$('#renderWarningsBody');
+    localStorage.setItem(RENDER_WARNINGS_KEY,body.hidden?'0':'1');
+    updateRenderWarnings();
+  };
+  $('#renderBtn').onclick=()=>{clearRenderWarnings();renderInput()};
+
+  // ---- 大模型配置（BYOK + WebCrypto 加密存储） ----
+  const LLM_STORAGE_KEY='a2ui.llm.v1';
+  const LLM_ITERATIONS=310000;
+  let llmConfig=null;
+  let llmPlainKey=null;
+  let llmUnlockPromise=null;
+
+  function bufToBase64(buf){
+    const bytes=new Uint8Array(buf);
+    let binary='';
+    for(let i=0;i<bytes.length;i+=0x8000){
+      binary+=String.fromCharCode.apply(null,bytes.subarray(i,i+0x8000));
+    }
+    return btoa(binary);
+  }
+  function base64ToBuf(b64){
+    const binary=atob(b64);
+    const bytes=new Uint8Array(binary.length);
+    for(let i=0;i<binary.length;i++)bytes[i]=binary.charCodeAt(i);
+    return bytes.buffer;
+  }
+  function requireWebCrypto(){
+    if(!window.crypto||!window.crypto.subtle)throw Error('当前浏览器不支持 WebCrypto，请使用 HTTPS 或 localhost 环境');
+  }
+  async function deriveLlmKey(password,saltBuf){
+    requireWebCrypto();
+    const material=await crypto.subtle.importKey('raw',new TextEncoder().encode(password),'PBKDF2',false,['deriveKey']);
+    return crypto.subtle.deriveKey({name:'PBKDF2',salt:saltBuf,iterations:LLM_ITERATIONS,hash:'SHA-256'},material,{name:'AES-GCM',length:256},false,['encrypt','decrypt']);
+  }
+  async function encryptApiKey(apiKey,password){
+    requireWebCrypto();
+    const salt=crypto.getRandomValues(new Uint8Array(16));
+    const iv=crypto.getRandomValues(new Uint8Array(12));
+    const aesKey=await deriveLlmKey(password,salt);
+    const data=await crypto.subtle.encrypt({name:'AES-GCM',iv},aesKey,new TextEncoder().encode(apiKey));
+    return {kdf:{algo:'PBKDF2',hash:'SHA-256',iterations:LLM_ITERATIONS,salt:bufToBase64(salt)},aead:{algo:'AES-GCM',iv:bufToBase64(iv),data:bufToBase64(data)}};
+  }
+  async function decryptApiKey(password){
+    requireWebCrypto();
+    if(!llmConfig)throw Error('尚未保存大模型配置');
+    const salt=base64ToBuf(llmConfig.kdf.salt),iv=base64ToBuf(llmConfig.aead.iv);
+    const aesKey=await deriveLlmKey(password,salt);
+    try{
+      const plain=await crypto.subtle.decrypt({name:'AES-GCM',iv},aesKey,base64ToBuf(llmConfig.aead.data));
+      return new TextDecoder().decode(plain);
+    }catch(e){throw Error('主口令不正确，无法解密 API Key')}
+  }
+  function loadLlmConfig(){
+    if(llmConfig)return llmConfig;
+    try{
+      const raw=localStorage.getItem(LLM_STORAGE_KEY);
+      if(!raw)return null;
+      const cfg=JSON.parse(raw);
+      if(!cfg||typeof cfg!=='object'||!cfg.baseURL||!cfg.model||!cfg.kdf||!cfg.aead)throw Error('配置格式损坏');
+      llmConfig=cfg;
+      return cfg;
+    }catch(e){llmConfig=null;localStorage.removeItem(LLM_STORAGE_KEY);return null}
+  }
+  async function saveLlmConfig(baseURL,model,apiKey,password){
+    const enc=await encryptApiKey(apiKey,password);
+    const cfg={v:1,baseURL,model,kdf:enc.kdf,aead:enc.aead};
+    llmConfig=cfg;
+    localStorage.setItem(LLM_STORAGE_KEY,JSON.stringify(cfg));
+    llmPlainKey=apiKey;
+    return cfg;
+  }
+  function clearLlmConfig(){llmConfig=null;llmPlainKey=null;llmUnlockPromise=null;localStorage.removeItem(LLM_STORAGE_KEY)}
+
+  const LLM_VENDOR_PRESETS=[
+    {label:'DeepSeek',baseURL:'https://api.deepseek.com/v1',model:'deepseek-chat'},
+    {label:'OpenAI',baseURL:'https://api.openai.com/v1',model:'gpt-4o-mini'},
+    {label:'Moonshot Kimi',baseURL:'https://api.moonshot.cn/v1',model:'moonshot-v1-8k'},
+    {label:'智谱 GLM',baseURL:'https://open.bigmodel.cn/api/paas/v4',model:'glm-4-flash'},
+    {label:'通义 DashScope',baseURL:'https://dashscope.aliyuncs.com/compatible-mode/v1',model:'qwen-plus'},
+    {label:'SiliconFlow',baseURL:'https://api.siliconflow.cn/v1',model:'deepseek-ai/DeepSeek-V3'}
+  ];
+  const presetSelect=$('#llmVendorPreset');
+  presetSelect.innerHTML='<option value="">自定义（默认）</option>'+LLM_VENDOR_PRESETS.map(p=>`<option value="${p.label}">${p.label}</option>`).join('');
+  presetSelect.onchange=()=>{
+    const preset=LLM_VENDOR_PRESETS.find(p=>p.label===presetSelect.value);
+    if(preset){$('#llmBaseURL').value=preset.baseURL;$('#llmModel').value=preset.model}
+  };
+
+  function ensureLlmUnlocked(){
+    const cfg=loadLlmConfig();
+    if(!cfg)return Promise.reject(Error('请先点击右上角 ⚙ 配置大模型'));
+    if(llmPlainKey)return Promise.resolve(llmPlainKey);
+    if(llmUnlockPromise)return llmUnlockPromise;
+    const dialog=$('#llmUnlockDialog'),input=$('#llmUnlockPassword'),errorEl=$('#llmUnlockError');
+    llmUnlockPromise=new Promise((resolve,reject)=>{
+      errorEl.hidden=true;
+      input.value='';
+      dialog.hidden=false;
+      setTimeout(()=>input.focus(),30);
+      const close=result=>{
+        dialog.hidden=true;
+        llmUnlockPromise=null;
+        if(result.ok)resolve(result.key);
+        else reject(result.error||Error('已取消解锁'));
+      };
+      $('#llmUnlockConfirm').onclick=async()=>{
+        try{
+          const key=await decryptApiKey(input.value);
+          llmPlainKey=key;
+          close({ok:true,key});
+        }catch(e){errorEl.textContent=e.message;errorEl.hidden=false;input.select()}
+      };
+      const cancel=()=>close({ok:false,error:Error('已取消解锁')});
+      $('#llmUnlockCancel').onclick=cancel;
+      $('#llmUnlockClose').onclick=cancel;
+      dialog.onclick=e=>{if(e.target===dialog)cancel()};
+      input.onkeydown=e=>{if(e.key==='Enter')$('#llmUnlockConfirm').click();if(e.key==='Escape')cancel()};
+    });
+    return llmUnlockPromise;
+  }
+
+  async function chatCompletion(messages,{timeoutMs=90000}={}){
+    const cfg=loadLlmConfig();
+    if(!cfg)throw Error('请先点击右上角 ⚙ 配置大模型');
+    const key=await ensureLlmUnlocked();
+    let base=cfg.baseURL.trim().replace(/\/+$/,'');
+    if(!/\/chat\/completions$/i.test(base))base+='/chat/completions';
+    const controller=new AbortController();
+    const timer=setTimeout(()=>controller.abort(),timeoutMs);
+    const body={model:cfg.model,messages,temperature:0.3};
+    for(let attempt=0;attempt<2;attempt++){
+      try{
+        const response=await fetch(base,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},body:JSON.stringify(body),signal:controller.signal});
+        if(response.status===429&&attempt===0){await new Promise(r=>setTimeout(r,1800));continue}
+        if(!response.ok){
+          let detail='';
+          try{const data=await response.json();detail=data&&data.error&&data.error.message?data.error.message:''}catch(e){detail=''}
+          if(!detail){try{detail=(await response.text()).slice(0,300)}catch(e){detail=''}}
+          const hint={400:'请求参数错误',401:'API Key 无效或未授权',403:'无权限访问',404:'BaseURL 或接口路径错误',429:'请求过于频繁（限流）'}[response.status]||`请求失败（HTTP ${response.status}）`;
+          throw Error(`${hint}${detail?`：${detail}`:''}`);
+        }
+        const data=await response.json();
+        const text=data&&data.choices&&data.choices[0]&&data.choices[0].message?data.choices[0].message.content:null;
+        if(typeof text!=='string'||!text.trim())throw Error('模型返回内容为空');
+        return text;
+      }catch(e){
+        if(e.name==='AbortError')throw Error(`请求超时（超过 ${Math.round(timeoutMs/1000)} 秒），请检查网络或模型响应速度`);
+        if(e instanceof TypeError)throw Error('无法连接模型服务：请检查 BaseURL、网络连接，以及服务是否允许浏览器直连（CORS）');
+        throw e;
+      }
+    }
+    throw Error('请求失败');
+  }
+
+  // ---- 提示词模板加载 ----
+  const ALT_PROMPT_BASE='scripts/alt-prompts/';
+  let altPromptCache={};
+  async function fetchPromptFile(name){
+    const url=ALT_PROMPT_BASE+name;
+    const r=await fetch(url,{cache:'no-cache'});
+    if(!r.ok)throw Error(`模板加载失败：${url}（HTTP ${r.status}）`);
+    return r.text();
+  }
+  async function loadPromptTemplate(name){
+    if(altPromptCache[name])return altPromptCache[name];
+    const text=await fetchPromptFile(name);
+    altPromptCache[name]=text;
+    return text;
+  }
+  async function loadTaskSpecTemplate(){
+    const template=await loadPromptTemplate('task-spec-generation.md');
+    if(!template.includes('{{ASSET_LIBRARY}}')||!template.includes('{{CLICK_EVENT}}'))throw Error('模板缺少附录占位符 {{ASSET_LIBRARY}} / {{CLICK_EVENT}}');
+    const [assets,events]=await Promise.all([fetchPromptFile('reference/asset-library.md'),fetchPromptFile('reference/click-event.md')]);
+    return template.replace('{{ASSET_LIBRARY}}',assets).replace('{{CLICK_EVENT}}',events);
+  }
+
+  // ---- 输出解析与 TaskSpec 字段校验 ----
+  function extractJsonBlock(text){
+    const fence=text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    const candidate=fence?fence[1]:text;
+    const start=candidate.indexOf('{'),end=candidate.lastIndexOf('}');
+    if(start<0||end<=start)throw Error('响应中未找到 JSON 对象');
+    return JSON.parse(candidate.slice(start,end+1));
+  }
+  function extractAltAsc(text){
+    const alt=text.match(/<alt>([\s\S]*?)<\/alt>/i);
+    const asc=text.match(/<asc>([\s\S]*?)<\/asc>/i);
+    if(!alt||!asc)throw Error('响应中未找到 <alt>...</alt> 或 <asc>...</asc> 段落');
+    const clean=s=>String(s).replace(/```[A-Za-z0-9_+\-]*\s*/g,'').replace(/\s*```/g,'').trim();
+    const altText=clean(alt[1]),ascText=clean(asc[1]);
+    if(!altText||!ascText)throw Error('<alt> 或 <asc> 内容为空');
+    return {alt:altText,asc:ascText};
+  }
+  const TASKSPEC_TOP_LEVEL=new Set(['userQuery','size','eventCandidates','dataModelSchema','assetCandidates']);
+  const EVENT_CALLS=new Set(['clickToCallPhone','clickToDeeplink','clickToIntent']);
+  const FORBIDDEN_EVENT_FIELDS=['id','label','description','required','onClick'];
+  function normalizeAssetSrc(src){
+    if(typeof src!=='string')return null;
+    const name=src.replace(/^.*[\\/]/,'');
+    if(!name.endsWith('.svg'))return null;
+    return Array.isArray(window.MediaAssetCatalog)&&window.MediaAssetCatalog.includes(name)?'resources/base/media/'+name:null;
+  }
+  function validateSchemaNodes(node,path,root){
+    const issues=[];
+    if(!node||typeof node!=='object'||Array.isArray(node))return issues;
+    if(!root&&'description' in node){
+      if(!('type' in node))issues.push(`${path} 节点缺 type`);
+      if(!('sampleValue' in node))issues.push(`${path} 节点缺 sampleValue`);
+      if(typeof node.description!=='string'||!node.description.trim())issues.push(`${path}.description 不能为空`);
+    }
+    Object.keys(node).forEach(key=>{
+      const child=node[key];
+      if(child&&typeof child==='object'&&!['type','description','sampleValue','maxLength','default'].includes(key)){
+        issues.push(...validateSchemaNodes(child,`${path}.${key}`,false));
+      }
+    });
+    return issues;
+  }
+  function validateTaskSpec(spec){
+    const issues=[];
+    if(!spec||typeof spec!=='object'||Array.isArray(spec))return ['TaskSpec 必须是 JSON 对象'];
+    Object.keys(spec).forEach(key=>{if(!TASKSPEC_TOP_LEVEL.has(key))issues.push(`顶层字段 ${key} 不在协议内（仅允许 userQuery/size/eventCandidates/dataModelSchema/assetCandidates）`)});
+    if(!['2x2','2x4'].includes(spec.size))issues.push('size 必须是 "2x2" 或 "2x4"');
+    if(typeof spec.userQuery!=='string'||!spec.userQuery.trim())issues.push('userQuery 不能为空');
+    if(!spec.dataModelSchema||typeof spec.dataModelSchema!=='object'||Array.isArray(spec.dataModelSchema))issues.push('dataModelSchema 必须是对象');
+    else issues.push(...validateSchemaNodes(spec.dataModelSchema,'dataModelSchema',true));
+    if(!Array.isArray(spec.assetCandidates))issues.push('assetCandidates 必须是数组');
+    else spec.assetCandidates.forEach((asset,index)=>{
+      if(!asset||typeof asset!=='object'||Array.isArray(asset)){issues.push(`assetCandidates[${index}] 必须是对象`);return}
+      const normalized=normalizeAssetSrc(asset.src);
+      if(!normalized)issues.push(`assetCandidates[${index}].src 必须是素材库内声明的本地 SVG（resources/base/media/*.svg）`);
+      else if(asset.src!==normalized)issues.push(`assetCandidates[${index}].src 应规范为 ${normalized}`);
+      if(typeof asset.description!=='string'||!asset.description.trim())issues.push(`assetCandidates[${index}].description 不能为空`);
+    });
+    if(!Array.isArray(spec.eventCandidates))issues.push('eventCandidates 必须是数组');
+    else spec.eventCandidates.forEach((event,index)=>{
+      if(!event||typeof event!=='object'||Array.isArray(event)){issues.push(`eventCandidates[${index}] 必须是对象`);return}
+      FORBIDDEN_EVENT_FIELDS.forEach(key=>{if(key in event)issues.push(`eventCandidates[${index}] 不允许出现 ${key} 字段`)});
+      if(!EVENT_CALLS.has(event.call))issues.push(`eventCandidates[${index}].call 必须是 clickToCallPhone / clickToDeeplink / clickToIntent`);
+      if(event.args!==undefined&&(typeof event.args!=='object'||event.args===null||Array.isArray(event.args)))issues.push(`eventCandidates[${index}].args 必须是对象`);
+    });
+    return issues;
+  }
+
+  // ---- 两段生成流程 ----
+  function showGenError(box,title,items){
+    box.hidden=false;
+    box.innerHTML=`<strong>${escapeHtml(title)}</strong>${items&&items.length?`<ul>${items.map(x=>`<li>${escapeHtml(x)}</li>`).join('')}</ul>`:''}`;
+  }
+  async function generateTaskSpec(){
+    const genError=$('#altGenError'),btn=$('#altGenTaskSpecBtn');
+    genError.hidden=true;
+    const query=$('#altUserQuery').value.trim();
+    if(!query){showGenError(genError,'请先输入用户 Query');return}
+    btn.disabled=true;
+    const oldLabel=btn.textContent;
+    btn.textContent='生成中…';
+    try{
+      const template=await loadTaskSpecTemplate();
+      const system=template.replace('{userQuery}',query);
+      const text=await chatCompletion([{role:'system',content:system},{role:'user',content:query}],{timeoutMs:120000});
+      const spec=extractJsonBlock(text);
+      if(!spec||typeof spec!=='object'||Array.isArray(spec))throw Error('模型输出不是 JSON 对象');
+      spec.userQuery=query;
+      const issues=validateTaskSpec(spec);
+      $('#altTaskSpec').value=JSON.stringify(spec,null,2);
+      syncSizePlaceholders();
+      if(issues.length)showGenError(genError,`TaskSpec 已生成，但有 ${issues.length} 条校验提示（可手动修改后继续）：`,issues);
+      else toast('TaskSpec 已生成');
+    }catch(e){
+      showGenError(genError,'生成 TaskSpec 失败：',[e.message||String(e)]);
+    }finally{
+      btn.disabled=false;
+      btn.textContent=oldLabel;
+    }
+  }
+  async function generateAltAsc(){
+    const genError=$('#altGenError'),btn=$('#altGenAltAscBtn');
+    genError.hidden=true;
+    const taskSpecText=$('#altTaskSpec').value.trim();
+    if(!taskSpecText){showGenError(genError,'请先填写或生成 TaskSpec');return}
+    let spec;
+    try{spec=JSON.parse(taskSpecText)}catch(e){showGenError(genError,'TaskSpec 不是合法 JSON：',[e.message||String(e)]);return}
+    const issues=validateTaskSpec(spec);
+    const blocking=issues.filter(i=>/顶层字段|size 必须|assetCandidates\[.*\]\.src/.test(i));
+    if(blocking.length){showGenError(genError,'TaskSpec 校验未通过，请先修正：',blocking);return}
+    btn.disabled=true;
+    const oldLabel=btn.textContent;
+    btn.textContent='生成中…';
+    try{
+      const template=await loadPromptTemplate('alt-asc-generation.md');
+      const system=template.replace('{taskSpec}',JSON.stringify(spec,null,2));
+      const text=await chatCompletion([{role:'system',content:system},{role:'user',content:'请根据上述 TaskSpec 生成对应的 ALT 与 ASC。'}],{timeoutMs:180000});
+      const {alt,asc}=extractAltAsc(text);
+      $('#altInput').value=alt;
+      $('#ascInput').value=asc;
+      toast('ALT / ASC 已生成，可直接编译并渲染');
+    }catch(e){
+      showGenError(genError,'生成 ALT/ASC 失败：',[e.message||String(e),'可检查模型输出是否包含 <alt>...</alt> 与 <asc>...</asc> 后重试']);
+    }finally{
+      btn.disabled=false;
+      btn.textContent=oldLabel;
+    }
+  }
+  $('#altGenTaskSpecBtn').onclick=generateTaskSpec;
+  $('#altGenAltAscBtn').onclick=generateAltAsc;
+
+  // ---- 设置弹窗 ----
+  function setLlmStatus(el,text,isError){
+    el.textContent=text;
+    el.className='llm-status'+(isError?' err':'');
+    el.hidden=false;
+  }
+  function openLlmSettings(){
+    const cfg=loadLlmConfig();
+    $('#llmBaseURL').value=cfg?cfg.baseURL:'';
+    $('#llmModel').value=cfg?cfg.model:'';
+    $('#llmApiKey').value='';
+    $('#llmMasterPassword').value='';
+    $('#llmMasterPasswordConfirm').value='';
+    $('#llmVendorPreset').value='';
+    $('#llmSettingsStatus').hidden=true;
+    $('#llmSettingsDialog').hidden=false;
+  }
+  $('#llmSettingsBtn').onclick=openLlmSettings;
+  $('#llmCloseSettings').onclick=()=>{$('#llmSettingsDialog').hidden=true};
+  $('#llmCancelSettings').onclick=()=>{$('#llmSettingsDialog').hidden=true};
+  $('#llmSettingsDialog').onclick=e=>{if(e.target===$('#llmSettingsDialog'))$('#llmSettingsDialog').hidden=true};
+  $('#llmSaveConfig').onclick=async()=>{
+    const baseURL=$('#llmBaseURL').value.trim(),model=$('#llmModel').value.trim(),apiKey=$('#llmApiKey').value,pwd=$('#llmMasterPassword').value,confirmPwd=$('#llmMasterPasswordConfirm').value;
+    const status=$('#llmSettingsStatus');
+    status.hidden=true;
+    if(!baseURL)return setLlmStatus(status,'BaseURL 不能为空',true);
+    if(!model)return setLlmStatus(status,'模型名不能为空',true);
+    if(!apiKey)return setLlmStatus(status,'API Key 不能为空',true);
+    if(!pwd)return setLlmStatus(status,'主口令不能为空',true);
+    if(pwd.length<4)return setLlmStatus(status,'主口令至少 4 个字符',true);
+    if(pwd!==confirmPwd)return setLlmStatus(status,'两次输入的口令不一致',true);
+    try{
+      await saveLlmConfig(baseURL,model,apiKey,pwd);
+      $('#llmApiKey').value='';
+      $('#llmMasterPassword').value='';
+      $('#llmMasterPasswordConfirm').value='';
+      setLlmStatus(status,'已保存：API Key 已用 AES-GCM + PBKDF2 加密，口令未落盘，本次会话已解锁',false);
+      toast('大模型配置已保存');
+    }catch(e){setLlmStatus(status,'保存失败：'+(e.message||e),true)}
+  };
+  $('#llmClearConfig').onclick=()=>{
+    if(!confirm('确定清除已保存的大模型配置吗？加密的 API Key 将无法恢复。'))return;
+    clearLlmConfig();
+    $('#llmBaseURL').value='';
+    $('#llmModel').value='';
+    $('#llmApiKey').value='';
+    $('#llmMasterPassword').value='';
+    $('#llmMasterPasswordConfirm').value='';
+    setLlmStatus($('#llmSettingsStatus'),'配置已清除',false);
+  };
 })();

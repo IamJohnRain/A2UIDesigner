@@ -29,6 +29,7 @@ jobs:
           cp index.html app.js styles.css color-picker.css add-ui.css genui-renderer.js _site/
           cp -r references/media references/fonts _site/references/
           cp -r scripts/config _site/scripts/
+          cp -r scripts/alt-prompts _site/scripts/
           cp scripts/alt_to_dsl_converter.py _site/scripts/
       - name: Setup Pages
         uses: actions/configure-pages@v5
