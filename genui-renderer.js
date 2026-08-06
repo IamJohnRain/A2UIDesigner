@@ -97,25 +97,649 @@
     if (!value?.colors) return '';
     const directions = { RightBottom: '135deg', LeftBottom: '45deg', RightTop: '225deg', LeftTop: '315deg',
       Right: '90deg', Left: '270deg', Bottom: '180deg', Top: '0deg' };
-    return `linear-gradient(${directions[value.direction] || '135deg'},${value.colors.map(item =>
-      `${cssColor(item[0])} ${Number(item[1]) * 100}%`).join(',')})`;
+    const colors = value.colors;
+    const stops = Array.isArray(value.stops) ? value.stops : [];
+    const repeating = value.repeating === true;
+    const angle = typeof value.angle === 'number' ? `${value.angle}deg` : (directions[value.direction] || '135deg');
+    const parts = colors.map((item, index) => {
+      let color;
+      let stop;
+      if (Array.isArray(item) && item.length >= 2) {
+        color = cssColor(item[0]);
+        stop = Number(item[1]);
+      } else if (item && typeof item === 'object') {
+        color = cssColor(item.color);
+        stop = item.stop !== undefined ? Number(item.stop) : item.position !== undefined ? Number(item.position) : NaN;
+      } else {
+        color = cssColor(item);
+        stop = NaN;
+      }
+      if (typeof stops[index] === 'number') stop = stops[index];
+      if (!Number.isFinite(stop)) stop = colors.length <= 1 ? 0 : index / (colors.length - 1);
+      return `${color} ${stop * 100}%`;
+    });
+    return `${repeating ? 'repeating-linear-gradient' : 'linear-gradient'}(${angle},${parts.join(',')})`;
   }
 
   function resolved(value, context) {
     return context.evalBinding(value, context.local);
   }
 
-  function evaluateBinding(value, getPath, local) {
-    if (typeof value !== 'string' || !/^\{\{[\s\S]*\}\}$/.test(value.trim())) return value;
-    let expression = value.trim().slice(2, -2).trim();
+  // ---------------------------------------------------------------- dynamic
+  // GenUI resolves every attribute through one recursive pipeline
+  // (data/DynamicValueResolver.cpp): full {{ ... }} expressions, ${...}
+  // template strings, {"path": ...} bindings and {"call": ..., "args": ...}
+  // native function calls. Objects and arrays are walked recursively.
+
+  const MAX_DYNAMIC_RESOLVE_DEPTH = 16;
+
+  function valueToText(value) {
+    if (value == null) return '';
+    if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value);
+    return JSON.stringify(value);
+  }
+
+  function isPathBinding(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+    const keys = Object.keys(value);
+    return keys.length === 1 && keys[0] === 'path';
+  }
+
+  function evaluateExpression(raw, getPath, local) {
+    let expression = raw.trim().slice(2, -2).trim();
+    // JSON-pointer placeholders are rewritten to the absolute data-model
+    // variable in native expressions; mirror that with literal substitution.
     expression = expression.replace(/\$\{([^}]+)\}/g, (_, path) => JSON.stringify(getPath(path, local)));
-    // GenUI rewrites JSON-pointer placeholders to this absolute data-model
-    // variable, and also accepts the variable directly in DSL expressions.
-    // Keep it independent of template-local variables, as native does.
+    // GenUI recovers $__dataModel["/a/b"] JSON-pointer bracket keys.
+    expression = expression.replace(/\$__dataModel\s*\[\s*(['"])(\/[^'"]*)\1\s*\]/g, (_, __, path) =>
+      JSON.stringify(getPath(path, local)));
     const size = input => Array.isArray(input) ? input.length : 0;
     const dataModel = getPath('/', local) ?? {};
     try { return Function('size', '$__dataModel', `"use strict";return (${expression})`)(size, dataModel); }
-    catch { return value; }
+    catch { return undefined; }
+  }
+
+  function resolveTemplateString(raw, getPath, local) {
+    let resolved = '';
+    let touched = false;
+    let index = 0;
+    while (index < raw.length) {
+      if (raw[index] === '\\' && raw[index + 1] === '$' && raw[index + 2] === '{') {
+        resolved += '${';
+        index += 3;
+        touched = true;
+        continue;
+      }
+      if (raw[index] === '$' && raw[index + 1] === '{') {
+        const close = raw.indexOf('}', index + 2);
+        if (close === -1) {
+          resolved += raw[index];
+          index += 1;
+          continue;
+        }
+        const expr = raw.slice(index + 2, close);
+        if (expr[0] === '/') {
+          resolved += valueToText(getPath(expr, local));
+          touched = true;
+          index = close + 1;
+          continue;
+        }
+        // Plain template strings only resolve JSON-pointer placeholders.
+        resolved += raw[index];
+        index += 1;
+        continue;
+      }
+      resolved += raw[index];
+      index += 1;
+    }
+    return touched ? resolved : raw;
+  }
+
+  // ------------------------------------------------------ native functions
+  // Registry mirrors functions/NativeFunctionRegistry.cpp (new in 8a2c9fc).
+  const EMAIL_PATTERN = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
+
+  function parseDecimals(value) {
+    if (value === undefined) return 2;
+    if (typeof value !== 'number' || !Number.isFinite(value) || Math.abs(value) > 20) return null;
+    return Math.floor(Math.abs(value));
+  }
+
+  function parseGrouping(value) {
+    if (value === undefined) return false;
+    if (typeof value !== 'boolean') return null;
+    return value;
+  }
+
+  function roundTo(value, decimals) {
+    const factor = Math.pow(10, decimals);
+    const epsilon = value >= 0 ? 1e-9 : -1e-9;
+    return Math.round(value * factor + epsilon) / factor;
+  }
+
+  function formatDecimal(value, decimals) {
+    const rounded = roundTo(value, decimals);
+    const negative = rounded < 0 || Object.is(rounded, -0);
+    const digits = Math.abs(rounded).toFixed(decimals);
+    return (negative ? '-' : '') + digits;
+  }
+
+  function formatWithGrouping(value, decimals) {
+    const formatted = formatDecimal(Math.abs(value), decimals);
+    const dot = formatted.indexOf('.');
+    const intPart = dot === -1 ? formatted : formatted.slice(0, dot);
+    const decPart = dot === -1 ? '' : formatted.slice(dot);
+    let grouped = '';
+    for (let i = intPart.length - 1, count = 0; i >= 0; i -= 1, count += 1) {
+      if (count > 0 && count % 3 === 0) grouped = ',' + grouped;
+      grouped = intPart[i] + grouped;
+    }
+    return (value < 0 ? '-' : '') + grouped + decPart;
+  }
+
+  const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August',
+    'September', 'October', 'November', 'December'];
+  const MONTH_ABBREVS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const DAY_ABBREVS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+  function dayOfWeek(year, month, day) {
+    if (month < 3) {
+      month += 12;
+      year -= 1;
+    }
+    const k = year % 100;
+    const j = Math.floor(year / 100);
+    const h = (day + Math.floor((13 * (month + 1)) / 5) + k + Math.floor(k / 4) + Math.floor(j / 4) + 5 * j) % 7;
+    return (h + 6) % 7;
+  }
+
+  function padInt(value, width) {
+    let text = String(Math.abs(value));
+    while (text.length < width) text = '0' + text;
+    return text;
+  }
+
+  function formatDateValue(value, format) {
+    if (typeof value !== 'string' || typeof format !== 'string' || value === '' || format === '') return '';
+    if (value.length < 10 || value[4] !== '-' || value[7] !== '-') return '';
+    const year = Number(value.slice(0, 4));
+    const month = Number(value.slice(5, 7));
+    const day = Number(value.slice(8, 10));
+    if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return '';
+    let hour = 0;
+    let minute = 0;
+    let second = 0;
+    if (value.length > 10 && value[10] === 'T') {
+      if (value.length >= 19) {
+        hour = Number(value.slice(11, 13));
+        minute = Number(value.slice(14, 16));
+        second = Number(value.slice(17, 19));
+      } else if (value.length >= 16) {
+        hour = Number(value.slice(11, 13));
+        minute = Number(value.slice(14, 16));
+      }
+    }
+    const parts = { year, month, day, hour, minute, second };
+    let result = '';
+    let index = 0;
+    while (index < format.length) {
+      const token = format[index];
+      let run = 1;
+      while (index + run < format.length && format[index + run] === token) run += 1;
+      if (token === 'y') result += run >= 3 ? padInt(parts.year, 4) : padInt(parts.year % 100, 2);
+      else if (token === 'M') {
+        const valid = parts.month >= 1 && parts.month <= 12;
+        result += run >= 4 ? (valid ? MONTH_NAMES[parts.month - 1] : '')
+          : run === 3 ? (valid ? MONTH_ABBREVS[parts.month - 1] : '')
+            : run === 2 ? padInt(parts.month, 2) : String(parts.month);
+      } else if (token === 'd') result += run >= 2 ? padInt(parts.day, 2) : String(parts.day);
+      else if (token === 'E') {
+        const weekday = dayOfWeek(parts.year, parts.month, parts.day);
+        result += run >= 4 ? DAY_NAMES[weekday] : DAY_ABBREVS[weekday];
+      } else if (token === 'H') result += run >= 2 ? padInt(parts.hour, 2) : String(parts.hour);
+      else if (token === 'h') {
+        let hour12 = parts.hour % 12;
+        if (hour12 === 0) hour12 = 12;
+        result += run >= 2 ? padInt(hour12, 2) : String(hour12);
+      } else if (token === 'm') result += run >= 2 ? padInt(parts.minute, 2) : String(parts.minute);
+      else if (token === 's') result += run >= 2 ? padInt(parts.second, 2) : String(parts.second);
+      else if (token === 'a') result += parts.hour < 12 ? 'AM' : 'PM';
+      else result += token.repeat(run);
+      index += run;
+    }
+    return result;
+  }
+
+  function findMatchingBrace(text, start) {
+    let depth = 0;
+    for (let i = start; i < text.length; i += 1) {
+      if (text[i] === '{') depth += 1;
+      else if (text[i] === '}') {
+        depth -= 1;
+        if (depth === 0) return i;
+      }
+    }
+    return -1;
+  }
+
+  function parseLooseJsonToken(token) {
+    if (token === '') return '';
+    if (token === 'true') return true;
+    if (token === 'false') return false;
+    if (token === 'null') return null;
+    if (token.trim() !== '' && Number.isFinite(Number(token))) return Number(token);
+    return token;
+  }
+
+  function parseSingleFormatArg(argsPart, start, getPath, local) {
+    if (argsPart[start] === "'") {
+      const end = argsPart.indexOf("'", start + 1);
+      if (end === -1) return null;
+      return { value: argsPart.slice(start + 1, end), next: end + 1 };
+    }
+    if (argsPart[start] === '$' && argsPart[start + 1] === '{') {
+      const innerClose = findMatchingBrace(argsPart, start + 1);
+      if (innerClose === -1) return null;
+      const resolved = resolveFormatTemplate('${' + argsPart.slice(start + 2, innerClose) + '}', getPath, local);
+      return { value: parseLooseJsonToken(resolved), next: innerClose + 1 };
+    }
+    let end = argsPart.indexOf(',', start);
+    if (end === -1) end = argsPart.length;
+    const raw = argsPart.slice(start, end).replace(/\s+$/, '');
+    return { value: parseLooseJsonToken(raw), next: end };
+  }
+
+  function parseFormatCallArgs(argsPart, getPath, local) {
+    const args = {};
+    let pos = 0;
+    while (pos < argsPart.length) {
+      while (pos < argsPart.length && argsPart[pos] === ' ') pos += 1;
+      if (pos >= argsPart.length) break;
+      const colon = argsPart.indexOf(':', pos);
+      if (colon === -1) return null;
+      const name = argsPart.slice(pos, colon).replace(/\s+$/, '');
+      if (name === '') return null;
+      let start = colon + 1;
+      while (start < argsPart.length && argsPart[start] === ' ') start += 1;
+      if (start >= argsPart.length) return null;
+      const parsed = parseSingleFormatArg(argsPart, start, getPath, local);
+      if (!parsed) return null;
+      pos = parsed.next;
+      if (pos < argsPart.length && argsPart[pos] === ',') pos += 1;
+      args[name] = parsed.value;
+    }
+    return args;
+  }
+
+  function resolveFormatDataPath(expr, getPath, local) {
+    const path = expr && expr[0] === '/' ? expr : '/' + expr;
+    return valueToText(getPath(path, local));
+  }
+
+  function resolveFormatFunctionCall(funcName, argsPart, getPath, local) {
+    const fn = nativeFunctions[funcName];
+    if (!fn) return '';
+    const args = parseFormatCallArgs(argsPart, getPath, local);
+    if (!args) return '';
+    const result = fn(args, getPath, local);
+    return result == null ? '' : valueToText(result);
+  }
+
+  function resolveFormatTemplate(template, getPath, local) {
+    let result = '';
+    let index = 0;
+    while (index < template.length) {
+      if (template[index] === '\\' && template[index + 1] === '$' && template[index + 2] === '{') {
+        result += '${';
+        index += 3;
+        continue;
+      }
+      if (template[index] !== '$' || template[index + 1] !== '{') {
+        result += template[index];
+        index += 1;
+        continue;
+      }
+      const close = findMatchingBrace(template, index + 1);
+      if (close < 0) {
+        result += template[index];
+        index += 1;
+        continue;
+      }
+      const expr = template.slice(index + 2, close);
+      const paren = expr.indexOf('(');
+      let resolved;
+      if (paren !== -1 && expr[expr.length - 1] === ')') {
+        resolved = resolveFormatFunctionCall(expr.slice(0, paren), expr.slice(paren + 1, expr.length - 1),
+          getPath, local);
+      } else {
+        resolved = resolveFormatDataPath(expr, getPath, local);
+      }
+      result += resolved;
+      index = close + 1;
+    }
+    return result;
+  }
+
+  // CLDR plural rule families (NativePluralizeFunction.cpp).
+  function pluralOperands(count) {
+    const integerValue = Math.trunc(count);
+    const isDecimal = count % 1 !== 0;
+    return { count, integerValue, isDecimal };
+  }
+
+  const pluralOneOther = o => o.isDecimal ? 'other' : o.integerValue === 1 ? 'one' : 'other';
+  const pluralFrench = o => {
+    if (o.integerValue === 0 || o.integerValue === 1) return 'one';
+    if (o.isDecimal) {
+      const intPart = Math.trunc(o.count);
+      const frac = o.count - intPart;
+      if (frac > 0 && (intPart === 0 || intPart === 1)) return 'one';
+    }
+    return 'other';
+  };
+  const pluralOneFewOther = o => {
+    if (o.isDecimal) return 'other';
+    if (o.integerValue === 1) return 'one';
+    if (o.integerValue >= 2 && o.integerValue <= 4) return 'few';
+    return 'other';
+  };
+  const pluralOneFewManyOther = o => {
+    if (o.isDecimal) return 'other';
+    const mod10 = o.integerValue % 10;
+    const mod100 = o.integerValue % 100;
+    if (mod10 === 1 && mod100 !== 11) return 'one';
+    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'few';
+    if (mod10 === 0 || (mod10 >= 5 && mod10 <= 9) || (mod100 >= 11 && mod100 <= 14)) return 'many';
+    return 'other';
+  };
+  const pluralPolish = o => {
+    if (o.isDecimal) return 'other';
+    if (o.integerValue === 1) return 'one';
+    const mod10 = o.integerValue % 10;
+    const mod100 = o.integerValue % 100;
+    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'few';
+    return 'many';
+  };
+  const pluralLithuanian = o => {
+    if (o.isDecimal) return 'other';
+    const mod10 = o.integerValue % 10;
+    const mod100 = o.integerValue % 100;
+    if (mod10 === 1 && mod100 !== 11) return 'one';
+    if (mod10 >= 2 && mod10 <= 9 && (mod100 < 12 || mod100 > 19)) return 'few';
+    return 'other';
+  };
+  const pluralLatvian = o => {
+    if (o.isDecimal) return 'zero';
+    if (o.integerValue % 10 === 0) return 'zero';
+    const mod100 = o.integerValue % 100;
+    if (mod100 >= 11 && mod100 <= 19) return 'zero';
+    if (o.integerValue % 10 === 1 && mod100 !== 11) return 'one';
+    return 'other';
+  };
+  const pluralBreton = o => {
+    if (o.isDecimal) return 'other';
+    if (o.integerValue === 1) return 'one';
+    if (o.integerValue === 2) return 'two';
+    if (o.integerValue === 3) return 'few';
+    if (o.integerValue === 6) return 'many';
+    return 'other';
+  };
+  const pluralMacedonian = o => {
+    if (o.isDecimal) return 'other';
+    if (o.integerValue % 10 === 1 && o.integerValue !== 11) return 'one';
+    return 'other';
+  };
+  const pluralIcelandic = o => {
+    if (o.isDecimal) return 'other';
+    if (o.integerValue % 10 === 1 && o.integerValue % 100 !== 11) return 'one';
+    return 'other';
+  };
+  const pluralArabic = o => {
+    if (o.isDecimal) return 'other';
+    if (o.integerValue === 0) return 'zero';
+    if (o.integerValue === 1) return 'one';
+    if (o.integerValue === 2) return 'two';
+    const mod100 = o.integerValue % 100;
+    if (mod100 >= 3 && mod100 <= 10) return 'few';
+    if (mod100 >= 11 && mod100 <= 99) return 'many';
+    return 'other';
+  };
+  const pluralHebrew = o => {
+    if (o.isDecimal) return 'other';
+    if (o.integerValue === 1) return 'one';
+    if (o.integerValue === 2) return 'two';
+    if (o.integerValue === 0) return 'many';
+    if (o.integerValue >= 10 && o.integerValue <= 20) return 'many';
+    if (o.integerValue > 20 && o.integerValue % 10 === 0) return 'many';
+    return 'other';
+  };
+  const pluralWelsh = o => {
+    if (o.isDecimal) return 'other';
+    if (o.integerValue === 0) return 'zero';
+    if (o.integerValue === 1) return 'one';
+    if (o.integerValue === 2) return 'two';
+    if (o.integerValue === 3) return 'few';
+    if (o.integerValue === 6) return 'many';
+    return 'other';
+  };
+  const pluralIrish = o => {
+    if (o.isDecimal) return 'other';
+    if (o.integerValue === 1) return 'one';
+    if (o.integerValue === 2) return 'two';
+    if (o.integerValue >= 3 && o.integerValue <= 6) return 'few';
+    if (o.integerValue >= 7 && o.integerValue <= 10) return 'many';
+    return 'other';
+  };
+  const pluralSlovenian = o => {
+    if (o.isDecimal) return 'other';
+    const mod100 = o.integerValue % 100;
+    if (mod100 === 1) return 'one';
+    if (mod100 === 2) return 'two';
+    if (mod100 === 3 || mod100 === 4) return 'few';
+    return 'other';
+  };
+  const pluralMaltese = o => {
+    if (o.isDecimal) return 'other';
+    if (o.integerValue === 1) return 'one';
+    if (o.integerValue === 0 || (o.integerValue % 100 >= 2 && o.integerValue % 100 <= 10)) return 'few';
+    if (o.integerValue % 100 >= 11 && o.integerValue % 100 <= 19) return 'many';
+    return 'other';
+  };
+  const PLURAL_RULE_MAPPINGS = {
+    ar: pluralArabic, ru: pluralOneFewManyOther, uk: pluralOneFewManyOther, be: pluralOneFewManyOther,
+    bs: pluralOneFewManyOther, hr: pluralOneFewManyOther, sr: pluralOneFewManyOther, pl: pluralPolish,
+    cs: pluralOneFewOther, sk: pluralOneFewOther, lt: pluralLithuanian, lv: pluralLatvian,
+    fr: pluralFrench, pt: pluralFrench, cy: pluralWelsh, ga: pluralIrish, br: pluralBreton,
+    he: pluralHebrew, is: pluralIcelandic, mk: pluralMacedonian, sl: pluralSlovenian, mt: pluralMaltese
+  };
+
+  function pluralCategory(count, locale) {
+    const language = String(locale || '').split('-')[0];
+    const rule = PLURAL_RULE_MAPPINGS[language] || pluralOneOther;
+    return rule(pluralOperands(count));
+  }
+
+  function nativeFormatString(args, getPath, local) {
+    if (!args || typeof args !== 'object') return '';
+    const value = args.value;
+    if (typeof value !== 'string') return '';
+    return resolveFormatTemplate(value, getPath, local);
+  }
+
+  function nativeFormatNumber(args) {
+    if (!args || typeof args !== 'object') return '';
+    const value = args.value;
+    if (typeof value !== 'number') return '';
+    const decimals = parseDecimals(args.decimals);
+    const grouping = parseGrouping(args.grouping);
+    if (decimals === null || grouping === null) return '';
+    return grouping ? formatWithGrouping(value, decimals) : formatDecimal(value, decimals);
+  }
+
+  function nativeFormatCurrency(args) {
+    if (!args || typeof args !== 'object') return '';
+    const value = args.value;
+    const currency = args.currency;
+    if (typeof value !== 'number' || typeof currency !== 'string' || currency === '') return '';
+    const decimals = parseDecimals(args.decimals);
+    const grouping = parseGrouping(args.grouping);
+    if (decimals === null || grouping === null) return '';
+    const formatted = grouping ? formatWithGrouping(value, decimals) : formatDecimal(value, decimals);
+    return currency + ' ' + formatted;
+  }
+
+  function nativeFormatDate(args) {
+    if (!args || typeof args !== 'object') return '';
+    return formatDateValue(args.value, args.format);
+  }
+
+  function nativePluralize(args) {
+    if (!args || typeof args !== 'object') return '';
+    const value = args.value;
+    if (typeof value !== 'number') return '';
+    for (const key of ['zero', 'one', 'two', 'few', 'many', 'other']) {
+      if (args[key] !== undefined && typeof args[key] !== 'string') return '';
+    }
+    const locale = (typeof navigator !== 'undefined' && navigator.language) || 'en';
+    const category = pluralCategory(value, locale);
+    const matched = args[category];
+    if (typeof matched === 'string' && matched !== '') return matched;
+    return typeof args.other === 'string' ? args.other : '';
+  }
+
+  function nativeRequired(args) {
+    if (!args || typeof args !== 'object') return false;
+    const value = args.value;
+    if (value === undefined || value === null) return false;
+    if (typeof value === 'string') return value !== '';
+    if (Array.isArray(value)) return value.length > 0;
+    if (typeof value === 'object') return Object.keys(value).length > 0;
+    return true;
+  }
+
+  function nativeRegex(args) {
+    if (!args || typeof args !== 'object') return false;
+    const value = args.value;
+    const pattern = args.pattern;
+    if (typeof value !== 'string' || typeof pattern !== 'string' || pattern === '') return false;
+    try { return new RegExp('^(?:' + pattern + ')$').test(value); }
+    catch { return false; }
+  }
+
+  function nativeLength(args) {
+    if (!args || typeof args !== 'object') return false;
+    const value = args.value;
+    if (typeof value !== 'string') return false;
+    const length = value.length;
+    const hasMin = args.min !== undefined;
+    const hasMax = args.max !== undefined;
+    if (!hasMin && !hasMax) return false;
+    if (hasMin) {
+      if (typeof args.min !== 'number' || !Number.isFinite(args.min) ||
+        args.min < -2147483648 || args.min > 2147483647) return false;
+      if (length < Math.trunc(args.min)) return false;
+    }
+    if (hasMax) {
+      if (typeof args.max !== 'number' || !Number.isFinite(args.max) ||
+        args.max < -2147483648 || args.max > 2147483647) return false;
+      if (length > Math.trunc(args.max)) return false;
+    }
+    return true;
+  }
+
+  function nativeNumeric(args) {
+    if (!args || typeof args !== 'object') return false;
+    const value = args.value;
+    if (typeof value !== 'number' || !Number.isFinite(value)) return false;
+    const hasMin = args.min !== undefined;
+    const hasMax = args.max !== undefined;
+    if (!hasMin && !hasMax) return false;
+    if (hasMin) {
+      if (typeof args.min !== 'number' || !Number.isFinite(args.min)) return false;
+      if (value < args.min) return false;
+    }
+    if (hasMax) {
+      if (typeof args.max !== 'number' || !Number.isFinite(args.max)) return false;
+      if (value > args.max) return false;
+    }
+    return true;
+  }
+
+  function nativeEmail(args) {
+    if (!args || typeof args !== 'object') return false;
+    const value = args.value;
+    if (typeof value !== 'string' || value === '') return false;
+    return EMAIL_PATTERN.test(value);
+  }
+
+  function nativeAnd(args) {
+    if (!args || typeof args !== 'object') return false;
+    const values = args.values;
+    if (!Array.isArray(values) || values.length < 2) return false;
+    return values.every(item => item === true);
+  }
+
+  function nativeOr(args) {
+    if (!args || typeof args !== 'object') return false;
+    const values = args.values;
+    if (!Array.isArray(values) || values.length < 2) return false;
+    return values.some(item => item === true);
+  }
+
+  function nativeNot(args) {
+    if (!args || typeof args !== 'object') return true;
+    const value = args.value;
+    if (typeof value !== 'boolean') return true;
+    return !value;
+  }
+
+  const nativeFunctions = Object.freeze({
+    required: nativeRequired,
+    regex: nativeRegex,
+    length: nativeLength,
+    numeric: nativeNumeric,
+    email: nativeEmail,
+    formatString: nativeFormatString,
+    formatNumber: nativeFormatNumber,
+    formatCurrency: nativeFormatCurrency,
+    formatDate: nativeFormatDate,
+    pluralize: nativePluralize,
+    and: nativeAnd,
+    or: nativeOr,
+    not: nativeNot
+  });
+
+  function resolveFunctionCall(node, getPath, local, depth) {
+    const fn = nativeFunctions[node.call];
+    if (!fn) return undefined;
+    const args = resolveDynamicValue(node.args, getPath, local, depth + 1) ?? {};
+    return fn(args, getPath, local);
+  }
+
+  function resolveDynamicValue(value, getPath, local, depth) {
+    if (depth > MAX_DYNAMIC_RESOLVE_DEPTH) return undefined;
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      if (/^\{\{[\s\S]*\}\}$/.test(trimmed)) return evaluateExpression(value, getPath, local);
+      if (value.includes('${')) return resolveTemplateString(value, getPath, local);
+      return value;
+    }
+    if (Array.isArray(value)) return value.map(item => resolveDynamicValue(item, getPath, local, depth + 1));
+    if (value && typeof value === 'object') {
+      if (Object.prototype.hasOwnProperty.call(value, 'call')) return resolveFunctionCall(value, getPath, local, depth);
+      if (isPathBinding(value)) return getPath(value.path, local);
+      const resolvedObject = {};
+      Object.keys(value).forEach(key => {
+        resolvedObject[key] = resolveDynamicValue(value[key], getPath, local, depth + 1);
+      });
+      return resolvedObject;
+    }
+    return value;
+  }
+
+  function evaluateBinding(value, getPath, local) {
+    return resolveDynamicValue(value, getPath, local, 0);
   }
 
   function applyComponentDefaults(element, component) {
@@ -140,18 +764,24 @@
   }
 
   function applyCommonStyles(element, component, context) {
-    const styles = component.styles || {};
+    const styles = resolved(component.styles, context) || {};
     const style = element.style;
+    const dimension = value => typeof value === 'number' ? `${value}px` : String(value);
     // ArkUI nodes do not shrink unless flexShrink is explicitly applied.
     style.flexShrink = '0';
     applyComponentDefaults(element, component);
-    if (styles.width != null) style.width = `${styles.width}px`;
-    if (styles.height != null) style.height = `${styles.height}px`;
+    if (styles.width != null) style.width = dimension(styles.width);
+    if (styles.height != null) style.height = dimension(styles.height);
     if (styles.padding != null) style.padding = edge(styles.padding);
     if (styles.margin != null) style.margin = edge(styles.margin);
     if (styles.borderRadius != null) style.borderRadius = typeof styles.borderRadius === 'number'
       ? `${styles.borderRadius}px` : edge(styles.borderRadius);
     if (styles.clip) style.overflow = 'hidden';
+    if (styles.visibility) {
+      const visibility = String(resolved(styles.visibility, context)).toLowerCase();
+      if (visibility === 'none') style.display = 'none';
+      else if (visibility === 'hidden') style.visibility = 'hidden';
+    }
     if (styles.backgroundColor) style.backgroundColor = cssColor(resolved(styles.backgroundColor, context));
     if (styles.linearGradient) style.backgroundImage = gradient(styles.linearGradient);
     else if (styles.backgroundImage) {
@@ -159,6 +789,24 @@
       style.backgroundImage = `url("${context.previewAssetPath(source)}")`;
       style.backgroundSize = 'cover';
       style.backgroundPosition = 'center';
+    }
+    if (styles.constraintSize) {
+      const constraintSize = resolved(styles.constraintSize, context) || {};
+      if (constraintSize.minWidth != null) style.minWidth = dimension(constraintSize.minWidth);
+      if (constraintSize.maxWidth != null) style.maxWidth = dimension(constraintSize.maxWidth);
+      if (constraintSize.minHeight != null) style.minHeight = dimension(constraintSize.minHeight);
+      if (constraintSize.maxHeight != null) style.maxHeight = dimension(constraintSize.maxHeight);
+    }
+    if (styles.backgroundImageSize && style.backgroundImage) {
+      const backgroundImageSize = resolved(styles.backgroundImageSize, context) || {};
+      const sizeDimension = value => typeof value === 'number' ? `${value}px` : String(value);
+      if (backgroundImageSize.width != null && backgroundImageSize.height != null) {
+        style.backgroundSize = `${sizeDimension(backgroundImageSize.width)} ${sizeDimension(backgroundImageSize.height)}`;
+      } else if (backgroundImageSize.width != null) {
+        style.backgroundSize = sizeDimension(backgroundImageSize.width);
+      } else if (backgroundImageSize.height != null) {
+        style.backgroundSize = `auto ${sizeDimension(backgroundImageSize.height)}`;
+      }
     }
     if (styles.fontSize != null) style.fontSize = `${styles.fontSize}px`;
     if (styles.fontWeight != null) style.fontWeight = fontWeight(styles.fontWeight, 400);
@@ -169,6 +817,10 @@
       const shadow = styles.shadow;
       style.boxShadow = `${shadow.offsetX || 0}px ${shadow.offsetY || 0}px ${shadow.radius || 0}px ${cssColor(resolved(shadow.color || '#FF000000', context))}`;
     }
+    if (styles.aspectRatio != null) {
+      const aspectRatio = Number(resolved(styles.aspectRatio, context));
+      if (Number.isFinite(aspectRatio) && aspectRatio > 0) style.aspectRatio = String(aspectRatio);
+    }
     if (styles.flexGrow != null) style.flexGrow = styles.flexGrow;
     if (Number(styles.layoutWeight) > 0) {
       style.flexGrow = String(styles.layoutWeight);
@@ -178,7 +830,7 @@
   }
 
   function configureContainer(element, component, context) {
-    const styles = component.styles || {};
+    const styles = resolved(component.styles, context) || {};
     const style = element.style;
     if (component.component === 'Row' || component.component === 'Column' || component.component === 'List') {
       const isRow = component.component === 'Row';
@@ -219,10 +871,10 @@
   }
 
   function configureText(element, component, context) {
-    const styles = component.styles || {};
+    const styles = resolved(component.styles, context) || {};
     const maxLines = Number.isFinite(Number(styles.maxLines)) ? Math.max(0, Number(styles.maxLines)) : defaults.Text.maxLines;
     const overflow = styles.textOverflow === 'ellipsis' ? 'ellipsis' : 'clip';
-    element.textContent = resolved(component.content, context) ?? '';
+    element.textContent = resolved(component.content ?? component.text, context) ?? '';
     element.dataset.genuiTextContent = element.textContent;
     element.style.display = 'flex';
     element.style.alignItems = 'center';
@@ -263,10 +915,11 @@
   }
 
   function configureImage(element, component, context) {
+    const styles = resolved(component.styles, context) || {};
     const source = resolved(component.src, context);
     const previewSource = context.previewAssetPath(source);
-    const objectFit = component.styles?.objectFit || defaults.Image.objectFit;
-    const fillColor = resolved(component.styles?.fillColor, context);
+    const objectFit = styles.objectFit || defaults.Image.objectFit;
+    const fillColor = resolved(styles.fillColor, context);
     const useSvgFill = typeof fillColor === 'string' && /\.svg(?:$|[?#])/i.test(String(source || ''));
     const image = document.createElement(useSvgFill ? 'span' : 'img');
     image.style.width = '100%';
@@ -318,7 +971,7 @@
   }
 
   function configureProgress(element, component, context) {
-    const styles = component.styles || {};
+    const styles = resolved(component.styles, context) || {};
     const value = Number(resolved(component.value, context));
     const total = Number(resolved(component.total, context));
     const safeTotal = Number.isFinite(total) && total > 0 ? total : defaults.Progress.total;
@@ -327,6 +980,9 @@
     const type = String(styles.type || defaults.Progress.type).toLowerCase();
     const color = cssColor(resolved(styles.color, context) || defaults.Progress.color);
     const track = cssColor(resolved(styles.backgroundColor, context) || defaults.Progress.trackColor);
+    const strokeWidth = Number(resolved(styles.strokeWidth, context));
+    const safeStrokeWidth = Number.isFinite(strokeWidth) && strokeWidth > 0 ? strokeWidth
+      : (type === 'ring' || type === 'scalering' ? 8 : defaults.Progress.linearStrokeWidth);
     if (type === 'ring' || type === 'scalering') {
       const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
       const background = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
@@ -342,7 +998,7 @@
         circle.setAttribute('cy', '50');
         circle.setAttribute('r', '46');
         circle.setAttribute('fill', 'none');
-        circle.setAttribute('stroke-width', '8');
+        circle.setAttribute('stroke-width', String(safeStrokeWidth));
       });
       background.setAttribute('stroke', track);
       foreground.setAttribute('stroke', color);
@@ -362,6 +1018,7 @@
       primitive.className = 'genui-progress-track';
       primitive.dataset.ratio = String(safeValue / safeTotal);
       primitive.dataset.progressType = type;
+      primitive.dataset.strokeWidth = String(safeStrokeWidth);
       primitive.style.cssText = 'position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);overflow:hidden';
       primitive.style.background = track;
       fill.style.cssText = `display:block;height:100%;background:${color}`;
@@ -374,7 +1031,7 @@
   }
 
   function configureDivider(element, component, context) {
-    const styles = component.styles || {};
+    const styles = resolved(component.styles, context) || {};
     const vertical = styles.vertical ?? defaults.Divider.vertical;
     const strokeWidth = styles.strokeWidth ?? defaults.Divider.strokeWidth;
     const primitive = document.createElement('span');
@@ -393,8 +1050,8 @@
 
   function configureCheckbox(element, component, context) {
     const preset = defaults.Checkbox;
-    const styles = component.styles || {};
-    const mark = component.mark || styles.mark || {};
+    const styles = resolved(component.styles, context) || {};
+    const mark = resolved(component.mark || styles.mark, context) || {};
     const selected = Boolean(resolved(component.select, context));
     const control = document.createElement('span');
     element.setAttribute('role', 'checkbox');
@@ -557,9 +1214,10 @@
     root.querySelectorAll('.genui-progress-track').forEach(track => {
       const host = track.parentElement;
       const type = track.dataset.progressType;
+      const strokeWidth = Number(track.dataset.strokeWidth) || defaults.Progress.linearStrokeWidth;
       const thickness = type === 'capsule'
         ? host.clientHeight
-        : Math.min(defaults.Progress.linearStrokeWidth, host.clientHeight);
+        : Math.min(strokeWidth, host.clientHeight);
       const radius = thickness / 2;
       const ratio = Math.max(0, Math.min(1, Number(track.dataset.ratio) || 0));
       track.style.height = `${thickness}px`;
@@ -605,6 +1263,7 @@
     defaults,
     cssColor,
     evaluateBinding,
+    nativeFunctions,
     apply,
     renderLeaf,
     finalize: fitAdaptiveText
