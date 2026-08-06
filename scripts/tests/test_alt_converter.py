@@ -459,6 +459,192 @@ class AutomaticAltTest(unittest.TestCase):
         child_widths = [converter.parse_box(child.attrs["box"])[0] for child in row.children]
         self.assertLessEqual(sum(child_widths) + int(row.attrs["gap"]), 276)
 
+    def test_checkbox_leaf_containers_use_space_between_and_start(self) -> None:
+        document = converter.AltDocument(
+            converter.AltNode(
+                "Column",
+                "root",
+                {"card": "2x4", "theme": "neutral-light"},
+            )
+        )
+        main_row = converter.AltNode("Row", "main_row", {})
+        group = converter.AltNode("Column", "summary_group", {})
+        group.children = [
+            converter.AltNode("Text", "title", {"role": "title"}),
+            converter.AltNode("Text", "caption", {"role": "support"}),
+            converter.AltNode("Text", "value", {"role": "metric"}),
+        ]
+        selection = converter.AltNode("Column", "selection_group", {})
+        selection.children = [
+            converter.AltNode("Checkbox", "item_1", {"role": "selection"}),
+            converter.AltNode("Checkbox", "item_2", {"role": "selection"}),
+            converter.AltNode("Checkbox", "item_3", {"role": "selection"}),
+        ]
+        main_row.children = [group, selection]
+        footer = converter.AltNode("Row", "footer", {})
+        footer.children = [
+            converter.AltNode("Text", "warning", {"role": "warning"}),
+            converter.AltNode("Button", "action_button", {"role": "action"}),
+        ]
+        document.root.children = [main_row, footer]
+        spec = task_spec(size="2x4")
+        asc = {
+            "title": {"text": "Title"},
+            "caption": {"text": "Caption"},
+            "value": {"text": "95 min"},
+            "item_1": {"label": "Item 1", "select": False},
+            "item_2": {"label": "Item 2", "select": True},
+            "item_3": {"label": "Item 3", "select": False},
+            "warning": {"text": "Warning"},
+            "action_button": {"label": "Open", "event": 0},
+        }
+
+        compiled, issues = converter.auto_layout_document(document, spec, asc)
+        issues += converter.validate_layout(compiled, "2x4")
+        self.assertFalse(
+            [issue for issue in issues if issue.severity == "error"],
+            [issue.message for issue in issues],
+        )
+
+        selection_node = next(
+            node for node in converter.alt_nodes(compiled) if node.node_id == "selection_group"
+        )
+        self.assertEqual(selection_node.attrs["main"], "between")
+        self.assertEqual(selection_node.attrs["cross"], "start")
+        self.assertNotIn("gap", selection_node.attrs)
+
+        group_node = next(
+            node for node in converter.alt_nodes(compiled) if node.node_id == "summary_group"
+        )
+        self.assertEqual(group_node.attrs["main"], "start")
+        self.assertEqual(group_node.attrs["cross"], "center")
+        self.assertIn("gap", group_node.attrs)
+
+        footer_node = next(
+            node for node in converter.alt_nodes(compiled) if node.node_id == "footer"
+        )
+        self.assertEqual(footer_node.attrs["main"], "start")
+        self.assertEqual(footer_node.attrs["cross"], "center")
+        self.assertIn("gap", footer_node.attrs)
+
+        base_text, _ = converter.alt_to_dsl(
+            compiled, spec, strict_layout=False, validate_content=False
+        )
+        dsl_text = converter.apply_asc_to_dsl(base_text, document, spec, asc)
+        _, update, _ = converter.parse_jsonl_messages(dsl_text)
+        components = {
+            item["id"]: item for item in update["updateComponents"]["components"]
+        }
+        selection_styles = components["selection_group"]["styles"]
+        self.assertEqual(selection_styles["justifyContent"], "spaceBetween")
+        self.assertEqual(selection_styles["alignItems"], "start")
+        self.assertNotIn("itemMargin", components["selection_group"])
+
+    def test_button_in_column_fills_container_width(self) -> None:
+        document = converter.AltDocument(
+            converter.AltNode(
+                "Column",
+                "root",
+                {"card": "2x4", "theme": "neutral-light"},
+            )
+        )
+        body = converter.AltNode("Row", "body", {})
+        group = converter.AltNode("Column", "action_group", {})
+        group.children = [
+            converter.AltNode("Text", "hint", {"role": "support"}),
+            converter.AltNode("Button", "action_button", {"role": "action"}),
+        ]
+        body.children = [group]
+        document.root.children = [body]
+        spec = task_spec(size="2x4")
+        asc = {
+            "hint": {"text": "Hint"},
+            "action_button": {"label": "Open", "event": 0},
+        }
+
+        compiled, issues = converter.auto_layout_document(document, spec, asc)
+        issues += converter.validate_layout(compiled, "2x4")
+        self.assertFalse(
+            [issue for issue in issues if issue.severity == "error"],
+            [issue.message for issue in issues],
+        )
+
+        group_node = next(
+            node for node in converter.alt_nodes(compiled) if node.node_id == "action_group"
+        )
+        button_node = next(
+            node for node in converter.alt_nodes(compiled) if node.node_id == "action_button"
+        )
+        self.assertEqual(
+            converter.parse_box(button_node.attrs["box"])[0],
+            converter.parse_box(group_node.attrs["box"])[0],
+        )
+
+        base_text, _ = converter.alt_to_dsl(
+            compiled, spec, strict_layout=False, validate_content=False
+        )
+        dsl_text = converter.apply_asc_to_dsl(base_text, document, spec, asc)
+        _, update, _ = converter.parse_jsonl_messages(dsl_text)
+        components = {
+            item["id"]: item for item in update["updateComponents"]["components"]
+        }
+        self.assertEqual(
+            components["action_button"]["styles"]["width"],
+            components["action_group"]["styles"]["width"],
+        )
+
+    def test_root_column_uses_space_between(self) -> None:
+        document = converter.AltDocument(
+            converter.AltNode(
+                "Column",
+                "root",
+                {"card": "2x4", "theme": "neutral-light"},
+            )
+        )
+        header = converter.AltNode("Row", "header", {})
+        header.children = [
+            converter.AltNode("Text", "title", {"role": "title"}),
+            converter.AltNode("Text", "status", {"role": "status"}),
+        ]
+        footer = converter.AltNode("Row", "footer", {})
+        footer.children = [
+            converter.AltNode("Text", "warning", {"role": "warning"}),
+            converter.AltNode("Button", "action_button", {"role": "action"}),
+        ]
+        document.root.children = [header, footer]
+        spec = task_spec(size="2x4")
+        asc = {
+            "title": {"text": "Title"},
+            "status": {"text": "Ready"},
+            "warning": {"text": "Warning"},
+            "action_button": {"label": "Open", "event": 0},
+        }
+
+        compiled, issues = converter.auto_layout_document(document, spec, asc)
+        issues += converter.validate_layout(compiled, "2x4")
+        self.assertFalse(
+            [issue for issue in issues if issue.severity == "error"],
+            [issue.message for issue in issues],
+        )
+
+        self.assertEqual(compiled.root.attrs["main"], "between")
+        self.assertEqual(compiled.root.attrs["cross"], "center")
+        self.assertNotIn("gap", compiled.root.attrs)
+
+        base_text, _ = converter.alt_to_dsl(
+            compiled, spec, strict_layout=False, validate_content=False
+        )
+        dsl_text = converter.apply_asc_to_dsl(base_text, document, spec, asc)
+        _, update, _ = converter.parse_jsonl_messages(dsl_text)
+        root_dsl = next(
+            component
+            for component in update["updateComponents"]["components"]
+            if component["id"] == "root"
+        )
+        self.assertEqual(root_dsl["styles"]["justifyContent"], "spaceBetween")
+        self.assertEqual(root_dsl["styles"]["alignItems"], "center")
+        self.assertNotIn("itemMargin", root_dsl)
+
     def test_warning_role_uses_theme_warning_color(self) -> None:
         document = converter.AltDocument(
             converter.AltNode(

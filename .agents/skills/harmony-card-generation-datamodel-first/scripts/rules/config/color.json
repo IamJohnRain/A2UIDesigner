@@ -5,16 +5,13 @@
   "tokenNamePattern": "^(brand|warning|alert|confirm|font_|icon_|background_|comp_|interactive_|multi_color_)",
   "sceneExtensions": [
     {
-      "scene": "alt_theme_surface_gradient",
-      "usage": "ALT 自动布局主题 surface.gradient 场景拓展色（ohmycolor 渐变方案映射）",
+      "scene": "alt_theme_official_tokens",
+      "usage": "ALT automatic theme surface/action gradient hexes mapped from official color tokens",
       "hex": [
-        "#ffc9d6ff",
-        "#ffe2e2e2",
-        "#ffe8d5ff",
-        "#ffa4c7ff",
-        "#ff191970",
-        "#ff4169e1",
-        "#ff6495ed"
+        "#ff86c5e3",
+        "#ff46b1e3",
+        "#ff5f58c7",
+        "#ff5550a6"
       ]
     },
     {

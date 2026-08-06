@@ -4,16 +4,16 @@
     "neutral-light": {
       "mode": "light",
       "surface": {
-        "root": "#FFF7FAFF",
-        "panel": "#FFF1F5FA",
+        "root": "#FFFFFFFF",
+        "panel": "#FFF1F3F5",
         "gradient": {
           "direction": "RightBottom",
           "colors": [
-            ["#FFC9D6FF", 0],
-            ["#FFE2E2E2", 1]
+            ["#FFFFFFFF", 0],
+            ["#190A59F7", 1]
           ]
         },
-        "border": "1/#1A3B6FC4"
+        "border": "1/#33000000"
       },
       "text": {
         "primary": "#E5000000",
@@ -32,8 +32,8 @@
         "primaryGradient": {
           "direction": "RightBottom",
           "colors": [
-            ["#FF347BF7", 0],
-            ["#FF0753E6", 1]
+            ["#FF0A59F7", 0],
+            ["#FF0A59F7", 1]
           ]
         },
         "secondaryBackground": "#0C000000",
@@ -58,16 +58,16 @@
     "ambient-light": {
       "mode": "light",
       "surface": {
-        "root": "#FFF2F8F8",
-        "panel": "#FFFFFFFF",
+        "root": "#FF86C5E3",
+        "panel": "#FFF1F3F5",
         "gradient": {
           "direction": "RightBottom",
           "colors": [
-            ["#FFE8D5FF", 0],
-            ["#FFA4C7FF", 1]
+            ["#FFFFFFFF", 0],
+            ["#FF86C5E3", 1]
           ]
         },
-        "border": "1/#1A2A8693"
+        "border": "1/#33000000"
       },
       "text": {
         "primary": "#E5000000",
@@ -76,7 +76,7 @@
         "onAccent": "#FFFFFFFF"
       },
       "icon": {
-        "primary": "#46B1E3",
+        "primary": "#FF46B1E3",
         "secondary": "#99000000",
         "onAccent": "#FFFFFFFF"
       },
@@ -86,15 +86,15 @@
         "primaryGradient": {
           "direction": "RightBottom",
           "colors": [
-            ["#FF39B8EC", 0],
-            ["#FF1767DD", 1]
+            ["#FF0A59F7", 0],
+            ["#FF0A59F7", 1]
           ]
         },
         "secondaryBackground": "#19000000",
         "secondaryText": "#E5000000"
       },
       "progress": {
-        "fill": "#46B1E3",
+        "fill": "#FF46B1E3",
         "track": "#19000000"
       },
       "selection": {
@@ -112,17 +112,16 @@
     "focus-dark": {
       "mode": "dark",
       "surface": {
-        "root": "#FF15161E",
-        "panel": "#FF20212B",
+        "root": "#FF191A1C",
+        "panel": "#FF202224",
         "gradient": {
           "direction": "RightBottom",
           "colors": [
-            ["#FF191970", 0],
-            ["#FF4169E1", 0.5],
-            ["#FF6495ED", 1]
+            ["#FF5F58C7", 0],
+            ["#FF5550A6", 1]
           ]
         },
-        "border": "1/#337A74D7"
+        "border": "1/#33FFFFFF"
       },
       "text": {
         "primary": "#E5FFFFFF",
@@ -136,24 +135,24 @@
         "onAccent": "#FFFFFFFF"
       },
       "action": {
-        "primaryBackground": "#5F58C7",
+        "primaryBackground": "#FF5F58C7",
         "primaryText": "#FFFFFFFF",
         "primaryGradient": {
           "direction": "RightBottom",
           "colors": [
-            ["#FF7C73EF", 0],
-            ["#FF514BBE", 1]
+            ["#FF5F58C7", 0],
+            ["#FF5550A6", 1]
           ]
         },
         "secondaryBackground": "#19FFFFFF",
-        "secondaryText": "#317AF7"
+        "secondaryText": "#FF317AF7"
       },
       "progress": {
-        "fill": "#5F58C7",
+        "fill": "#FF5F58C7",
         "track": "#19FFFFFF"
       },
       "selection": {
-        "selected": "#317AF7",
+        "selected": "#FF317AF7",
         "unselected": "#33FFFFFF",
         "mark": "#FFFFFFFF"
       },
