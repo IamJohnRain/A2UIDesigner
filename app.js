@@ -295,6 +295,12 @@
             const cfg3=await (await fetch('scripts/config/alt-tuning.json')).text();
             await py.runPythonAsync(converterSrc);
             await py.runPythonAsync(`import json; configure_runtime(${JSON.stringify(cfg1)},${JSON.stringify(cfg2)},${JSON.stringify(cfg3)})`);
+            const builderSrc=await (await fetch('scripts/taskspec_to_alt_chat_completions.py')).text();
+            const builderCode=prepareAltPromptBuilder(builderSrc);
+            py.globals.set('_CFG_THEMES',cfg1);
+            py.globals.set('_CFG_LAYOUT',cfg2);
+            py.globals.set('_CFG_TUNING',cfg3);
+            await py.runPythonAsync(builderCode);
             return py;
           }catch(e){lastError=e;}
         }
@@ -565,6 +571,27 @@
     const [assets,events]=await Promise.all([fetchPromptFile('reference/asset-library.md'),fetchPromptFile('reference/click-event.md')]);
     return template.replace('{{ASSET_LIBRARY}}',assets).replace('{{CLICK_EVENT}}',events);
   }
+  function prepareAltPromptBuilder(src){
+    let code=src;
+    code=code.replace('from __future__ import annotations\n','');
+    code=code.replace(/from alt_converter import \([\s\S]*?\n\)\n/,'');
+    code=code.replace(/\r?\nif __name__ == "__main__":\s*raise SystemExit\(main\(\)\)\s*$/,'');
+    const configBlock=[
+      'CONFIG_DIR = Path(__file__).resolve().parent / "config"',
+      'LAYOUT_PROFILE = json.loads((CONFIG_DIR / "alt-layout-profile.json").read_text(encoding="utf-8"))',
+      'TUNING = json.loads((CONFIG_DIR / "alt-tuning.json").read_text(encoding="utf-8"))',
+      'THEME_CONFIG = json.loads((CONFIG_DIR / "alt-themes.json").read_text(encoding="utf-8"))'
+    ].join('\n');
+    const injection=[
+      'LAYOUT_PROFILE = json.loads(_CFG_LAYOUT)',
+      'TUNING = json.loads(_CFG_TUNING)',
+      'THEME_CONFIG = json.loads(_CFG_THEMES)'
+    ].join('\n');
+    if(!code.includes(configBlock))throw Error('ALT 上下文构建器配置块未找到，无法注入');
+    code=code.replace(configBlock,injection);
+    code+='\n\ndef build_alt_asc_messages(task_spec_text):\n    spec = json.loads(task_spec_text)\n    request = build_request(spec, str(spec.get("userQuery", "")), "")\n    return json.dumps(request["messages"][:2], ensure_ascii=False)\n';
+    return code;
+  }
 
   // ---- 输出解析与 TaskSpec 字段校验 ----
   function extractJsonBlock(text){
@@ -680,9 +707,11 @@
     const oldLabel=btn.textContent;
     btn.textContent='生成中…';
     try{
-      const template=await loadPromptTemplate('alt-asc-generation.md');
-      const system=template.replace('{taskSpec}',JSON.stringify(spec,null,2));
-      const text=await chatCompletion([{role:'system',content:system},{role:'user',content:'请根据上述 TaskSpec 生成对应的 ALT 与 ASC。'}],{timeoutMs:180000});
+      const py=await ensurePyodide();
+      py.globals.set('__ts',taskSpecText);
+      const messagesJson=await py.runPythonAsync('build_alt_asc_messages(__ts)');
+      const messages=JSON.parse(messagesJson);
+      const text=await chatCompletion(messages,{timeoutMs:180000});
       const {alt,asc}=extractAltAsc(text);
       $('#altInput').value=alt;
       $('#ascInput').value=asc;

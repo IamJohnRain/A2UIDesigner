@@ -178,22 +178,17 @@ scripts/alt-prompts/
 
 ### 6.3 模板二：`alt-asc-generation.md`（TaskSpec → ALT + ASC）
 
-结构：角色定义 → 输入占位 `{taskSpec}` → 输出契约 → 布局/绑定/素材/事件约束 → 降级顺序 → 简短示例。
+**实施方式（2026-08-07 修订，方案 A）**：ALT/ASC 生成上下文不再使用手写摘要模板，而是由浏览器在已懒加载的 Pyodide 运行时里直接执行 `scripts/taskspec_to_alt_chat_completions.py` 的 `build_request(spec, userQuery, '')`，取 `messages[:2]`（system + user）作为请求消息。因此浏览器上下文与训练/评估管线**逐字一致**，脚本本身零改动。
 
-硬约束（源自 skill `SKILL.md` 一致性约定）：
-
-- 输出两段：`<alt>...</alt>`（自动布局 ALT 文本，`Column root card=2x2 theme=neutral-light` 形式）+ `<asc>...</asc>`（语义文本），与 `run_alt_dataset.py` 解析格式一致。
-- 尺寸：`2x2 = 140x140`、`2x4 = 300x140`，root `padding: 12`、`borderRadius`（18/22）、`clip: true`，内部组件一律数值宽高，不用 `matchParent`。
-- 绑定：静态值或完整 `{{ ... }}` 表达式，路径必须能从 `dataModelSchema` / CardSpec 推导；`sampleValue` 作为 `updateDataModel` 默认值保证直接渲染美观。
-- 素材：只用 TaskSpec `assetCandidates` 白名单 SVG；SVG 颜色由主题映射写入 `Image.styles.fillColor`，模型不选色。
-- 事件：`onClick` 只能由 `eventCandidates` 转换，参数严格按 `click-event.md`（如拨号 `phoneNumber`、导航 `trafficpe` 取值 `Drive|Walk|Cycle|Bus`、Deeplink 目标表原样复制）。
-- 语义 ID 稳定：`surface_card`、`root`、`header_row`、`title_text`、`primary_value`、`primary_caption`、`action_button` 等。
-- 布局失败降级顺序：缩短弱文本 → 删除可选槽位 → 降字号阶梯 → 拆行/改 Column → 升级 `2x4` → 能力边界说明。
+- system = `SYSTEM_PROMPT`（约 150 行硬规则）填充 `{{TASK_CONTEXT_JSON}}` / `{{POLICY_CONTEXT_JSON}}` / `{{REFERENCE_CONTEXT_JSON}}` 三层上下文（由脚本按 TaskSpec 动态计算：绑定字段、素材/事件索引、布局策略、交互需求等）。
+- user = 原始用户 query（`TaskSpec.userQuery`）。
+- `scripts/alt-prompts/alt-asc-generation.md` 仅为该 `SYSTEM_PROMPT` 的**审阅镜像**，不参与运行时。
+- 输出契约保持：`<alt>...</alt>` + `<asc>...</asc>`，与 `run_alt_dataset.py` 解析格式一致。
 
 ### 6.4 模板加载
 
-- 前端在生成按钮点击时 `fetch('scripts/alt-prompts/xxx.md')`，把 `{userQuery}` / `{taskSpec}` 占位替换为实际内容，再作为 `system` 消息发送。
-- 模板文件改动直接生效（GitHub Pages 发布后），无需改代码。
+- 模板一（TaskSpec 生成）：点击时 `fetch('scripts/alt-prompts/task-spec-generation.md')`，注入 `reference/asset-library.md` 与 `reference/click-event.md` 附录、替换 `{userQuery}`，作为 `system` 发送；模板改动直接生效（GitHub Pages 发布后）。
+- 模板二（ALT/ASC 生成）：Pyodide 内执行保存的脚本（见 6.3），前端把 `scripts/taskspec_to_alt_chat_completions.py` 拉进运行时；要改 ALT/ASC 提示词只改该脚本的 `SYSTEM_PROMPT`，浏览器自动跟随。
 
 ## 7. 数据流
 
@@ -207,7 +202,7 @@ scripts/alt-prompts/
 填入 TaskSpec 输入框（用户可手改）
   │  [生成 ALT/ASC]
   ▼
-模板二 + 校验后的 TaskSpec ──► chat/completions ──► <alt> + <asc>
+Pyodide 执行 taskspec_to_alt_chat_completions.build_request ──► chat/completions ──► <alt> + <asc>
   ▼
 填入 ALT/ASC 输入框 ──► [编译并渲染]（现有 Pyodide 管线）──► DSL + 渲染
   ▼
@@ -222,7 +217,8 @@ scripts/alt-prompts/
 | `add-ui.css` | 生成按钮、告警区（可折叠）、设置弹窗、口令输入样式 |
 | `app.js` | 新增：LLM 配置读写 + WebCrypto 加密解密模块、`chatCompletion()` 调用、两段生成流程、输出解析与校验、告警统一迁移；修改：`renderInput`/ALT 编译告警写入 `#renderWarnings` |
 | `scripts/alt-prompts/task-spec-generation.md` | 模板一（新增） |
-| `scripts/alt-prompts/alt-asc-generation.md` | 模板二（新增） |
+| `scripts/alt-prompts/alt-asc-generation.md` | `SYSTEM_PROMPT` 审阅镜像（与 `taskspec_to_alt_chat_completions.py` 一致） |
+| `scripts/taskspec_to_alt_chat_completions.py` | 零改动；浏览器经 Pyodide 直接执行其 `build_request` 生成 ALT/ASC 上下文 |
 | `docs/alt-llm-generation-plan.md` | 本文档 |
 
 ## 9. 风险与对策
@@ -240,7 +236,7 @@ scripts/alt-prompts/
 
 - P0：设置弹窗 + WebCrypto 加密/解密 + 会话口令流程。
 - P1：「生成 TaskSpec」+ 模板一 + 解析与字段校验。
-- P2：「生成 ALT/ASC」+ 模板二 + `<alt>/<asc>` 解析。
+- P2：「生成 ALT/ASC」+ Pyodide 执行 `taskspec_to_alt_chat_completions.build_request` + `<alt>/<asc>` 解析。
 - P3：告警迁移到画布下方可折叠区域。
 - P4：模板审阅打磨 + 用 `tmp/run_luna_v4` 代表性用例做端到端回归（query → 生成 → 编译渲染）。
 

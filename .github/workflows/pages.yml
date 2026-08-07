@@ -31,6 +31,7 @@ jobs:
           cp -r scripts/config _site/scripts/
           cp -r scripts/alt-prompts _site/scripts/
           cp scripts/alt_to_dsl_converter.py _site/scripts/
+          cp scripts/taskspec_to_alt_chat_completions.py _site/scripts/
       - name: Setup Pages
         uses: actions/configure-pages@v5
       - name: Upload artifact
