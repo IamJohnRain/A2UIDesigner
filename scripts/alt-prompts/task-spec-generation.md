@@ -9,8 +9,8 @@
 
 # 输出契约
 
-- 只输出一个 JSON 对象，不要 Markdown 围栏、解释或多余文字。
-- 顶层只允许以下五个字段，禁止出现 `displayCandidates`、`role`、`cardSpec`、`rules`、`dataModel` 等非协议字段：
+- 只输出一个 JSON 对象，不要 Markdown 围栏、解释、思考过程、示例代码块或多个 JSON。
+- 顶层只允许以下五个字段，禁止出现 `data`、`displayCandidates`、`role`、`cardSpec`、`rules`、`dataModel` 等非协议字段：
   `userQuery`、`size`、`eventCandidates`、`dataModelSchema`、`assetCandidates`
 
 # 硬约束
@@ -33,6 +33,7 @@
 ## dataModelSchema
 
 - 只收录与卡片展示相关的字段路径；每个字段节点必须包含 `type`、`description`、`sampleValue` 三个字段。
+- `dataModelSchema` 是顶层字段之一；所有数据字段必须嵌套在 `dataModelSchema` 内部（例如 `dataModelSchema: { "data": {...} }`），禁止把 `data` 或任何数据字段提升到顶层。
 - `description` 说明字段的展示语义；`sampleValue` 必须脱敏、贴近 UI 展示形态（例如 `"26℃"`、`"多云"`、`"09:30 产品评审"`），禁止使用真实隐私数据。
 - 数组字段用 `type: "array"` + `items` 描述单条结构；嵌套分组用普通对象承载。
 

@@ -6,7 +6,7 @@
   <title>Harmony Card DSL Studio</title>
   <link rel="stylesheet" href="styles.css" />
   <link rel="stylesheet" href="color-picker.css" />
-  <link rel="stylesheet" href="add-ui.css?v=20260806-alt-llm" />
+  <link rel="stylesheet" href="add-ui.css?v=20260807-alt-llm-stream-w5" />
   <style>[hidden]{display:none!important}.button-link{display:inline-flex;align-items:center;text-decoration:none;border:1px solid var(--line);border-radius:8px;background:#fff;color:#30384a;padding:8px 12px}.button-link:hover{background:#f4f5fa}</style>
 </head>
 <body>
@@ -25,26 +25,26 @@
   <main class="workspace">
     <aside class="source-panel panel">
       <div class="panel-head"><div><h2>DSL 源码</h2><p>粘贴三行 JSONL，或打开本地文件</p></div><span id="parseState" class="status muted">等待输入</span></div>
-      <div class="source-tabs" role="tablist" aria-label="编辑视图"><button class="source-tab active" data-source-tab="code" role="tab" aria-selected="true">源码</button><button class="source-tab" data-source-tab="tree" role="tab" aria-selected="false">布局</button><button class="source-tab" data-source-tab="alt" role="tab" aria-selected="false">ALT 生成</button></div>
-      <div id="sourceCodePanel" class="source-tab-panel"><textarea id="dslInput" spellcheck="false" placeholder='{"version":"v0.9","createSurface":{...}}&#10;{"version":"v0.9","updateComponents":{...}}&#10;{"version":"v0.9","updateDataModel":{...}}'></textarea>
-      <div id="errorBox" class="error-box" hidden></div>
-      <div class="source-actions"><button id="formatBtn" class="ghost">格式化</button><button id="renderBtn" class="primary grow">渲染卡片</button></div>
-      </div>
-      <div id="sourceTreePanel" class="source-tab-panel layout-tree-panel" hidden><p class="tree-help">点击节点即可在画布和属性栏中编辑；警告表示未挂载或无效引用。</p><div id="layoutTree" class="layout-tree" role="tree"></div></div>
-      <div id="sourceAltPanel" class="source-tab-panel alt-tab-panel" hidden>
+      <div class="source-tabs" role="tablist" aria-label="编辑视图"><button class="source-tab active" data-source-tab="taskspec" role="tab" aria-selected="true">TaskSpec</button><button class="source-tab" data-source-tab="alt" role="tab" aria-selected="false">ALT</button><button class="source-tab" data-source-tab="dsl" role="tab" aria-selected="false">DSL</button><button class="source-tab" data-source-tab="layout" role="tab" aria-selected="false">布局</button></div>
+      <div id="sourceTaskSpecPanel" class="source-tab-panel alt-tab-panel taskspec-tab-panel" data-source-panel="taskspec">
         <div class="alt-fields">
-          <label class="alt-field"><span>用户 Query</span>
-            <textarea id="altUserQuery" spellcheck="false" placeholder="例如：弄个有点击按钮的卡片，点了跳到充电地图，顺便读一下今天的日程"></textarea>
+          <label class="alt-field alt-query-field"><span>用户 Query</span>
+            <textarea id="altUserQuery" rows="2" spellcheck="false" placeholder="例如：弄个有点击按钮的卡片，点了跳到充电地图，顺便读一下今天的日程"></textarea>
           </label>
           <div class="source-actions alt-gen-row">
             <button id="altGenTaskSpecBtn" class="primary grow">生成 TaskSpec</button>
           </div>
-          <label class="alt-field"><span>TaskSpec（JSON，可手改）</span>
+          <label class="alt-field taskspec-field"><span class="alt-field-head">TaskSpec（JSON，可手改）<button id="llmSessionBtn" class="session-open-btn" type="button" title="查看最近一次大模型请求（Prompt / 输出 / Token）">⇱</button></span>
             <textarea id="altTaskSpec" spellcheck="false" placeholder='{"userQuery":"...","size":"2x2",...}'></textarea>
           </label>
           <div class="source-actions alt-gen-row">
             <button id="altGenAltAscBtn" class="primary grow">生成 ALT / ASC</button>
           </div>
+        </div>
+        <div id="altGenError" class="error-box" hidden></div>
+      </div>
+      <div id="sourceAltPanel" class="source-tab-panel alt-tab-panel" data-source-panel="alt" hidden>
+        <div class="alt-fields">
           <label class="alt-field"><span>ALT 结构（card.alt.txt）</span>
             <textarea id="altInput" spellcheck="false" placeholder='Column root card=2x2 theme=neutral-light&#10;  Text title role=title'></textarea>
           </label>
@@ -52,7 +52,6 @@
             <textarea id="ascInput" spellcheck="false" placeholder='Text title text=今日用电'></textarea>
           </label>
         </div>
-        <div id="altGenError" class="error-box" hidden></div>
         <div class="alt-options">
           <label class="alt-option"><span>主题</span>
             <select id="altTheme"></select>
@@ -68,6 +67,11 @@
           <button id="altCompileBtn" class="primary grow">编译并渲染</button>
         </div>
       </div>
+      <div id="sourceCodePanel" class="source-tab-panel" data-source-panel="dsl" hidden><textarea id="dslInput" spellcheck="false" placeholder='{"version":"v0.9","createSurface":{...}}&#10;{"version":"v0.9","updateComponents":{...}}&#10;{"version":"v0.9","updateDataModel":{...}}'></textarea>
+      <div id="errorBox" class="error-box" hidden></div>
+      <div class="source-actions"><button id="formatBtn" class="ghost">格式化</button><button id="renderBtn" class="primary grow">渲染卡片</button></div>
+      </div>
+      <div id="sourceTreePanel" class="source-tab-panel layout-tree-panel" data-source-panel="layout" hidden><p class="tree-help">点击节点即可在画布和属性栏中编辑；警告表示未挂载或无效引用。</p><div id="layoutTree" class="layout-tree" role="tree"></div></div>
     </aside>
 
     <section class="stage-panel panel">
@@ -113,6 +117,7 @@
       <div class="alt-loading-title">正在下载转换引擎</div>
       <div class="alt-loading-desc">首次使用需要在本地下载 Python 转换运行时（约 7MB），仅首次需要。下载与转换都在浏览器本地完成，你的内容不会上传。请稍候，下载完成后将自动继续。</div>
       <div class="alt-loading-track"><div id="altLoadingBar" class="alt-loading-bar"></div></div>
+      <div id="altLoadingFile" class="alt-loading-file" hidden></div>
       <div id="altLoadingText" class="alt-loading-text">0%（0 B / 0 B）</div>
       <div id="altLoadingError" class="alt-loading-error" hidden></div>
       <button id="altLoadingRetry" class="primary" hidden>重试</button>
@@ -180,8 +185,39 @@
       </footer>
     </section>
   </div>
+  <div id="llmSessionDialog" class="modal-backdrop" hidden>
+    <section class="llm-dialog session-dialog" role="dialog" aria-modal="true" aria-labelledby="llmSessionTitle">
+      <header>
+        <div><h2 id="llmSessionTitle">大模型请求</h2><p id="llmSessionSubtitle">最近一次请求详情</p></div>
+        <button id="llmSessionClose" class="icon-btn" type="button" aria-label="关闭">×</button>
+      </header>
+      <div class="session-body">
+        <section class="session-pane session-prompt-pane">
+          <div class="session-pane-head"><strong>请求 Prompt</strong><button id="llmSessionCopyPrompt" class="ghost" type="button">复制</button></div>
+          <pre id="llmSessionPrompt" class="session-pre" spellcheck="false"></pre>
+        </section>
+        <section class="session-pane session-output-pane">
+          <div class="session-pane-head">
+            <strong>输出</strong>
+            <div class="session-output-tabs">
+              <button id="llmSessionTabAnswer" class="session-tab active" type="button">回答</button>
+              <button id="llmSessionTabReasoning" class="session-tab" type="button">思考</button>
+            </div>
+          </div>
+          <div class="session-output-wrap">
+            <pre id="llmSessionOutput" class="session-pre" spellcheck="false"></pre>
+            <pre id="llmSessionReasoning" class="session-pre" spellcheck="false" hidden></pre>
+          </div>
+        </section>
+      </div>
+      <footer class="session-footer">
+        <span id="llmSessionStatus" class="session-status">未开始</span>
+        <span id="llmSessionTokens" class="session-tokens">输入 0 · 输出 0（估算）</span>
+      </footer>
+    </section>
+  </div>
   <script src="genui-renderer.js?v=20260730-embedded-harmony-fonts"></script>
   <script src="references/media/assets.js?v=20260729-file-compatible"></script>
-  <script src="app.js?v=20260806-alt-llm"></script>
+  <script src="app.js?v=20260807-alt-llm-stream-w5"></script>
 </body>
 </html>

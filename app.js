@@ -185,7 +185,7 @@
   select=function(id,rerender=true){baseSelect(id,rerender);renderLayoutTree();updateAddControls()};
   deselect=function(){baseDeselect();renderLayoutTree();updateAddControls()};
   document.querySelectorAll('[data-add]').forEach(button=>button.onclick=()=>{const type=button.dataset.add;if(type==='Image')showAssetDialog();else addComponentSafely(type)});
-  document.querySelectorAll('[data-source-tab]').forEach(tab=>tab.onclick=()=>{const name=tab.dataset.sourceTab;$('#sourceCodePanel').hidden=name!=='code';$('#sourceTreePanel').hidden=name!=='tree';$('#sourceAltPanel').hidden=name!=='alt';document.querySelectorAll('[data-source-tab]').forEach(x=>{const active=x===tab;x.classList.toggle('active',active);x.setAttribute('aria-selected',String(active))});if(name==='tree')renderLayoutTree();if(name==='alt')initAltTab()});
+  document.querySelectorAll('[data-source-tab]').forEach(tab=>tab.onclick=()=>{const name=tab.dataset.sourceTab;document.querySelectorAll('[data-source-panel]').forEach(panel=>{panel.hidden=panel.dataset.sourcePanel!==name});document.querySelectorAll('[data-source-tab]').forEach(x=>{const active=x===tab;x.classList.toggle('active',active);x.setAttribute('aria-selected',String(active))});if(name==='layout')renderLayoutTree();if(name==='taskspec'||name==='alt')initAltTab()});
   $('#closeAssetDialog').onclick=closeAssetDialog;$('#cancelAssetDialog').onclick=closeAssetDialog;$('#assetDialog').onclick=e=>{if(e.target===$('#assetDialog'))closeAssetDialog()};$('#insertAssetBtn').onclick=()=>{if(!pendingAssetSrc)return;const src=pendingAssetSrc;closeAssetDialog();addComponentSafely('Image',src)};
   updateAddControls();renderLayoutTree();
 
@@ -227,24 +227,34 @@
     'https://raw.githubusercontent.com/IamJohnRain/a2ui-pyodide/master/',
     'https://iamjohnrain.github.io/a2ui-pyodide/'
   ];
-  let altProgress={loaded:0,total:0};
+  let altProgress={loaded:0,total:0,unknownTotal:false,fixedTotal:false,current:''};
+  let downloadProgressInstalled=false;
+  let progressRaf=0;
 
   function installDownloadProgress(){
+    if(downloadProgressInstalled)return;
+    downloadProgressInstalled=true;
     const nativeFetch=window.fetch.bind(window);
     window.fetch=async(input,init)=>{
       const response=await nativeFetch(input,init);
       const url=typeof input==='string'?input:(input&&input.url)||'';
       if(!response.ok||!response.body||!ALT_CORE_FILES.some(f=>url.includes(f)))return response;
       const total=Number(response.headers.get('content-length'))||0;
-      altProgress.total+=total;
+      if(!altProgress.fixedTotal)altProgress.total+=total;
+      if(!total&&!altProgress.fixedTotal)altProgress.unknownTotal=true;
+      altProgress.current=url.split('/').pop()||'';
       const reader=response.body.getReader();
       const stream=new ReadableStream({
         start(controller){
-          let loaded=0;
           (function pump(){
             reader.read().then(({done,value})=>{
-              if(done){altProgress.loaded+=loaded;controller.close();updateAltProgress();return}
-              loaded+=value.byteLength;
+              if(done){
+                scheduleAltProgress(true);
+                controller.close();
+                return;
+              }
+              altProgress.loaded+=value.byteLength;
+              scheduleAltProgress(false);
               controller.enqueue(value);
               pump();
             }).catch(err=>controller.error(err));
@@ -255,11 +265,46 @@
     };
   }
 
+  function scheduleAltProgress(force){
+    if(force){
+      if(progressRaf){cancelAnimationFrame(progressRaf);progressRaf=0}
+      updateAltProgress();
+      return;
+    }
+    if(progressRaf)return;
+    progressRaf=requestAnimationFrame(()=>{progressRaf=0;updateAltProgress()});
+  }
+
   function updateAltProgress(){
-    const percent=altProgress.total?Math.min(100,Math.round(altProgress.loaded/altProgress.total*100)):0;
-    const bar=$('#altLoadingBar'),text=$('#altLoadingText');
-    if(bar)bar.style.width=percent+'%';
-    if(text)text.textContent=`${percent}%（${fmtBytes(altProgress.loaded)} / ${fmtBytes(altProgress.total)}）`;
+    const bar=$('#altLoadingBar'),text=$('#altLoadingText'),file=$('#altLoadingFile');
+    const known=!altProgress.unknownTotal&&altProgress.total>0;
+    if(bar)bar.classList.toggle('indeterminate',!known);
+    if(file){
+      file.hidden=!altProgress.current;
+      file.textContent=altProgress.current?`正在下载 ${altProgress.current}`:'';
+    }
+    if(known){
+      const percent=Math.min(100,Math.round(altProgress.loaded/altProgress.total*100));
+      if(bar)bar.style.width=percent+'%';
+      if(text)text.textContent=`${percent}%（${fmtBytes(altProgress.loaded)} / ${fmtBytes(altProgress.total)}）`;
+    }else{
+      if(bar)bar.style.width='';
+      if(text)text.textContent=`已下载 ${fmtBytes(altProgress.loaded)}`;
+    }
+  }
+
+  async function preloadAltTotal(base){
+    try{
+      const response=await fetch(base+'pyodide-lock.json',{cache:'no-cache'});
+      if(!response.ok)return null;
+      const lock=await response.json();
+      const wanted=new Set(ALT_CORE_FILES);
+      let total=0,count=0;
+      for(const [name,meta] of Object.entries(lock.packages||{})){
+        if(wanted.has(name)&&meta&&typeof meta.size==='number'){total+=meta.size;count++}
+      }
+      return count>=4?total:null;
+    }catch(e){return null}
   }
 
   function loadPyodideLoader(){
@@ -267,11 +312,20 @@
       if(window.loadPyodide)return resolve();
       const tryBase=index=>{
         if(index>=PYODIDE_BASES.length){reject(new Error('Pyodide loader 下载失败'));return}
-        const script=document.createElement('script');
-        script.src=PYODIDE_BASES[index]+'pyodide.js';
-        script.onload=()=>resolve();
-        script.onerror=()=>{script.remove();tryBase(index+1)};
-        document.head.appendChild(script);
+        fetch(PYODIDE_BASES[index]+'pyodide.js')
+          .then(response=>{
+            if(!response.ok)throw Error('HTTP '+response.status);
+            return response.blob();
+          })
+          .then(blob=>{
+            const url=URL.createObjectURL(blob);
+            const script=document.createElement('script');
+            script.src=url;
+            script.onload=()=>{URL.revokeObjectURL(url);resolve()};
+            script.onerror=()=>{URL.revokeObjectURL(url);script.remove();tryBase(index+1)};
+            document.head.appendChild(script);
+          })
+          .catch(()=>tryBase(index+1));
       };
       tryBase(0);
     });
@@ -284,6 +338,8 @@
       pyodidePromise=(async()=>{
         installDownloadProgress();
         await loadPyodideLoader();
+        const preloaded=await preloadAltTotal(PYODIDE_BASES[0]);
+        if(preloaded){altProgress.total=preloaded;altProgress.fixedTotal=true;scheduleAltProgress(true)}
         let lastError=null;
         for(const base of PYODIDE_BASES){
           try{
@@ -322,20 +378,18 @@
     return JSON.parse(result);
   }
 
-  let altLoadingTimer=null;
   function showAltLoading(){
     $('#altLoading').hidden=false;
     $('#altLoadingError').hidden=true;
     $('#altLoadingRetry').hidden=true;
-    altProgress={loaded:0,total:0};
+    altProgress={loaded:0,total:0,unknownTotal:false,fixedTotal:false,current:''};
     updateAltProgress();
-    altLoadingTimer=setTimeout(()=>$('#altLoadingBar').classList.add('indeterminate'),2000);
   }
   function hideAltLoading(){
-    clearTimeout(altLoadingTimer);
     const overlay=$('#altLoading');
     if(overlay)overlay.hidden=true;
-    $('#altLoadingBar').classList.remove('indeterminate');
+    const bar=$('#altLoadingBar');
+    if(bar)bar.classList.remove('indeterminate');
   }
   function showAltReport(title,lines,kind='error'){pushRenderWarnings(title,lines,kind)}
 
@@ -550,6 +604,86 @@
     throw Error('请求失败');
   }
 
+  function estimateTokens(text){
+    const s=String(text||'');
+    const cjk=(s.match(/[\u3400-\u9fff\u3040-\u30ff\uac00-\ud7af\u3000-\u303f\uff00-\uffef]/g)||[]).length;
+    return Math.max(1,Math.round(cjk+(s.length-cjk)/4));
+  }
+  function estimateMessagesTokens(messages){
+    return messages.reduce((sum,message)=>sum+estimateTokens((message.role||'')+'\n'+(message.content||'')),0);
+  }
+
+  async function chatCompletionStream(messages,{timeoutMs=180000,onChunk,onReasoning,onUsage}={}){
+    const cfg=loadLlmConfig();
+    if(!cfg)throw Error('请先点击右上角 ⚙ 配置大模型');
+    const key=await ensureLlmUnlocked();
+    let base=cfg.baseURL.trim().replace(/\/+$/,'');
+    if(!/\/chat\/completions$/i.test(base))base+='/chat/completions';
+    const controller=new AbortController();
+    const timer=setTimeout(()=>controller.abort(),timeoutMs);
+    const body={model:cfg.model,messages,temperature:0.3,stream:true};
+    let fullText='';
+    let fullReasoning='';
+    try{
+      const response=await fetch(base,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},body:JSON.stringify(body),signal:controller.signal});
+      if(response.status===429){
+        clearTimeout(timer);
+        await new Promise(resolve=>setTimeout(resolve,1800));
+        return chatCompletionStream(messages,{timeoutMs,onChunk,onReasoning,onUsage});
+      }
+      if(!response.ok){
+        let detail='';
+        try{const data=await response.json();detail=data&&data.error&&data.error.message?data.error.message:''}catch(e){detail=''}
+        if(!detail){try{detail=(await response.text()).slice(0,300)}catch(e){detail=''}}
+        const hint={400:'请求参数错误',401:'API Key 无效或未授权',403:'无权限访问',404:'BaseURL 或接口路径错误',429:'请求过于频繁（限流）'}[response.status]||`请求失败（HTTP ${response.status}）`;
+        throw Error(`${hint}${detail?`：${detail}`:''}`);
+      }
+      if(!response.body)throw Error('当前浏览器不支持流式响应');
+      const reader=response.body.getReader();
+      const decoder=new TextDecoder();
+      let buffer='';
+      const handleLine=line=>{
+        if(!line.startsWith('data:'))return;
+        const payload=line.slice(5).trim();
+        if(!payload||payload==='[DONE]')return;
+        let data;
+        try{data=JSON.parse(payload)}catch(e){return}
+        if(data.error)throw Error(data.error.message||'模型流式返回错误');
+        if(data.usage&&onUsage)onUsage(data.usage);
+        const delta=data.choices&&data.choices[0]&&data.choices[0].delta;
+        if(!delta)return;
+        if(typeof delta.content==='string'&&delta.content){
+          fullText+=delta.content;
+          if(onChunk)onChunk(delta.content);
+        }
+        const reasoning=delta.reasoning_content||delta.reasoning;
+        if(typeof reasoning==='string'&&reasoning){
+          fullReasoning+=reasoning;
+          if(onReasoning)onReasoning(reasoning);
+        }
+      };
+      while(true){
+        const {done,value}=await reader.read();
+        if(done)break;
+        buffer+=decoder.decode(value,{stream:true});
+        let separator=buffer.indexOf('\n');
+        while(separator>=0){
+          const line=buffer.slice(0,separator).trim();
+          buffer=buffer.slice(separator+1);
+          if(line)handleLine(line);
+          separator=buffer.indexOf('\n');
+        }
+      }
+      if(buffer.trim())handleLine(buffer.trim());
+      if(!fullText&&!fullReasoning)throw Error('模型返回内容为空');
+      return fullText;
+    }catch(e){
+      if(e.name==='AbortError')throw Error(`请求超时（超过 ${Math.round(timeoutMs/1000)} 秒），请检查网络或模型响应速度`);
+      if(e instanceof TypeError)throw Error('无法连接模型服务：请检查 BaseURL、网络连接，以及服务是否允许浏览器直连（CORS）');
+      throw e;
+    }finally{clearTimeout(timer)}
+  }
+
   // ---- 提示词模板加载 ----
   const ALT_PROMPT_BASE='scripts/alt-prompts/';
   let altPromptCache={};
@@ -595,11 +729,41 @@
 
   // ---- 输出解析与 TaskSpec 字段校验 ----
   function extractJsonBlock(text){
-    const fence=text.match(/```(?:json)?\s*([\s\S]*?)```/i);
-    const candidate=fence?fence[1]:text;
-    const start=candidate.indexOf('{'),end=candidate.lastIndexOf('}');
-    if(start<0||end<=start)throw Error('响应中未找到 JSON 对象');
-    return JSON.parse(candidate.slice(start,end+1));
+    const candidates=[];
+    const fences=Array.from(text.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi),match=>match[1]);
+    fences.forEach(fence=>candidates.push(fence));
+    const stripped=String(text).replace(/<think>[\s\S]*?<\/think>/gi,' ').replace(/```[\s\S]*?```/g,' ');
+    const start=stripped.indexOf('{'),end=stripped.lastIndexOf('}');
+    if(start>=0&&end>start)candidates.push(stripped.slice(start,end+1));
+    let fallback=null;
+    for(const candidate of candidates){
+      try{
+        const parsed=JSON.parse(candidate.trim());
+        if(!parsed||typeof parsed!=='object'||Array.isArray(parsed))continue;
+        fallback=parsed;
+        if('userQuery' in parsed&&'size' in parsed)return parsed;
+      }catch(e){/* 尝试下一个候选 */}
+    }
+    if(fallback)return fallback;
+    throw Error('响应中未找到 JSON 对象');
+  }
+  function normalizeTaskSpec(spec,query){
+    if(!spec||typeof spec!=='object'||Array.isArray(spec))return spec;
+    const normalized={...spec};
+    const inner=normalized.data;
+    if(inner&&typeof inner==='object'&&!Array.isArray(inner)){
+      if(!normalized.userQuery&&!normalized.size&&(inner.userQuery!==undefined||inner.size!==undefined)){
+        Object.keys(inner).forEach(key=>{if(!(key in normalized))normalized[key]=inner[key]});
+      }else if(!normalized.dataModelSchema){
+        normalized.dataModelSchema=inner;
+      }
+    }
+    delete normalized.data;
+    if(normalized.size==null)normalized.size='2x2';
+    if(!Array.isArray(normalized.assetCandidates))normalized.assetCandidates=[];
+    if(!Array.isArray(normalized.eventCandidates))normalized.eventCandidates=[];
+    if(typeof normalized.userQuery!=='string'||!normalized.userQuery.trim())normalized.userQuery=query||'';
+    return normalized;
   }
   function extractAltAsc(text){
     const alt=text.match(/<alt>([\s\S]*?)<\/alt>/i);
@@ -662,6 +826,64 @@
   }
 
   // ---- 两段生成流程 ----
+  let llmSession=null;
+  function resetLlmSession(stage,messages,promptText){
+    llmSession={
+      stage,
+      status:'请求中…',
+      prompt:promptText,
+      output:'',
+      reasoning:'',
+      inputTokens:estimateMessagesTokens(messages),
+      outputTokens:0,
+      usage:null
+    };
+    renderLlmSession();
+    $('#llmSessionDialog').hidden=false;
+  }
+  function renderLlmSession(){
+    if(!llmSession)return;
+    const session=llmSession;
+    $('#llmSessionTitle').textContent=session.stage||'大模型请求';
+    $('#llmSessionSubtitle').textContent=session.status||'';
+    $('#llmSessionPrompt').textContent=session.prompt||'（暂无 Prompt）';
+    $('#llmSessionOutput').textContent=session.output;
+    $('#llmSessionReasoning').textContent=session.reasoning;
+    const statusEl=$('#llmSessionStatus');
+    statusEl.textContent=session.status||'';
+    statusEl.className='session-status'+(session.status==='请求中…'||session.status==='生成中…'?' is-active':(session.status&&session.status.includes('失败')?' is-error':''));
+    const inputTokens=session.usage&&session.usage.prompt_tokens!=null?session.usage.prompt_tokens:session.inputTokens;
+    const outputTokens=session.usage&&session.usage.completion_tokens!=null?session.usage.completion_tokens:session.outputTokens;
+    $('#llmSessionTokens').textContent=`输入 ${inputTokens} · 输出 ${outputTokens}${session.usage?'':'（估算）'}`;
+    const outputEl=$('#llmSessionOutput'),reasoningEl=$('#llmSessionReasoning');
+    if(outputEl.scrollHeight-outputEl.scrollTop-outputEl.clientHeight<40)outputEl.scrollTop=outputEl.scrollHeight;
+    if(reasoningEl.scrollHeight-reasoningEl.scrollTop-reasoningEl.clientHeight<40)reasoningEl.scrollTop=reasoningEl.scrollHeight;
+  }
+  function openLlmSession(){
+    if(!llmSession)resetLlmSession('大模型请求',[],'（暂无请求记录，点击「生成 TaskSpec」或「生成 ALT / ASC」后自动显示）');
+    renderLlmSession();
+    $('#llmSessionDialog').hidden=false;
+  }
+  $('#llmSessionBtn').onclick=openLlmSession;
+  $('#llmSessionClose').onclick=()=>{$('#llmSessionDialog').hidden=true};
+  $('#llmSessionDialog').onclick=e=>{if(e.target===$('#llmSessionDialog'))$('#llmSessionDialog').hidden=true};
+  $('#llmSessionCopyPrompt').onclick=()=>{
+    if(!llmSession||!llmSession.prompt)return;
+    navigator.clipboard.writeText(llmSession.prompt).then(()=>toast('Prompt 已复制')).catch(()=>toast('复制失败'));
+  };
+  $('#llmSessionTabAnswer').onclick=()=>{
+    $('#llmSessionTabAnswer').classList.add('active');
+    $('#llmSessionTabReasoning').classList.remove('active');
+    $('#llmSessionOutput').hidden=false;
+    $('#llmSessionReasoning').hidden=true;
+  };
+  $('#llmSessionTabReasoning').onclick=()=>{
+    $('#llmSessionTabReasoning').classList.add('active');
+    $('#llmSessionTabAnswer').classList.remove('active');
+    $('#llmSessionReasoning').hidden=false;
+    $('#llmSessionOutput').hidden=true;
+  };
+
   function showGenError(box,title,items){
     box.hidden=false;
     box.innerHTML=`<strong>${escapeHtml(title)}</strong>${items&&items.length?`<ul>${items.map(x=>`<li>${escapeHtml(x)}</li>`).join('')}</ul>`:''}`;
@@ -677,16 +899,25 @@
     try{
       const template=await loadTaskSpecTemplate();
       const system=template.replace('{userQuery}',query);
-      const text=await chatCompletion([{role:'system',content:system},{role:'user',content:query}],{timeoutMs:120000});
-      const spec=extractJsonBlock(text);
+      const messages=[{role:'system',content:system},{role:'user',content:query}];
+      resetLlmSession('生成 TaskSpec',messages,system+'\n\n[user]\n'+query);
+      const text=await chatCompletionStream(messages,{
+        timeoutMs:120000,
+        onChunk:chunk=>{llmSession.output+=chunk;llmSession.outputTokens+=estimateTokens(chunk);llmSession.status='生成中…';renderLlmSession()},
+        onReasoning:chunk=>{llmSession.reasoning+=chunk;llmSession.outputTokens+=estimateTokens(chunk);renderLlmSession()},
+        onUsage:usage=>{llmSession.usage=usage;llmSession.outputTokens=usage.completion_tokens!=null?usage.completion_tokens:llmSession.outputTokens;renderLlmSession()}
+      });
+      llmSession.status='已完成';
+      renderLlmSession();
+      const spec=normalizeTaskSpec(extractJsonBlock(text),query);
       if(!spec||typeof spec!=='object'||Array.isArray(spec))throw Error('模型输出不是 JSON 对象');
-      spec.userQuery=query;
       const issues=validateTaskSpec(spec);
       $('#altTaskSpec').value=JSON.stringify(spec,null,2);
       syncSizePlaceholders();
       if(issues.length)showGenError(genError,`TaskSpec 已生成，但有 ${issues.length} 条校验提示（可手动修改后继续）：`,issues);
       else toast('TaskSpec 已生成');
     }catch(e){
+      if(llmSession){llmSession.status='失败：'+(e.message||e);renderLlmSession()}
       showGenError(genError,'生成 TaskSpec 失败：',[e.message||String(e)]);
     }finally{
       btn.disabled=false;
@@ -711,12 +942,24 @@
       py.globals.set('__ts',taskSpecText);
       const messagesJson=await py.runPythonAsync('build_alt_asc_messages(__ts)');
       const messages=JSON.parse(messagesJson);
-      const text=await chatCompletion(messages,{timeoutMs:180000});
+      const promptText=messages.map(message=>`[${message.role}]\n${message.content}`).join('\n\n');
+      resetLlmSession('生成 ALT / ASC',messages,promptText);
+      const text=await chatCompletionStream(messages,{
+        timeoutMs:180000,
+        onChunk:chunk=>{llmSession.output+=chunk;llmSession.outputTokens+=estimateTokens(chunk);llmSession.status='生成中…';renderLlmSession()},
+        onReasoning:chunk=>{llmSession.reasoning+=chunk;llmSession.outputTokens+=estimateTokens(chunk);renderLlmSession()},
+        onUsage:usage=>{llmSession.usage=usage;llmSession.outputTokens=usage.completion_tokens!=null?usage.completion_tokens:llmSession.outputTokens;renderLlmSession()}
+      });
+      llmSession.status='已完成';
+      renderLlmSession();
       const {alt,asc}=extractAltAsc(text);
       $('#altInput').value=alt;
       $('#ascInput').value=asc;
       toast('ALT / ASC 已生成，可直接编译并渲染');
+      const altTab=document.querySelector('[data-source-tab="alt"]');
+      if(altTab)altTab.click();
     }catch(e){
+      if(llmSession){llmSession.status='失败：'+(e.message||e);renderLlmSession()}
       showGenError(genError,'生成 ALT/ASC 失败：',[e.message||String(e),'可检查模型输出是否包含 <alt>...</alt> 与 <asc>...</asc> 后重试']);
     }finally{
       btn.disabled=false;
