@@ -21,6 +21,39 @@ The ALT tab also supports BYOK LLM generation (user query → TaskSpec → ALT/A
 
 There is no generated build directory or package manager output.
 
+## Config & Settings Synchronization
+
+The settings page is metadata-driven: the 渲染参数 tab renders exactly the parameters declared in
+`scripts/config/alt-tuning.meta.json`, while their defaults come from `scripts/config/alt-tuning.json`
+(cloud defaults; user overrides live in `localStorage["a2ui.tuning.v1"]`). Whenever a component is added,
+or any geometry/measurement behavior changes, update the following together in the same change:
+
+- `scripts/config/alt-tuning.json` — the new or changed hyperparameter values.
+- `scripts/config/alt-tuning.meta.json` — one entry per tunable parameter with a Chinese `name`,
+  `category`/`group`, hover `tooltip`, control `type`, and `min/max/step/unit`. Without an entry here
+  the parameter never appears in the 设置 UI.
+- `scripts/config/alt-layout-profile.json` — structural layout rules (canvas / limits / spacing /
+  textRules / typography) when they are affected.
+- `scripts/config/alt-themes.json` — theme tokens when the component introduces colors.
+- `scripts/alt_converter.py` and `scripts/alt_to_dsl_converter.py` — identical copies of the ALT-to-DSL
+  pipeline (CLI batch vs browser/Pyodide); apply the same edit to both.
+- `scripts/taskspec_to_alt_chat_completions.py` — when prompt-side units, limits, or allowed components
+  change.
+- `genui-renderer.js` — keep browser fallback defaults aligned with the tuning values so DSL-omitted
+  styles render consistently.
+- `docs/alt-tuning-parameters.md` — document every new parameter.
+
+Verify every such change with:
+
+1. `node --check app.js` and `git diff --check`.
+2. Open 设置 → 渲染参数: the parameter must appear with a Chinese name, tooltip, and correct default;
+   exercise 保存 → 刷新 → 自动加载 → 重置.
+3. Recompile a representative card and confirm output is unchanged unless the change intends otherwise.
+4. UI text must stay UTF-8: never pipe Chinese through shell pipelines that can replace non-ASCII with `?`,
+   and scan `index.html`, `app.js`, and `scripts/config/*.json` for stray `?` runs before committing.
+5. Bump the asset cache-buster query strings in `index.html` whenever `app.js` or CSS behavior changes,
+   because GitHub Pages caches those assets.
+
 ## Build, Test, and Development Commands
 
 No build step is required. Open `index.html` directly, or serve the repository locally:
