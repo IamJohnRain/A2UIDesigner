@@ -29,6 +29,10 @@
     {
       "id": "general",
       "name": "通用"
+    },
+    {
+      "id": "limits",
+      "name": "容量限制"
     }
   ],
   "parameters": [
@@ -801,6 +805,234 @@
       "step": 1,
       "unit": "",
       "tooltip": "RGB 最小通道低于该值判定为彩色主题（ambient-light）。"
+    },
+    {
+      "path": "layout.limits.2x2.maxDepth",
+      "name": "最大嵌套深度",
+      "category": "limits",
+      "group": "2x2",
+      "type": "number",
+      "min": 1,
+      "max": 8,
+      "step": 1,
+      "unit": "层",
+      "tooltip": "卡片允许的最大组件嵌套深度，超出会报 auto ALT 协议错误。"
+    },
+    {
+      "path": "layout.limits.2x2.maxNodes",
+      "name": "最大节点数",
+      "category": "limits",
+      "group": "2x2",
+      "type": "number",
+      "min": 1,
+      "max": 50,
+      "step": 1,
+      "unit": "个",
+      "tooltip": "卡片允许的最大组件节点总数。"
+    },
+    {
+      "path": "layout.limits.2x2.maxText",
+      "name": "最大文本数",
+      "category": "limits",
+      "group": "2x2",
+      "type": "number",
+      "min": 0,
+      "max": 20,
+      "step": 1,
+      "unit": "个",
+      "tooltip": "卡片允许的最大文本节点数。"
+    },
+    {
+      "path": "layout.limits.2x2.maxButtons",
+      "name": "最大按钮数",
+      "category": "limits",
+      "group": "2x2",
+      "type": "number",
+      "min": 0,
+      "max": 5,
+      "step": 1,
+      "unit": "个",
+      "tooltip": "卡片允许的最大按钮数，超出会报 auto ALT 协议错误。"
+    },
+    {
+      "path": "layout.limits.2x2.maxImages",
+      "name": "最大图片数",
+      "category": "limits",
+      "group": "2x2",
+      "type": "number",
+      "min": 0,
+      "max": 10,
+      "step": 1,
+      "unit": "个",
+      "tooltip": "卡片允许的最大图片节点数。"
+    },
+    {
+      "path": "layout.limits.2x2.maxProgress",
+      "name": "最大进度组件数",
+      "category": "limits",
+      "group": "2x2",
+      "type": "number",
+      "min": 0,
+      "max": 5,
+      "step": 1,
+      "unit": "个",
+      "tooltip": "卡片允许的最大进度组件数。"
+    },
+    {
+      "path": "layout.limits.2x2.maxCheckbox",
+      "name": "最大勾选框数",
+      "category": "limits",
+      "group": "2x2",
+      "type": "number",
+      "min": 0,
+      "max": 10,
+      "step": 1,
+      "unit": "个",
+      "tooltip": "卡片允许的最大勾选框数。"
+    },
+    {
+      "path": "layout.limits.2x2.maxLists",
+      "name": "最大列表数",
+      "category": "limits",
+      "group": "2x2",
+      "type": "number",
+      "min": 0,
+      "max": 3,
+      "step": 1,
+      "unit": "个",
+      "tooltip": "卡片允许的最大列表数。"
+    },
+    {
+      "path": "layout.limits.2x2.maxVisibleTextUnits",
+      "name": "可见文本上限",
+      "category": "limits",
+      "group": "2x2",
+      "type": "number",
+      "min": 10,
+      "max": 200,
+      "step": 1,
+      "unit": "单位",
+      "tooltip": "可见文本宽度单位总量上限，超出为硬错误。"
+    },
+    {
+      "path": "layout.limits.2x4.maxDepth",
+      "name": "最大嵌套深度",
+      "category": "limits",
+      "group": "2x4",
+      "type": "number",
+      "min": 1,
+      "max": 8,
+      "step": 1,
+      "unit": "层",
+      "tooltip": "卡片允许的最大组件嵌套深度，超出会报 auto ALT 协议错误。"
+    },
+    {
+      "path": "layout.limits.2x4.maxNodes",
+      "name": "最大节点数",
+      "category": "limits",
+      "group": "2x4",
+      "type": "number",
+      "min": 1,
+      "max": 50,
+      "step": 1,
+      "unit": "个",
+      "tooltip": "卡片允许的最大组件节点总数。"
+    },
+    {
+      "path": "layout.limits.2x4.maxText",
+      "name": "最大文本数",
+      "category": "limits",
+      "group": "2x4",
+      "type": "number",
+      "min": 0,
+      "max": 20,
+      "step": 1,
+      "unit": "个",
+      "tooltip": "卡片允许的最大文本节点数。"
+    },
+    {
+      "path": "layout.limits.2x4.maxButtons",
+      "name": "最大按钮数",
+      "category": "limits",
+      "group": "2x4",
+      "type": "number",
+      "min": 0,
+      "max": 5,
+      "step": 1,
+      "unit": "个",
+      "tooltip": "卡片允许的最大按钮数，超出会报 auto ALT 协议错误。"
+    },
+    {
+      "path": "layout.limits.2x4.maxImages",
+      "name": "最大图片数",
+      "category": "limits",
+      "group": "2x4",
+      "type": "number",
+      "min": 0,
+      "max": 10,
+      "step": 1,
+      "unit": "个",
+      "tooltip": "卡片允许的最大图片节点数。"
+    },
+    {
+      "path": "layout.limits.2x4.maxProgress",
+      "name": "最大进度组件数",
+      "category": "limits",
+      "group": "2x4",
+      "type": "number",
+      "min": 0,
+      "max": 5,
+      "step": 1,
+      "unit": "个",
+      "tooltip": "卡片允许的最大进度组件数。"
+    },
+    {
+      "path": "layout.limits.2x4.maxCheckbox",
+      "name": "最大勾选框数",
+      "category": "limits",
+      "group": "2x4",
+      "type": "number",
+      "min": 0,
+      "max": 10,
+      "step": 1,
+      "unit": "个",
+      "tooltip": "卡片允许的最大勾选框数。"
+    },
+    {
+      "path": "layout.limits.2x4.maxLists",
+      "name": "最大列表数",
+      "category": "limits",
+      "group": "2x4",
+      "type": "number",
+      "min": 0,
+      "max": 3,
+      "step": 1,
+      "unit": "个",
+      "tooltip": "卡片允许的最大列表数。"
+    },
+    {
+      "path": "layout.limits.2x4.maxVisibleTextUnits",
+      "name": "可见文本上限",
+      "category": "limits",
+      "group": "2x4",
+      "type": "number",
+      "min": 10,
+      "max": 200,
+      "step": 1,
+      "unit": "单位",
+      "tooltip": "可见文本宽度单位总量上限，超出为硬错误。"
+    },
+    {
+      "path": "layout.limits.2x4.maxVisibleListItems",
+      "name": "列表可见条数",
+      "category": "limits",
+      "group": "2x4",
+      "type": "number",
+      "min": 1,
+      "max": 10,
+      "step": 1,
+      "unit": "条",
+      "tooltip": "列表最多可见的条目数（仅 2x4）。"
     }
   ]
 }

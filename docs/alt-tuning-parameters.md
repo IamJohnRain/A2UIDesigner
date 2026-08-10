@@ -162,3 +162,7 @@ compact 密度会使用 `alt-layout-profile.json` 的 `typography.compact` 字�
 `cli/render-card.js` 使用的 `genui-renderer.js` 内也内嵌了 Checkbox 的渲染默认值
 （controlSize 20 / controlMargin 2 / labelSpacing 12 / labelFontSize 16）与按钮默认值。
 修改 `components.*` 时，请同步核对渲染器默认值，避免 DSL 与预览不一致。
+
+## 容量限制（limits）
+
+`设置 → 渲染参数 → 容量限制` 分组暴露的是 `scripts/config/alt-layout-profile.json` 的 `limits.*` 值（2x2 / 2x4 的 maxDepth / maxNodes / maxText / maxButtons / maxImages / maxProgress / maxCheckbox / maxLists / maxVisibleTextUnits / maxVisibleListItems）。它们属于结构上限而非测量超参，因此默认值位于 layout profile 而不是 alt-tuning.json；设置页保存时会以 `layout.*` 前缀路径写入 localStorage（`a2ui.tuning.v1` 的 `layout` 字段），并在保存后连同 layout profile 一起重新注入运行时（`configure_runtime` 的第二个参数）。

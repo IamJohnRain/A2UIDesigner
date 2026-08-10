@@ -347,17 +347,21 @@
             let converterSrc=await (await fetch('scripts/alt_to_dsl_converter.py')).text();
             converterSrc=converterSrc.replace(/\r?\nif __name__ == "__main__":\s*raise SystemExit\(main\(\)\)\s*$/,'');
             const cfg1=await (await fetch('scripts/config/alt-themes.json')).text();
-            const cfg2=await (await fetch('scripts/config/alt-layout-profile.json')).text();
+            const cfg2=await (await fetch('scripts/config/alt-layout-profile.json?v=20260810')).text();
             const cfg3=await (await fetch('scripts/config/alt-tuning.json?v=20260810')).text();
             cloudTuning=JSON.parse(cfg3);
-            effectiveTuning=buildEffectiveTuning(cloudTuning,loadSavedTuning());
+            cloudLayout=JSON.parse(cfg2);
+            const saved=loadSavedSettings();
+            effectiveTuning=buildEffectiveTuning(cloudTuning,saved?saved.values:null);
+            effectiveLayout=buildEffectiveTuning(cloudLayout,saved?saved.layout:null);
+            const effectiveCfg2=JSON.stringify(effectiveLayout);
             const effectiveCfg3=JSON.stringify(effectiveTuning);
             await py.runPythonAsync(converterSrc);
-            await py.runPythonAsync(`import json; configure_runtime(${JSON.stringify(cfg1)},${JSON.stringify(cfg2)},${JSON.stringify(effectiveCfg3)})`);
+            await py.runPythonAsync(`import json; configure_runtime(${JSON.stringify(cfg1)},${JSON.stringify(effectiveCfg2)},${JSON.stringify(effectiveCfg3)})`);
             const builderSrc=await (await fetch('scripts/taskspec_to_alt_chat_completions.py')).text();
             const builderCode=prepareAltPromptBuilder(builderSrc);
             py.globals.set('_CFG_THEMES',cfg1);
-            py.globals.set('_CFG_LAYOUT',cfg2);
+            py.globals.set('_CFG_LAYOUT',effectiveCfg2);
             py.globals.set('_CFG_TUNING',effectiveCfg3);
             await py.runPythonAsync(builderCode);
             return py;
@@ -1027,7 +1031,9 @@
   // ---- 渲染参数（alt-tuning）设置 ----
   const TUNING_STORAGE_KEY='a2ui.tuning.v1';
   let cloudTuning=null;
+  let cloudLayout=null;
   let effectiveTuning=null;
+  let effectiveLayout=null;
   let tuningMeta=null;
   let tuningMetaPromise=null;
 
@@ -1052,13 +1058,17 @@
     node[parts[parts.length-1]]=value;
   }
 
-  function loadSavedTuning(){
+  function loadSavedSettings(){
     try{
       const raw=localStorage.getItem(TUNING_STORAGE_KEY);
       if(!raw)return null;
       const data=JSON.parse(raw);
-      if(!data||data.version!==1||!data.values||typeof data.values!=='object'||Array.isArray(data.values))return null;
-      return data.values;
+      if(!data||!data.values||typeof data.values!=='object'||Array.isArray(data.values))return null;
+      if(data.version===2){
+        const layout=data.layout&&typeof data.layout==='object'&&!Array.isArray(data.layout)?data.layout:{};
+        return {values:data.values,layout};
+      }
+      return {values:data.values,layout:{}};
     }catch(e){return null}
   }
 
@@ -1073,13 +1083,17 @@
   function loadTuningAssets(){
     if(!tuningMetaPromise){
       tuningMetaPromise=(async()=>{
-        const [cfg3,meta]=await Promise.all([
+        const [cfg2,cfg3,meta]=await Promise.all([
+          fetch('scripts/config/alt-layout-profile.json?v=20260810').then(r=>r.json()),
           fetch('scripts/config/alt-tuning.json?v=20260810').then(r=>r.json()),
           fetch('scripts/config/alt-tuning.meta.json?v=20260810').then(r=>r.json()),
         ]);
         cloudTuning=cfg3;
+        cloudLayout=cfg2;
         tuningMeta=meta;
-        effectiveTuning=buildEffectiveTuning(cloudTuning,loadSavedTuning());
+        const saved=loadSavedSettings();
+        effectiveTuning=buildEffectiveTuning(cloudTuning,saved?saved.values:null);
+        effectiveLayout=buildEffectiveTuning(cloudLayout,saved?saved.layout:null);
         return {cloudTuning,meta};
       })();
     }
@@ -1088,10 +1102,12 @@
 
   async function applyTuningToRuntime(){
     const py=await ensurePyodide();
+    const effectiveCfg2=JSON.stringify(effectiveLayout||cloudLayout);
     const effectiveCfg3=JSON.stringify(effectiveTuning);
-    await py.runPythonAsync(`import json; configure_runtime(None,None,${JSON.stringify(effectiveCfg3)})`);
+    await py.runPythonAsync(`import json; configure_runtime(None,${JSON.stringify(effectiveCfg2)},${JSON.stringify(effectiveCfg3)})`);
+    py.globals.set('_CFG_LAYOUT',effectiveCfg2);
     py.globals.set('_CFG_TUNING',effectiveCfg3);
-    await py.runPythonAsync('import json; TUNING=json.loads(_CFG_TUNING)');
+    await py.runPythonAsync('import json; LAYOUT_PROFILE=json.loads(_CFG_LAYOUT); TUNING=json.loads(_CFG_TUNING)');
     return true;
   }
 
@@ -1101,6 +1117,7 @@
   }
 
   function tuningValueFor(meta){
+    if(meta.path.startsWith('layout.'))return getTuningPath(effectiveLayout||{},meta.path.slice(7));
     return getTuningPath(effectiveTuning||{},meta.path);
   }
 
@@ -1161,16 +1178,20 @@
       }
       form.appendChild(section);
     }
-    $('#tuningMode').textContent=loadSavedTuning()?'使用本地配置（可重置为云端默认）':'使用云端默认';
+    $('#tuningMode').textContent=loadSavedSettings()?'使用本地配置（可重置为云端默认）':'使用云端默认';
   }
 
   function collectTuningValues(){
     const values={};
+    const layoutValues={};
     const errors=[];
     document.querySelectorAll('#tuningForm .tuning-row').forEach(row=>{
       const path=row.dataset.path;
       const meta=(tuningMeta.parameters||[]).find(p=>p.path===path);
       if(!meta)return;
+      const isLayout=path.startsWith('layout.');
+      const targetKey=isLayout?path.slice(7):path;
+      const bucket=isLayout?layoutValues:values;
       const input=row.querySelector('.tuning-input');
       if(meta.type==='number'){
         const raw=input.value.trim();
@@ -1179,11 +1200,11 @@
         if(!Number.isFinite(num)){errors.push(meta.name+'：必须是数字');return}
         if(meta.min!=null&&num<meta.min){errors.push(meta.name+'：不能小于 '+meta.min);return}
         if(meta.max!=null&&num>meta.max){errors.push(meta.name+'：不能大于 '+meta.max);return}
-        values[path]=num;
+        bucket[targetKey]=num;
       }else if(meta.type==='string'){
-        values[path]=input.value.trim();
+        bucket[targetKey]=input.value.trim();
       }else if(meta.type==='json'){
-        try{values[path]=JSON.parse(input.value)}catch(e){errors.push(meta.name+'：JSON 格式不正确')}
+        try{bucket[targetKey]=JSON.parse(input.value)}catch(e){errors.push(meta.name+'：JSON 格式不正确')}
       }else if(meta.type==='bands'){
         const bands=[];
         let ok=true;
@@ -1194,19 +1215,20 @@
           bands.push({aboveUnits:above,fontSize:size});
         });
         if(!ok){errors.push(meta.name+'：档位必须是数字');return}
-        values[path]=bands;
+        bucket[targetKey]=bands;
       }
     });
-    return {values,errors};
+    return {values,layoutValues,errors};
   }
 
   function saveTuning(){
     const status=$('#tuningStatus');
     status.hidden=true;
-    const {values,errors}=collectTuningValues();
+    const {values,layoutValues,errors}=collectTuningValues();
     if(errors.length){setLlmStatus(status,errors[0],true);return}
-    localStorage.setItem(TUNING_STORAGE_KEY,JSON.stringify({version:1,savedAt:new Date().toISOString(),values}));
+    localStorage.setItem(TUNING_STORAGE_KEY,JSON.stringify({version:2,savedAt:new Date().toISOString(),values,layout:layoutValues}));
     effectiveTuning=buildEffectiveTuning(cloudTuning,values);
+    effectiveLayout=buildEffectiveTuning(cloudLayout,layoutValues);
     renderTuningForm();
     syncTuningToRuntime().then(applied=>{
       setLlmStatus(status,applied?'已保存并注入运行时，重新编译后生效':'已保存到浏览器本地，下次编译自动生效',false);
@@ -1220,6 +1242,7 @@
     if(!confirm('确定恢复为云端默认渲染参数吗？本地保存的自定义值将被清除。'))return;
     localStorage.removeItem(TUNING_STORAGE_KEY);
     effectiveTuning=buildEffectiveTuning(cloudTuning,null);
+    effectiveLayout=buildEffectiveTuning(cloudLayout,null);
     renderTuningForm();
     const status=$('#tuningStatus');
     status.hidden=true;

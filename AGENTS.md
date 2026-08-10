@@ -49,8 +49,13 @@ Verify every such change with:
 2. Open 设置 → 渲染参数: the parameter must appear with a Chinese name, tooltip, and correct default;
    exercise 保存 → 刷新 → 自动加载 → 重置.
 3. Recompile a representative card and confirm output is unchanged unless the change intends otherwise.
-4. UI text must stay UTF-8: never pipe Chinese through shell pipelines that can replace non-ASCII with `?`,
-   and scan `index.html`, `app.js`, and `scripts/config/*.json` for stray `?` runs before committing.
+4. UI text must stay UTF-8. Windows PowerShell pipes strings to native processes using `$OutputEncoding`
+   (ASCII by default), so `@'...'@ | python -` silently turns every non-ASCII character (CJK, em-dash,
+   multiplication signs, arrows) into `?` with no error. Prefer `apply_patch` for file edits; when shell
+   editing is unavoidable, write non-ASCII as `\uXXXX` escapes, use PowerShell-native `Set-Content -Encoding
+   utf8` (no pipe into a native process), or read the content inside Python from existing files / `git show`
+   instead of passing it through stdin. Before committing, scan `index.html`, `app.js`, `scripts/config/*.json`,
+   and `AGENTS.md` for stray `?` runs or missing CJK text.
 5. Bump the asset cache-buster query strings in `index.html` whenever `app.js` or CSS behavior changes,
    because GitHub Pages caches those assets.
 
