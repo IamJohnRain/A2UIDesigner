@@ -1,806 +1,806 @@
 {
   "version": 1,
-  "description": "??????????????? alt-tuning.json ????????????????????????",
+  "description": "渲染参数设置界面的元数据：每个 alt-tuning.json 参数的中文名、分类、说明与控件类型。仅前端消费。",
   "categories": [
     {
       "id": "text",
-      "name": "??"
+      "name": "文本"
     },
     {
       "id": "button",
-      "name": "??"
+      "name": "按钮"
     },
     {
       "id": "checkbox",
-      "name": "???"
+      "name": "勾选框"
     },
     {
       "id": "image",
-      "name": "??"
+      "name": "图片"
     },
     {
       "id": "progress",
-      "name": "??"
+      "name": "进度"
     },
     {
       "id": "divider",
-      "name": "???"
+      "name": "分隔线"
     },
     {
       "id": "general",
-      "name": "??"
+      "name": "通用"
     }
   ],
   "parameters": [
     {
       "path": "text.widthSafety",
-      "name": "????????",
+      "name": "文本宽度安全系数",
       "category": "text",
-      "group": "????",
+      "group": "文本测量",
       "type": "number",
       "min": 1.0,
       "max": 2.0,
       "step": 0.01,
-      "unit": "?",
-      "tooltip": "?????? = ???? ? ?? ? ???? ? ??????? 1 ?????????????????"
+      "unit": "倍",
+      "tooltip": "文本预估宽度 = 字符单位 × 字号 × 字重系数 × 安全系数。大于 1 时为渲染留出余量，防止文字被截断。"
     },
     {
       "path": "text.buttonWidthSafety",
-      "name": "??????????",
+      "name": "按钮文案宽度安全系数",
       "category": "text",
-      "group": "????",
+      "group": "文本测量",
       "type": "number",
       "min": 1.0,
       "max": 2.0,
       "step": 0.01,
-      "unit": "?",
-      "tooltip": "?? label ???????????????????????????"
+      "unit": "倍",
+      "tooltip": "按钮 label 的宽度安全系数，比普通文本略紧，因为按钮文案通常更短。"
     },
     {
       "path": "text.lineHeightPadding",
-      "name": "??????",
+      "name": "行高纵向余量",
       "category": "text",
-      "group": "????",
+      "group": "文本测量",
       "type": "number",
       "min": 0,
       "max": 16,
       "step": 1,
       "unit": "vp",
-      "tooltip": "?? = ?? + ???????????????"
+      "tooltip": "行高 = 字号 + 该值，用于文本的垂直高度预算。"
     },
     {
       "path": "text.minimumWidthChars",
-      "name": "????????",
+      "name": "文本最小宽度字数",
       "category": "text",
-      "group": "????",
+      "group": "文本测量",
       "type": "number",
       "min": 1,
       "max": 8,
       "step": 0.5,
-      "unit": "?",
-      "tooltip": "?????? = ???? ? ???????????????????"
+      "unit": "字",
+      "tooltip": "文本最小宽度 = 最小字号 × 该值，相当于至少保留几个字的宽度下限。"
     },
     {
       "path": "text.longTextUnitsThreshold",
-      "name": "?????",
+      "name": "长文本阈值",
       "category": "text",
-      "group": "????",
+      "group": "文本测量",
       "type": "number",
       "min": 2,
       "max": 20,
       "step": 1,
-      "unit": "??",
-      "tooltip": "????????????????maxLines>1??????????"
+      "unit": "单位",
+      "tooltip": "内容宽度单位超过该值才允许折行（maxLines > 1），短文本强制单行。"
     },
     {
       "path": "text.unitRoundDigits",
-      "name": "?????????",
+      "name": "宽度单位保留小数位",
       "category": "text",
-      "group": "????",
+      "group": "文本测量",
       "type": "number",
       "min": 0,
       "max": 3,
       "step": 1,
-      "unit": "?",
-      "tooltip": "??????????? sample ?????????????"
+      "unit": "位",
+      "tooltip": "生成模型提示词时，字段 sample 的宽度单位保留的小数位数。"
     },
     {
       "path": "text.weightFactorDivisor",
-      "name": "??????",
+      "name": "字重系数分母",
       "category": "text",
-      "group": "????",
+      "group": "文本测量",
       "type": "number",
       "min": 1000,
       "max": 20000,
       "step": 500,
       "unit": "",
-      "tooltip": "???? = 1 + (??-400)/????????????????????"
+      "tooltip": "字重系数 = 1 + (字重 - 400) / 分母。决定加粗文字对预估宽度的放大程度。"
     },
     {
       "path": "text.unitWeights.space",
-      "name": "????????",
+      "name": "空格字符宽度单位",
       "category": "text",
-      "group": "??????",
+      "group": "字符宽度权重",
       "type": "number",
       "min": 0.1,
       "max": 2.0,
       "step": 0.05,
       "unit": "",
-      "tooltip": "?????????????????"
+      "tooltip": "空格在文本宽度估算中占的宽度单位。"
     },
     {
       "path": "text.unitWeights.cjk",
-      "name": "????????",
+      "name": "全角字符宽度单位",
       "category": "text",
-      "group": "??????",
+      "group": "字符宽度权重",
       "type": "number",
       "min": 0.1,
       "max": 2.0,
       "step": 0.05,
       "unit": "",
-      "tooltip": "??????????????????????"
+      "tooltip": "中日韩全角字符在文本宽度估算中占的宽度单位。"
     },
     {
       "path": "text.unitWeights.upper",
-      "name": "????????",
+      "name": "大写字母宽度单位",
       "category": "text",
-      "group": "??????",
+      "group": "字符宽度权重",
       "type": "number",
       "min": 0.1,
       "max": 2.0,
       "step": 0.05,
       "unit": "",
-      "tooltip": "???????????????????"
+      "tooltip": "大写字母在文本宽度估算中占的宽度单位。"
     },
     {
       "path": "text.unitWeights.lower",
-      "name": "????????",
+      "name": "小写字母宽度单位",
       "category": "text",
-      "group": "??????",
+      "group": "字符宽度权重",
       "type": "number",
       "min": 0.1,
       "max": 2.0,
       "step": 0.05,
       "unit": "",
-      "tooltip": "???????????????????"
+      "tooltip": "小写字母在文本宽度估算中占的宽度单位。"
     },
     {
       "path": "text.unitWeights.digit",
-      "name": "??????",
+      "name": "数字宽度单位",
       "category": "text",
-      "group": "??????",
+      "group": "字符宽度权重",
       "type": "number",
       "min": 0.1,
       "max": 2.0,
       "step": 0.05,
       "unit": "",
-      "tooltip": "?????????????????"
+      "tooltip": "数字在文本宽度估算中占的宽度单位。"
     },
     {
       "path": "text.unitWeights.other",
-      "name": "????????",
+      "name": "其他字符宽度单位",
       "category": "text",
-      "group": "??????",
+      "group": "字符宽度权重",
       "type": "number",
       "min": 0.1,
       "max": 2.0,
       "step": 0.05,
       "unit": "",
-      "tooltip": "???????????????????"
+      "tooltip": "其他符号在文本宽度估算中占的宽度单位。"
     },
     {
       "path": "button.charsHorizontalReserve",
-      "name": "??????",
+      "name": "按钮横向预留",
       "category": "button",
-      "group": "????",
+      "group": "按钮测量",
       "type": "number",
       "min": 0,
       "max": 64,
       "step": 1,
       "unit": "vp",
-      "tooltip": "???????????(?-??)/???? label ??????????????"
+      "tooltip": "计算按钮可容纳字符数与 label 宽度校验时扣除的固定内边距。"
     },
     {
       "path": "button.labelFontFallback",
-      "name": "????????",
+      "name": "按钮文案回退字号",
       "category": "button",
-      "group": "????",
+      "group": "按钮测量",
       "type": "number",
       "min": 8,
       "max": 32,
       "step": 1,
       "unit": "fp",
-      "tooltip": "????????????????? label ????????"
+      "tooltip": "兼容路径下按钮缺少字号声明时，测量 label 使用的回退字号。"
     },
     {
       "path": "button.intrinsicHeightMinimum",
-      "name": "????????",
+      "name": "按钮固有最小高度",
       "category": "button",
-      "group": "????",
+      "group": "按钮测量",
       "type": "number",
       "min": 16,
       "max": 64,
       "step": 1,
       "unit": "vp",
-      "tooltip": "?????????????????????"
+      "tooltip": "兼容路径校验按钮高度时使用的固有最小高度。"
     },
     {
       "path": "button.intrinsicHeightReserve",
-      "name": "????????",
+      "name": "按钮固有高度预留",
       "category": "button",
-      "group": "????",
+      "group": "按钮测量",
       "type": "number",
       "min": 0,
       "max": 32,
       "step": 1,
       "unit": "vp",
-      "tooltip": "???????? = max(????, ?? + ???)?"
+      "tooltip": "按钮固有最小高度 = max(最小高度, 字号 + 该预留)。"
     },
     {
       "path": "components.button.paddingVertical",
-      "name": "???????",
+      "name": "按钮上下内边距",
       "category": "button",
-      "group": "????",
+      "group": "常规按钮",
       "type": "number",
       "min": 0,
       "max": 32,
       "step": 1,
       "unit": "vp",
-      "tooltip": "??????????????????????"
+      "tooltip": "常规路径按钮的上下内边距，参与固有高度计算。"
     },
     {
       "path": "components.button.paddingHorizontal",
-      "name": "???????",
+      "name": "按钮左右内边距",
       "category": "button",
-      "group": "????",
+      "group": "常规按钮",
       "type": "number",
       "min": 0,
       "max": 48,
       "step": 1,
       "unit": "vp",
-      "tooltip": "??????????????????????"
+      "tooltip": "常规路径按钮的左右内边距，参与固有宽度计算。"
     },
     {
       "path": "components.button.minimumHeight",
-      "name": "??????",
+      "name": "按钮最小高度",
       "category": "button",
-      "group": "????",
+      "group": "常规按钮",
       "type": "number",
       "min": 16,
       "max": 64,
       "step": 1,
       "unit": "vp",
-      "tooltip": "???????????????"
+      "tooltip": "常规路径按钮的最小可点击高度。"
     },
     {
       "path": "components.button.minimumWidth",
-      "name": "??????",
+      "name": "按钮最小宽度",
       "category": "button",
-      "group": "????",
+      "group": "常规按钮",
       "type": "number",
       "min": 24,
       "max": 200,
       "step": 1,
       "unit": "vp",
-      "tooltip": "????????????"
+      "tooltip": "常规路径按钮的最小宽度。"
     },
     {
       "path": "components.button.widthSafety",
-      "name": "????????",
+      "name": "按钮宽度安全余量",
       "category": "button",
-      "group": "????",
+      "group": "常规按钮",
       "type": "number",
       "min": 0,
       "max": 32,
       "step": 1,
       "unit": "vp",
-      "tooltip": "???????+???????????????"
+      "tooltip": "按钮宽度在文案 + 内边距之上额外追加的安全余量。"
     },
     {
       "path": "components.autoButton.paddingVertical",
-      "name": "?????????",
+      "name": "自动按钮上下内边距",
       "category": "button",
-      "group": "??????",
+      "group": "自动布局按钮",
       "type": "number",
       "min": 0,
       "max": 32,
       "step": 1,
       "unit": "vp",
-      "tooltip": "?????ALT??????????"
+      "tooltip": "自动布局（ALT）按钮的上下内边距。"
     },
     {
       "path": "components.autoButton.paddingHorizontal",
-      "name": "?????????",
+      "name": "自动按钮左右内边距",
       "category": "button",
-      "group": "??????",
+      "group": "自动布局按钮",
       "type": "number",
       "min": 0,
       "max": 48,
       "step": 1,
       "unit": "vp",
-      "tooltip": "?????ALT??????????"
+      "tooltip": "自动布局（ALT）按钮的左右内边距。"
     },
     {
       "path": "components.autoButton.minimumHeight",
-      "name": "????????",
+      "name": "自动按钮最小高度",
       "category": "button",
-      "group": "??????",
+      "group": "自动布局按钮",
       "type": "number",
       "min": 16,
       "max": 64,
       "step": 1,
       "unit": "vp",
-      "tooltip": "?????ALT????????????"
+      "tooltip": "自动布局（ALT）按钮的最小可点击高度。"
     },
     {
       "path": "components.autoButton.minimumWidth",
-      "name": "????????",
+      "name": "自动按钮最小宽度",
       "category": "button",
-      "group": "??????",
+      "group": "自动布局按钮",
       "type": "number",
       "min": 24,
       "max": 200,
       "step": 1,
       "unit": "vp",
-      "tooltip": "?????ALT?????????"
+      "tooltip": "自动布局（ALT）按钮的最小宽度。"
     },
     {
       "path": "components.autoButton.widthSafety",
-      "name": "??????????",
+      "name": "自动按钮宽度安全余量",
       "category": "button",
-      "group": "??????",
+      "group": "自动布局按钮",
       "type": "number",
       "min": 0,
       "max": 32,
       "step": 1,
       "unit": "vp",
-      "tooltip": "?????ALT???????????"
+      "tooltip": "自动布局（ALT）按钮的宽度安全余量。"
     },
     {
       "path": "components.checkbox.outerHeight",
-      "name": "???????",
+      "name": "勾选框整体高度",
       "category": "checkbox",
-      "group": "?????",
+      "group": "常规勾选框",
       "type": "number",
       "min": 16,
       "max": 64,
       "step": 1,
       "unit": "vp",
-      "tooltip": "?????????????"
+      "tooltip": "常规路径勾选框的整体高度。"
     },
     {
       "path": "components.checkbox.controlSize",
-      "name": "??????",
+      "name": "勾选控件边长",
       "category": "checkbox",
-      "group": "?????",
+      "group": "常规勾选框",
       "type": "number",
       "min": 8,
       "max": 48,
       "step": 1,
       "unit": "vp",
-      "tooltip": "????????????????????"
+      "tooltip": "勾选方框的边长，参与勾选项固有宽度计算。"
     },
     {
       "path": "components.checkbox.controlMargin",
-      "name": "???????",
+      "name": "勾选控件外边距",
       "category": "checkbox",
-      "group": "?????",
+      "group": "常规勾选框",
       "type": "number",
       "min": 0,
       "max": 16,
       "step": 1,
       "unit": "vp",
-      "tooltip": "???????????"
+      "tooltip": "勾选方框四周的外边距。"
     },
     {
       "path": "components.checkbox.labelGap",
-      "name": "???????",
+      "name": "控件与文字间距",
       "category": "checkbox",
-      "group": "?????",
+      "group": "常规勾选框",
       "type": "number",
       "min": 0,
       "max": 32,
       "step": 1,
       "unit": "vp",
-      "tooltip": "????? label ????????"
+      "tooltip": "勾选方框与 label 文字之间的间距。"
     },
     {
       "path": "components.checkbox.labelFontSize",
-      "name": "???????",
+      "name": "勾选项文字字号",
       "category": "checkbox",
-      "group": "?????",
+      "group": "常规勾选框",
       "type": "number",
       "min": 8,
       "max": 32,
       "step": 1,
       "unit": "fp",
-      "tooltip": "??? label ???????? label ???"
+      "tooltip": "勾选项 label 的字号，用于测量 label 宽度。"
     },
     {
       "path": "components.autoCheckbox.outerHeight",
-      "name": "?????????",
+      "name": "自动勾选框整体高度",
       "category": "checkbox",
-      "group": "???????",
+      "group": "自动布局勾选框",
       "type": "number",
       "min": 16,
       "max": 64,
       "step": 1,
       "unit": "vp",
-      "tooltip": "?????ALT???????????? 22 ????"
+      "tooltip": "自动布局（ALT）勾选框的整体高度（默认 22 紧凑）。"
     },
     {
       "path": "components.autoCheckbox.controlSize",
-      "name": "????????",
+      "name": "自动勾选控件边长",
       "category": "checkbox",
-      "group": "???????",
+      "group": "自动布局勾选框",
       "type": "number",
       "min": 8,
       "max": 48,
       "step": 1,
       "unit": "vp",
-      "tooltip": "?????ALT?????????"
+      "tooltip": "自动布局（ALT）勾选方框的边长。"
     },
     {
       "path": "components.autoCheckbox.controlMargin",
-      "name": "?????????",
+      "name": "自动勾选控件外边距",
       "category": "checkbox",
-      "group": "???????",
+      "group": "自动布局勾选框",
       "type": "number",
       "min": 0,
       "max": 16,
       "step": 1,
       "unit": "vp",
-      "tooltip": "?????ALT????????????"
+      "tooltip": "自动布局（ALT）勾选方框四周的外边距。"
     },
     {
       "path": "components.autoCheckbox.labelGap",
-      "name": "???????????",
+      "name": "自动勾选控件与文字间距",
       "category": "checkbox",
-      "group": "???????",
+      "group": "自动布局勾选框",
       "type": "number",
       "min": 0,
       "max": 32,
       "step": 1,
       "unit": "vp",
-      "tooltip": "?????ALT?????? label ????"
+      "tooltip": "自动布局（ALT）勾选方框与 label 的间距。"
     },
     {
       "path": "components.autoCheckbox.labelFontSize",
-      "name": "?????????",
+      "name": "自动勾选项文字字号",
       "category": "checkbox",
-      "group": "???????",
+      "group": "自动布局勾选框",
       "type": "number",
       "min": 8,
       "max": 32,
       "step": 1,
       "unit": "fp",
-      "tooltip": "?????ALT???? label ????"
+      "tooltip": "自动布局（ALT）勾选项 label 的字号。"
     },
     {
       "path": "components.autoCheckbox.minimumWidth",
-      "name": "?????????",
+      "name": "自动勾选框最小宽度",
       "category": "checkbox",
-      "group": "???????",
+      "group": "自动布局勾选框",
       "type": "number",
       "min": 16,
       "max": 120,
       "step": 1,
       "unit": "vp",
-      "tooltip": "?????ALT???????????????????+??+????"
+      "tooltip": "自动布局（ALT）勾选框的最小宽度，等于固定部分（控件 + 边距 + 间距）。"
     },
     {
       "path": "components.image.meta",
-      "name": "????????",
+      "name": "次要信息图标边长",
       "category": "image",
-      "group": "????",
+      "group": "图标尺寸",
       "type": "number",
       "min": 8,
       "max": 80,
       "step": 1,
       "unit": "vp",
-      "tooltip": "meta ????????"
+      "tooltip": "meta 角色图标的边长。"
     },
     {
       "path": "components.image.support",
-      "name": "??????",
+      "name": "辅助图标边长",
       "category": "image",
-      "group": "????",
+      "group": "图标尺寸",
       "type": "number",
       "min": 8,
       "max": 80,
       "step": 1,
       "unit": "vp",
-      "tooltip": "support ????????"
+      "tooltip": "support 角色图标的边长。"
     },
     {
       "path": "components.image.action",
-      "name": "??????",
+      "name": "动作图标边长",
       "category": "image",
-      "group": "????",
+      "group": "图标尺寸",
       "type": "number",
       "min": 8,
       "max": 80,
       "step": 1,
       "unit": "vp",
-      "tooltip": "action ????????"
+      "tooltip": "action 角色图标的边长。"
     },
     {
       "path": "components.image.asset",
-      "name": "????????",
+      "name": "普通素材图标边长",
       "category": "image",
-      "group": "????",
+      "group": "图标尺寸",
       "type": "number",
       "min": 8,
       "max": 80,
       "step": 1,
       "unit": "vp",
-      "tooltip": "asset ??????????"
+      "tooltip": "asset 角色素材图标的边长。"
     },
     {
       "path": "components.image.primary2x2",
-      "name": "2x2 ????",
+      "name": "2x2 主图边长",
       "category": "image",
-      "group": "????",
+      "group": "图标尺寸",
       "type": "number",
       "min": 16,
       "max": 120,
       "step": 1,
       "unit": "vp",
-      "tooltip": "2x2 ?? primary ??/???????"
+      "tooltip": "2x2 卡片 primary 主图/大图标的边长。"
     },
     {
       "path": "components.image.primary2x4",
-      "name": "2x4 ????",
+      "name": "2x4 主图边长",
       "category": "image",
-      "group": "????",
+      "group": "图标尺寸",
       "type": "number",
       "min": 16,
       "max": 120,
       "step": 1,
       "unit": "vp",
-      "tooltip": "2x4 ?? primary ??/???????"
+      "tooltip": "2x4 卡片 primary 主图/大图标的边长。"
     },
     {
       "path": "components.progress.ring2x2",
-      "name": "2x2 ??????",
+      "name": "2x2 环形进度边长",
       "category": "progress",
-      "group": "????",
+      "group": "进度组件",
       "type": "number",
       "min": 24,
       "max": 120,
       "step": 1,
       "unit": "vp",
-      "tooltip": "2x2 ??????????"
+      "tooltip": "2x2 卡片环形进度的边长。"
     },
     {
       "path": "components.progress.ring2x4",
-      "name": "2x4 ??????",
+      "name": "2x4 环形进度边长",
       "category": "progress",
-      "group": "????",
+      "group": "进度组件",
       "type": "number",
       "min": 24,
       "max": 120,
       "step": 1,
       "unit": "vp",
-      "tooltip": "2x4 ??????????"
+      "tooltip": "2x4 卡片环形进度的边长。"
     },
     {
       "path": "components.progress.linearHeight",
-      "name": "???????",
+      "name": "线性进度条高度",
       "category": "progress",
-      "group": "????",
+      "group": "进度组件",
       "type": "number",
       "min": 2,
       "max": 24,
       "step": 1,
       "unit": "vp",
-      "tooltip": "?????????"
+      "tooltip": "线性进度条的高度。"
     },
     {
       "path": "components.progress.linearMinimumWidth",
-      "name": "?????????",
+      "name": "线性进度条最小宽度",
       "category": "progress",
-      "group": "????",
+      "group": "进度组件",
       "type": "number",
       "min": 16,
       "max": 200,
       "step": 1,
       "unit": "vp",
-      "tooltip": "???????????"
+      "tooltip": "线性进度条的最小宽度。"
     },
     {
       "path": "components.divider.stroke",
-      "name": "?????",
+      "name": "分隔线粗细",
       "category": "divider",
-      "group": "???",
+      "group": "分隔线",
       "type": "string",
       "placeholder": "1px",
       "unit": "",
-      "tooltip": "??????????? 1px?"
+      "tooltip": "分隔线的描边宽度，例如 1px。"
     },
     {
       "path": "density.compactNodeThreshold2x2",
-      "name": "2x2 ??????",
+      "name": "2x2 紧凑节点阈值",
       "category": "general",
-      "group": "????",
+      "group": "密度切换",
       "type": "number",
       "min": 1,
       "max": 30,
       "step": 1,
-      "unit": "?",
-      "tooltip": "2x2 ??????????????????????/????"
+      "unit": "个",
+      "tooltip": "2x2 卡片节点数超过该值即切换为紧凑密度（更小字号/间距）。"
     },
     {
       "path": "density.compactNodeThreshold2x4",
-      "name": "2x4 ??????",
+      "name": "2x4 紧凑节点阈值",
       "category": "general",
-      "group": "????",
+      "group": "密度切换",
       "type": "number",
       "min": 1,
       "max": 40,
       "step": 1,
-      "unit": "?",
-      "tooltip": "2x4 ??????????????????"
+      "unit": "个",
+      "tooltip": "2x4 卡片节点数超过该值即切换为紧凑密度。"
     },
     {
       "path": "density.compactUnitsRatio",
-      "name": "????????",
+      "name": "紧凑文本占比阈值",
       "category": "general",
-      "group": "????",
+      "group": "密度切换",
       "type": "number",
       "min": 0.1,
       "max": 1.0,
       "step": 0.01,
       "unit": "",
-      "tooltip": "?????????? ? ????????????"
+      "tooltip": "可见文本单位超过上限 × 该比例时切换为紧凑密度。"
     },
     {
       "path": "column.centerMainRatio",
-      "name": "???????",
+      "name": "子节点居中比例",
       "category": "general",
-      "group": "???",
+      "group": "列布局",
       "type": "number",
       "min": 0.1,
       "max": 1.0,
       "step": 0.05,
       "unit": "",
-      "tooltip": "?????????????? ? ???????????????"
+      "tooltip": "子节点高度总和小于容器内容高 × 该值时垂直居中，否则顶部对齐。"
     },
     {
       "path": "column.bottomActionAnchorGap",
-      "name": "????????",
+      "name": "底部按钮锚定空距",
       "category": "general",
-      "group": "???",
+      "group": "列布局",
       "type": "number",
       "min": 0,
       "max": 48,
       "step": 1,
       "unit": "vp",
-      "tooltip": "???????????????????????????spaceBetween??"
+      "tooltip": "以按钮结尾且距容器底部空余超过该值时，按钮锚定到底部（spaceBetween）。"
     },
     {
       "path": "column.compactGapMinimum",
-      "name": "????",
+      "name": "最小间距",
       "category": "general",
-      "group": "???",
+      "group": "列布局",
       "type": "number",
       "min": 0,
       "max": 12,
       "step": 1,
       "unit": "vp",
-      "tooltip": "??????????? itemMargin ????????????"
+      "tooltip": "空间不足时允许压缩到的 itemMargin 下限，压缩步长同为该值。"
     },
     {
       "path": "tolerance.comparisonEpsilon",
-      "name": "??????",
+      "name": "数值比较容差",
       "category": "general",
-      "group": "????",
+      "group": "数值容差",
       "type": "number",
       "min": 0,
       "max": 1,
       "step": 0.01,
       "unit": "vp",
-      "tooltip": "????/????????????????????"
+      "tooltip": "所有溢出/放不下判定的浮点容差，避免浮点误差误报。"
     },
     {
       "path": "typography.primaryFontBands",
-      "name": "primary ????",
+      "name": "primary 字号档位",
       "category": "general",
-      "group": "?????",
+      "group": "字号自适应",
       "type": "bands",
-      "tooltip": "primary ??????????????????????????????????????"
+      "tooltip": "primary 角色按内容长度降档：超过对应宽度单位数即使用该字号。共三档，按阈值从大到小。"
     },
     {
       "path": "fontAdaptation.defaultMinSize",
-      "name": "??????",
+      "name": "回退最小字号",
       "category": "general",
-      "group": "??????",
+      "group": "字号适配回退",
       "type": "number",
       "min": 8,
       "max": 32,
       "step": 1,
       "unit": "fp",
-      "tooltip": "?????????????????????"
+      "tooltip": "角色缺少字号适配配置时使用的回退最小字号。"
     },
     {
       "path": "fontAdaptation.defaultStep",
-      "name": "??????",
+      "name": "回退降档步长",
       "category": "general",
-      "group": "??????",
+      "group": "字号适配回退",
       "type": "number",
       "min": 1,
       "max": 8,
       "step": 1,
       "unit": "fp",
-      "tooltip": "?????????????"
+      "tooltip": "字号逐档降低时的回退步长。"
     },
     {
       "path": "fontAdaptation.absoluteMinimumSize",
-      "name": "??????",
+      "name": "字号绝对下限",
       "category": "general",
-      "group": "??????",
+      "group": "字号适配回退",
       "type": "number",
       "min": 6,
       "max": 24,
       "step": 1,
       "unit": "fp",
-      "tooltip": "??????????????"
+      "tooltip": "任何角色的字号不得低于该值。"
     },
     {
       "path": "fontAdaptation.defaultMinSizeOffset",
-      "name": "????????",
+      "name": "回退最小字号偏移",
       "category": "general",
-      "group": "??????",
+      "group": "字号适配回退",
       "type": "number",
       "min": 0,
       "max": 8,
       "step": 1,
       "unit": "fp",
-      "tooltip": "?????? = max(??????, ???? - ??)?"
+      "tooltip": "回退最小字号 = max(回退最小字号, 首选字号 - 偏移)。"
     },
     {
       "path": "themeInference.luminanceWeights",
-      "name": "??????",
+      "name": "背景亮度权重",
       "category": "general",
-      "group": "????",
+      "group": "主题推断",
       "type": "json",
-      "tooltip": "????????? RGB ????/?/???JSON ???? [0.2126, 0.7152, 0.0722]?"
+      "tooltip": "计算背景相对亮度的 RGB 权重（红/绿/蓝），JSON 数组，如 [0.2126, 0.7152, 0.0722]。"
     },
     {
       "path": "themeInference.darkLuminanceThreshold",
-      "name": "????????",
+      "name": "深色主题亮度阈值",
       "category": "general",
-      "group": "????",
+      "group": "主题推断",
       "type": "number",
       "min": 0,
       "max": 1,
       "step": 0.01,
       "unit": "",
-      "tooltip": "????????????????focus-dark??"
+      "tooltip": "背景亮度低于该值判定为深色主题（focus-dark）。"
     },
     {
       "path": "themeInference.ambientChannelSpread",
-      "name": "????????",
+      "name": "彩色通道极差阈值",
       "category": "general",
-      "group": "????",
+      "group": "主题推断",
       "type": "number",
       "min": 0,
       "max": 255,
       "step": 1,
       "unit": "",
-      "tooltip": "RGB ???? ? ??????????ambient-light??"
+      "tooltip": "RGB 通道极差 ≥ 该值判定为彩色主题（ambient-light）。"
     },
     {
       "path": "themeInference.ambientMinChannel",
-      "name": "????????",
+      "name": "近白最小通道阈值",
       "category": "general",
-      "group": "????",
+      "group": "主题推断",
       "type": "number",
       "min": 0,
       "max": 255,
       "step": 1,
       "unit": "",
-      "tooltip": "RGB ????????????????ambient-light??"
+      "tooltip": "RGB 最小通道低于该值判定为彩色主题（ambient-light）。"
     }
   ]
 }

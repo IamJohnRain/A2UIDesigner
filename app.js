@@ -348,7 +348,7 @@
             converterSrc=converterSrc.replace(/\r?\nif __name__ == "__main__":\s*raise SystemExit\(main\(\)\)\s*$/,'');
             const cfg1=await (await fetch('scripts/config/alt-themes.json')).text();
             const cfg2=await (await fetch('scripts/config/alt-layout-profile.json')).text();
-            const cfg3=await (await fetch('scripts/config/alt-tuning.json')).text();
+            const cfg3=await (await fetch('scripts/config/alt-tuning.json?v=20260810')).text();
             cloudTuning=JSON.parse(cfg3);
             effectiveTuning=buildEffectiveTuning(cloudTuning,loadSavedTuning());
             const effectiveCfg3=JSON.stringify(effectiveTuning);
@@ -1024,7 +1024,7 @@
     setLlmStatus($('#llmSettingsStatus'),'配置已清除',false);
   };
 
-  // ---- ?????alt-tuning??? ----
+  // ---- 渲染参数（alt-tuning）设置 ----
   const TUNING_STORAGE_KEY='a2ui.tuning.v1';
   let cloudTuning=null;
   let effectiveTuning=null;
@@ -1074,8 +1074,8 @@
     if(!tuningMetaPromise){
       tuningMetaPromise=(async()=>{
         const [cfg3,meta]=await Promise.all([
-          fetch('scripts/config/alt-tuning.json').then(r=>r.json()),
-          fetch('scripts/config/alt-tuning.meta.json').then(r=>r.json()),
+          fetch('scripts/config/alt-tuning.json?v=20260810').then(r=>r.json()),
+          fetch('scripts/config/alt-tuning.meta.json?v=20260810').then(r=>r.json()),
         ]);
         cloudTuning=cfg3;
         tuningMeta=meta;
@@ -1122,9 +1122,9 @@
       const bands=Array.isArray(value)?value:[];
       inputHtml=`<div class="tuning-bands" data-kind="bands">`+bands.map((band,index)=>(
         `<span class="tuning-band">
-          <label>??</label>
+          <label>超过</label>
           <input class="tuning-input tuning-band-input" type="number" data-sub="${index}.aboveUnits" value="${band.aboveUnits}">
-          <label>?? ?</label>
+          <label>单位 →</label>
           <input class="tuning-input tuning-band-input" type="number" data-sub="${index}.fontSize" value="${band.fontSize}">
           <label>fp</label>
         </span>`
@@ -1139,11 +1139,11 @@
   function renderTuningForm(){
     const form=$('#tuningForm');
     form.innerHTML='';
-    if(!tuningMeta||!tuningMeta.categories||!tuningMeta.parameters){form.innerHTML='<div class="tuning-empty">???????????</div>';return}
+    if(!tuningMeta||!tuningMeta.categories||!tuningMeta.parameters){form.innerHTML='<div class="tuning-empty">渲染参数元数据未加载。</div>';return}
     const byCategory=new Map(tuningMeta.categories.map(c=>[c.id,{name:c.name,groups:new Map()}]));
     for(const p of tuningMeta.parameters){
       const cat=byCategory.get(p.category)||{name:p.category,groups:new Map()};
-      const groupName=p.group||'??';
+      const groupName=p.group||'其他';
       if(!cat.groups.has(groupName))cat.groups.set(groupName,[]);
       cat.groups.get(groupName).push(p);
     }
@@ -1161,7 +1161,7 @@
       }
       form.appendChild(section);
     }
-    $('#tuningMode').textContent=loadSavedTuning()?'????????????????':'??????';
+    $('#tuningMode').textContent=loadSavedTuning()?'使用本地配置（可重置为云端默认）':'使用云端默认';
   }
 
   function collectTuningValues(){
@@ -1174,16 +1174,16 @@
       const input=row.querySelector('.tuning-input');
       if(meta.type==='number'){
         const raw=input.value.trim();
-        if(raw===''){errors.push(meta.name+'?????');return}
+        if(raw===''){errors.push(meta.name+'：不能为空');return}
         const num=Number(raw);
-        if(!Number.isFinite(num)){errors.push(meta.name+'??????');return}
-        if(meta.min!=null&&num<meta.min){errors.push(meta.name+'????? '+meta.min);return}
-        if(meta.max!=null&&num>meta.max){errors.push(meta.name+'????? '+meta.max);return}
+        if(!Number.isFinite(num)){errors.push(meta.name+'：必须是数字');return}
+        if(meta.min!=null&&num<meta.min){errors.push(meta.name+'：不能小于 '+meta.min);return}
+        if(meta.max!=null&&num>meta.max){errors.push(meta.name+'：不能大于 '+meta.max);return}
         values[path]=num;
       }else if(meta.type==='string'){
         values[path]=input.value.trim();
       }else if(meta.type==='json'){
-        try{values[path]=JSON.parse(input.value)}catch(e){errors.push(meta.name+'?JSON ?????')}
+        try{values[path]=JSON.parse(input.value)}catch(e){errors.push(meta.name+'：JSON 格式不正确')}
       }else if(meta.type==='bands'){
         const bands=[];
         let ok=true;
@@ -1193,7 +1193,7 @@
           if(!Number.isFinite(above)||!Number.isFinite(size)){ok=false;return}
           bands.push({aboveUnits:above,fontSize:size});
         });
-        if(!ok){errors.push(meta.name+'????????');return}
+        if(!ok){errors.push(meta.name+'：档位必须是数字');return}
         values[path]=bands;
       }
     });
@@ -1209,25 +1209,25 @@
     effectiveTuning=buildEffectiveTuning(cloudTuning,values);
     renderTuningForm();
     syncTuningToRuntime().then(applied=>{
-      setLlmStatus(status,applied?'?????????????????':'??????????????????',false);
-      toast('???????');
+      setLlmStatus(status,applied?'已保存并注入运行时，重新编译后生效':'已保存到浏览器本地，下次编译自动生效',false);
+      toast('渲染参数已保存');
     }).catch(e=>{
-      setLlmStatus(status,'?????????????'+(e.message||e),true);
+      setLlmStatus(status,'已保存，但注入运行时失败：'+(e.message||e),true);
     });
   }
 
   function resetTuning(){
-    if(!confirm('?????????????????????????????'))return;
+    if(!confirm('确定恢复为云端默认渲染参数吗？本地保存的自定义值将被清除。'))return;
     localStorage.removeItem(TUNING_STORAGE_KEY);
     effectiveTuning=buildEffectiveTuning(cloudTuning,null);
     renderTuningForm();
     const status=$('#tuningStatus');
     status.hidden=true;
     syncTuningToRuntime().then(applied=>{
-      setLlmStatus(status,applied?'?????????????????????':'????????????????',false);
-      toast('???????');
+      setLlmStatus(status,applied?'已恢复云端默认并注入运行时，重新编译后生效':'已恢复云端默认，下次编译自动生效',false);
+      toast('渲染参数已重置');
     }).catch(e=>{
-      setLlmStatus(status,'?????????????'+(e.message||e),true);
+      setLlmStatus(status,'已重置，但注入运行时失败：'+(e.message||e),true);
     });
   }
 
@@ -1248,7 +1248,7 @@
         if(!$('#tuningForm').children.length)renderTuningForm();
       }).catch(e=>{
         const status=$('#tuningStatus');status.hidden=false;
-        setLlmStatus(status,'?????????'+(e.message||e),true);
+        setLlmStatus(status,'渲染参数加载失败：'+(e.message||e),true);
       });
     }
   }
