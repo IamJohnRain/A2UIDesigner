@@ -349,13 +349,16 @@
             const cfg1=await (await fetch('scripts/config/alt-themes.json')).text();
             const cfg2=await (await fetch('scripts/config/alt-layout-profile.json')).text();
             const cfg3=await (await fetch('scripts/config/alt-tuning.json')).text();
+            cloudTuning=JSON.parse(cfg3);
+            effectiveTuning=buildEffectiveTuning(cloudTuning,loadSavedTuning());
+            const effectiveCfg3=JSON.stringify(effectiveTuning);
             await py.runPythonAsync(converterSrc);
-            await py.runPythonAsync(`import json; configure_runtime(${JSON.stringify(cfg1)},${JSON.stringify(cfg2)},${JSON.stringify(cfg3)})`);
+            await py.runPythonAsync(`import json; configure_runtime(${JSON.stringify(cfg1)},${JSON.stringify(cfg2)},${JSON.stringify(effectiveCfg3)})`);
             const builderSrc=await (await fetch('scripts/taskspec_to_alt_chat_completions.py')).text();
             const builderCode=prepareAltPromptBuilder(builderSrc);
             py.globals.set('_CFG_THEMES',cfg1);
             py.globals.set('_CFG_LAYOUT',cfg2);
-            py.globals.set('_CFG_TUNING',cfg3);
+            py.globals.set('_CFG_TUNING',effectiveCfg3);
             await py.runPythonAsync(builderCode);
             return py;
           }catch(e){lastError=e;}
@@ -984,12 +987,13 @@
     $('#llmMasterPasswordConfirm').value='';
     $('#llmVendorPreset').value='';
     $('#llmSettingsStatus').hidden=true;
-    $('#llmSettingsDialog').hidden=false;
+    switchSettingsTab('llm');
+    $('#settingsDialog').hidden=false;
   }
   $('#llmSettingsBtn').onclick=openLlmSettings;
-  $('#llmCloseSettings').onclick=()=>{$('#llmSettingsDialog').hidden=true};
-  $('#llmCancelSettings').onclick=()=>{$('#llmSettingsDialog').hidden=true};
-  $('#llmSettingsDialog').onclick=e=>{if(e.target===$('#llmSettingsDialog'))$('#llmSettingsDialog').hidden=true};
+  $('#settingsClose').onclick=()=>{$('#settingsDialog').hidden=true};
+  $('#llmCancelSettings').onclick=()=>{$('#settingsDialog').hidden=true};
+  $('#settingsDialog').onclick=e=>{if(e.target===$('#settingsDialog'))$('#settingsDialog').hidden=true};
   $('#llmSaveConfig').onclick=async()=>{
     const baseURL=$('#llmBaseURL').value.trim(),model=$('#llmModel').value.trim(),apiKey=$('#llmApiKey').value,pwd=$('#llmMasterPassword').value,confirmPwd=$('#llmMasterPasswordConfirm').value;
     const status=$('#llmSettingsStatus');
@@ -1019,4 +1023,238 @@
     $('#llmMasterPasswordConfirm').value='';
     setLlmStatus($('#llmSettingsStatus'),'配置已清除',false);
   };
+
+  // ---- ?????alt-tuning??? ----
+  const TUNING_STORAGE_KEY='a2ui.tuning.v1';
+  let cloudTuning=null;
+  let effectiveTuning=null;
+  let tuningMeta=null;
+  let tuningMetaPromise=null;
+
+  function deepCloneTuning(value){
+    return JSON.parse(JSON.stringify(value));
+  }
+
+  function getTuningPath(obj,path){
+    let node=obj;
+    for(const part of path.split('.')){
+      if(node==null||typeof node!=='object'||!(part in node))return undefined;
+      node=node[part];
+    }
+    return node;
+  }
+  function setTuningPath(obj,path,value){
+    const parts=path.split('.');let node=obj;
+    for(let i=0;i<parts.length-1;i++){
+      if(node[parts[i]]==null||typeof node[parts[i]]!=='object')node[parts[i]]={};
+      node=node[parts[i]];
+    }
+    node[parts[parts.length-1]]=value;
+  }
+
+  function loadSavedTuning(){
+    try{
+      const raw=localStorage.getItem(TUNING_STORAGE_KEY);
+      if(!raw)return null;
+      const data=JSON.parse(raw);
+      if(!data||data.version!==1||!data.values||typeof data.values!=='object'||Array.isArray(data.values))return null;
+      return data.values;
+    }catch(e){return null}
+  }
+
+  function buildEffectiveTuning(cloud,saved){
+    const effective=deepCloneTuning(cloud);
+    if(saved){
+      for(const key of Object.keys(saved))setTuningPath(effective,key,saved[key]);
+    }
+    return effective;
+  }
+
+  function loadTuningAssets(){
+    if(!tuningMetaPromise){
+      tuningMetaPromise=(async()=>{
+        const [cfg3,meta]=await Promise.all([
+          fetch('scripts/config/alt-tuning.json').then(r=>r.json()),
+          fetch('scripts/config/alt-tuning.meta.json').then(r=>r.json()),
+        ]);
+        cloudTuning=cfg3;
+        tuningMeta=meta;
+        effectiveTuning=buildEffectiveTuning(cloudTuning,loadSavedTuning());
+        return {cloudTuning,meta};
+      })();
+    }
+    return tuningMetaPromise;
+  }
+
+  async function applyTuningToRuntime(){
+    const py=await ensurePyodide();
+    const effectiveCfg3=JSON.stringify(effectiveTuning);
+    await py.runPythonAsync(`import json; configure_runtime(None,None,${JSON.stringify(effectiveCfg3)})`);
+    py.globals.set('_CFG_TUNING',effectiveCfg3);
+    await py.runPythonAsync('import json; TUNING=json.loads(_CFG_TUNING)');
+    return true;
+  }
+
+  function syncTuningToRuntime(){
+    if(!pyodidePromise)return Promise.resolve(false);
+    return applyTuningToRuntime();
+  }
+
+  function tuningValueFor(meta){
+    return getTuningPath(effectiveTuning||{},meta.path);
+  }
+
+  function renderTuningParam(p){
+    const row=document.createElement('div');
+    row.className='tuning-row';
+    row.dataset.path=p.path;
+    const value=tuningValueFor(p);
+    const unit=p.unit?`<span class="tuning-unit">${escapeHtml(p.unit)}</span>`:'';
+    const tip=p.tooltip?`<span class="tuning-tip" tabindex="0" data-tip="${escapeHtml(p.tooltip)}" aria-label="${escapeHtml(p.tooltip)}">?</span>`:'';
+    let inputHtml='';
+    if(p.type==='number'){
+      inputHtml=`<input class="tuning-input" type="number" data-kind="number" min="${p.min==null?'':p.min}" max="${p.max==null?'':p.max}" step="any" value="${value==null?'':value}">`;
+    }else if(p.type==='string'){
+      inputHtml=`<input class="tuning-input" type="text" data-kind="string" placeholder="${p.placeholder||''}" value="${escapeHtml(String(value==null?'':value))}">`;
+    }else if(p.type==='json'){
+      inputHtml=`<textarea class="tuning-input tuning-textarea" data-kind="json" rows="2" spellcheck="false">${escapeHtml(value==null?'':JSON.stringify(value))}</textarea>`;
+    }else if(p.type==='bands'){
+      const bands=Array.isArray(value)?value:[];
+      inputHtml=`<div class="tuning-bands" data-kind="bands">`+bands.map((band,index)=>(
+        `<span class="tuning-band">
+          <label>??</label>
+          <input class="tuning-input tuning-band-input" type="number" data-sub="${index}.aboveUnits" value="${band.aboveUnits}">
+          <label>?? ?</label>
+          <input class="tuning-input tuning-band-input" type="number" data-sub="${index}.fontSize" value="${band.fontSize}">
+          <label>fp</label>
+        </span>`
+      )).join('')+`</div>`;
+    }else{
+      inputHtml=`<span class="tuning-readonly">${escapeHtml(String(value==null?'':value))}</span>`;
+    }
+    row.innerHTML=`<span class="tuning-label"><span class="tuning-name">${escapeHtml(p.name)}</span>${tip}</span><span class="tuning-control">${unit}${inputHtml}</span>`;
+    return row;
+  }
+
+  function renderTuningForm(){
+    const form=$('#tuningForm');
+    form.innerHTML='';
+    if(!tuningMeta||!tuningMeta.categories||!tuningMeta.parameters){form.innerHTML='<div class="tuning-empty">???????????</div>';return}
+    const byCategory=new Map(tuningMeta.categories.map(c=>[c.id,{name:c.name,groups:new Map()}]));
+    for(const p of tuningMeta.parameters){
+      const cat=byCategory.get(p.category)||{name:p.category,groups:new Map()};
+      const groupName=p.group||'??';
+      if(!cat.groups.has(groupName))cat.groups.set(groupName,[]);
+      cat.groups.get(groupName).push(p);
+    }
+    for(const cat of tuningMeta.categories){
+      const data=byCategory.get(cat.id);if(!data)continue;
+      const section=document.createElement('section');
+      section.className='tuning-section';
+      section.innerHTML=`<h4>${escapeHtml(cat.name)}</h4>`;
+      for(const [groupName,params] of data.groups){
+        const group=document.createElement('div');
+        group.className='tuning-group';
+        group.innerHTML=`<h5>${escapeHtml(groupName)}</h5>`;
+        for(const p of params)group.appendChild(renderTuningParam(p));
+        section.appendChild(group);
+      }
+      form.appendChild(section);
+    }
+    $('#tuningMode').textContent=loadSavedTuning()?'????????????????':'??????';
+  }
+
+  function collectTuningValues(){
+    const values={};
+    const errors=[];
+    document.querySelectorAll('#tuningForm .tuning-row').forEach(row=>{
+      const path=row.dataset.path;
+      const meta=(tuningMeta.parameters||[]).find(p=>p.path===path);
+      if(!meta)return;
+      const input=row.querySelector('.tuning-input');
+      if(meta.type==='number'){
+        const raw=input.value.trim();
+        if(raw===''){errors.push(meta.name+'?????');return}
+        const num=Number(raw);
+        if(!Number.isFinite(num)){errors.push(meta.name+'??????');return}
+        if(meta.min!=null&&num<meta.min){errors.push(meta.name+'????? '+meta.min);return}
+        if(meta.max!=null&&num>meta.max){errors.push(meta.name+'????? '+meta.max);return}
+        values[path]=num;
+      }else if(meta.type==='string'){
+        values[path]=input.value.trim();
+      }else if(meta.type==='json'){
+        try{values[path]=JSON.parse(input.value)}catch(e){errors.push(meta.name+'?JSON ?????')}
+      }else if(meta.type==='bands'){
+        const bands=[];
+        let ok=true;
+        row.querySelectorAll('.tuning-band').forEach(band=>{
+          const above=Number(band.querySelector('[data-sub$=".aboveUnits"]').value);
+          const size=Number(band.querySelector('[data-sub$=".fontSize"]').value);
+          if(!Number.isFinite(above)||!Number.isFinite(size)){ok=false;return}
+          bands.push({aboveUnits:above,fontSize:size});
+        });
+        if(!ok){errors.push(meta.name+'????????');return}
+        values[path]=bands;
+      }
+    });
+    return {values,errors};
+  }
+
+  function saveTuning(){
+    const status=$('#tuningStatus');
+    status.hidden=true;
+    const {values,errors}=collectTuningValues();
+    if(errors.length){setLlmStatus(status,errors[0],true);return}
+    localStorage.setItem(TUNING_STORAGE_KEY,JSON.stringify({version:1,savedAt:new Date().toISOString(),values}));
+    effectiveTuning=buildEffectiveTuning(cloudTuning,values);
+    renderTuningForm();
+    syncTuningToRuntime().then(applied=>{
+      setLlmStatus(status,applied?'?????????????????':'??????????????????',false);
+      toast('???????');
+    }).catch(e=>{
+      setLlmStatus(status,'?????????????'+(e.message||e),true);
+    });
+  }
+
+  function resetTuning(){
+    if(!confirm('?????????????????????????????'))return;
+    localStorage.removeItem(TUNING_STORAGE_KEY);
+    effectiveTuning=buildEffectiveTuning(cloudTuning,null);
+    renderTuningForm();
+    const status=$('#tuningStatus');
+    status.hidden=true;
+    syncTuningToRuntime().then(applied=>{
+      setLlmStatus(status,applied?'?????????????????????':'????????????????',false);
+      toast('???????');
+    }).catch(e=>{
+      setLlmStatus(status,'?????????????'+(e.message||e),true);
+    });
+  }
+
+  function switchSettingsTab(tab){
+    const llm=tab==='llm';
+    $('#settingsTabLlm').classList.toggle('active',llm);
+    $('#settingsTabTuning').classList.toggle('active',!llm);
+    $('#settingsTabLlm').setAttribute('aria-selected',String(llm));
+    $('#settingsTabTuning').setAttribute('aria-selected',String(!llm));
+    $('#settingsPanelLlm').hidden=!llm;
+    $('#settingsPanelTuning').hidden=llm;
+    $('#llmClearConfig').hidden=!llm;
+    $('#llmSaveConfig').hidden=!llm;
+    $('#tuningReset').hidden=llm;
+    $('#tuningSave').hidden=llm;
+    if(!llm){
+      loadTuningAssets().then(()=>{
+        if(!$('#tuningForm').children.length)renderTuningForm();
+      }).catch(e=>{
+        const status=$('#tuningStatus');status.hidden=false;
+        setLlmStatus(status,'?????????'+(e.message||e),true);
+      });
+    }
+  }
+
+  $('#settingsTabLlm').onclick=()=>switchSettingsTab('llm');
+  $('#settingsTabTuning').onclick=()=>switchSettingsTab('tuning');
+  $('#tuningSave').onclick=saveTuning;
+  $('#tuningReset').onclick=resetTuning;
 })();

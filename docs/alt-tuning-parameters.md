@@ -5,6 +5,7 @@
 包括文本测量安全系数、组件几何尺寸、密度切换阈值、列布局阈值、数值容差与主题推断阈值。
 
 代码通过 `tuning_value("section.key", default)` 读取参数；`default` 与旧硬编码值一致，
+前端设置界面所需的参数元数据（中文名、分类、说明、控件类型）位于 `scripts/config/alt-tuning.meta.json`。
 因此删除某个 key 不会静默改变行为，只会回退到默认值。布局结构规则（canvas / limits /
 spacing / textRules / typography）仍在 `alt-layout-profile.json`，主题色 token 仍在
 `alt-themes.json`。
@@ -18,6 +19,7 @@ spacing / textRules / typography）仍在 `alt-layout-profile.json`，主题色 
 | `text.lineHeightPadding` | 4.0 | 行高纵向余量：`行高 = 字号 + lineHeightPadding`（vp），用于 `maxLines` 高度预算。 |
 | `text.minimumWidthChars` | 2.0 | 文本最小宽度 = 最小可用字号 × 该值（约等于“至少两个字”的宽度下限）。 |
 | `text.longTextUnitsThreshold` | 6.0 | 长文本判定阈值：`maxLines > 1` 只在内容单位数超过该值时才生效；短文本强制单行。 |
+| `text.unitRoundDigits` | 1 | 生成模型提示词时，字段 sample 宽度单位保留的小数位数。 |
 | `text.weightFactorDivisor` | 5000.0 | 字重系数分母：`1 + max(0, 字重 − 400) / divisor`。决定加粗对预估宽度的放大程度。 |
 | `text.unitWeights.space` | 0.35 | 空格字符的宽度单位。 |
 | `text.unitWeights.cjk` | 1.0 | 全角/中日韩字符（East Asian W/F）的宽度单位。 |
@@ -35,6 +37,8 @@ spacing / textRules / typography）仍在 `alt-layout-profile.json`，主题色 
 | --- | --- | --- |
 | `button.charsHorizontalReserve` | 24.0 | 按钮横向预留（vp）：计算 `chars` 容量（`floor((宽 − reserve) / 字号)`）和 label 宽度校验（`文本宽 + reserve`）时扣除的固定内边距。 |
 | `button.labelFontFallback` | 16.0 | 兼容路径下 Button 缺少 `font` 属性时，测量 label 使用的回退字号。 |
+| `button.intrinsicHeightMinimum` | 32.0 | 兼容路径校验按钮高度时使用的固有最小高度。 |
+| `button.intrinsicHeightReserve` | 16.0 | 按钮固有最小高度 = max(最小高度, 字号 + 该预留)。 |
 
 ## components —— 组件几何尺寸
 
@@ -130,6 +134,7 @@ compact 密度会使用 `alt-layout-profile.json` 的 `typography.compact` 字�
 | `fontAdaptation.defaultMinSize` | 10 | 回退最小字号（fp），与 `preferred − 4` 取较大者。 |
 | `fontAdaptation.defaultStep` | 2 | 回退降档步长（fp）。 |
 | `fontAdaptation.absoluteMinimumSize` | 8 | 字号绝对下限（fp），任何角色不得低于该值。 |
+| `fontAdaptation.defaultMinSizeOffset` | 4 | 回退最小字号 = max(回退最小字号, 首选字号 − 偏移)。 |
 
 ## themeInference —— 兼容 ALT 主题推断
 

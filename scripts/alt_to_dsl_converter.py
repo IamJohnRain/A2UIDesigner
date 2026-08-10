@@ -258,7 +258,9 @@ def _derive_tuning_constants() -> None:
     global BUTTON_CHARS_RESERVE, BUTTON_LABEL_FONT_FALLBACK, COLUMN_CENTER_MAIN_RATIO
     global COLUMN_BOTTOM_ACTION_ANCHOR_GAP, COLUMN_COMPACT_GAP_MINIMUM, PRIMARY_FONT_BANDS
     global FONT_ADAPTATION_DEFAULT_MIN_SIZE, FONT_ADAPTATION_DEFAULT_STEP
-    global FONT_ADAPTATION_ABSOLUTE_MIN_SIZE, THEME_LUMINANCE_WEIGHTS
+    global FONT_ADAPTATION_ABSOLUTE_MIN_SIZE, FONT_ADAPTATION_DEFAULT_MIN_SIZE_OFFSET
+    global BUTTON_INTRINSIC_HEIGHT_MINIMUM, BUTTON_INTRINSIC_HEIGHT_RESERVE
+    global THEME_LUMINANCE_WEIGHTS
     global THEME_DARK_LUMINANCE_THRESHOLD, THEME_AMBIENT_CHANNEL_SPREAD
     global THEME_AMBIENT_MIN_CHANNEL, AUTO_THEMES
     EPSILON = float(tuning_value("tolerance.comparisonEpsilon", 0.01))
@@ -270,6 +272,8 @@ def _derive_tuning_constants() -> None:
     TEXT_UNIT_WEIGHTS = tuning_value("text.unitWeights", {}) or {}
     BUTTON_CHARS_RESERVE = float(tuning_value("button.charsHorizontalReserve", 24.0))
     BUTTON_LABEL_FONT_FALLBACK = float(tuning_value("button.labelFontFallback", 16.0))
+    BUTTON_INTRINSIC_HEIGHT_MINIMUM = float(tuning_value("button.intrinsicHeightMinimum", 32.0))
+    BUTTON_INTRINSIC_HEIGHT_RESERVE = float(tuning_value("button.intrinsicHeightReserve", 16.0))
     COLUMN_CENTER_MAIN_RATIO = float(tuning_value("column.centerMainRatio", 0.7))
     COLUMN_BOTTOM_ACTION_ANCHOR_GAP = float(tuning_value("column.bottomActionAnchorGap", 18.0))
     COLUMN_COMPACT_GAP_MINIMUM = float(tuning_value("column.compactGapMinimum", 2.0))
@@ -284,6 +288,7 @@ def _derive_tuning_constants() -> None:
     FONT_ADAPTATION_DEFAULT_MIN_SIZE = int(tuning_value("fontAdaptation.defaultMinSize", 10))
     FONT_ADAPTATION_DEFAULT_STEP = int(tuning_value("fontAdaptation.defaultStep", 2))
     FONT_ADAPTATION_ABSOLUTE_MIN_SIZE = float(tuning_value("fontAdaptation.absoluteMinimumSize", 8))
+    FONT_ADAPTATION_DEFAULT_MIN_SIZE_OFFSET = float(tuning_value("fontAdaptation.defaultMinSizeOffset", 4.0))
     THEME_LUMINANCE_WEIGHTS = tuning_value(
         "themeInference.luminanceWeights", [0.2126, 0.7152, 0.0722]
     )
@@ -1716,8 +1721,8 @@ def validate_auto_protocol(document: AltDocument, task_size: str | None = None) 
 def node_box(
     node: AltNode,
     intrinsic: bool = True,
-    checkbox_min_height: float = 48.0,
-    checkbox_min_width: float = 36.0,
+    checkbox_min_height: float | None = None,
+    checkbox_min_width: float | None = None,
 ) -> tuple[float | None, float | None]:
     if "size" in node.attrs:
         size = numeric_dimension(node.attrs["size"])
@@ -1729,6 +1734,17 @@ def node_box(
     else:
         width = height = None
     if intrinsic and node.component == "Checkbox":
+        if checkbox_min_height is None or checkbox_min_width is None:
+            legacy_profile = checkbox_layout_profile(automatic=False)
+            checkbox_min_height = float(legacy_profile.get("outerHeight", 48))
+            checkbox_min_width = float(
+                legacy_profile.get(
+                    "minimumWidth",
+                    float(legacy_profile.get("controlSize", 20))
+                    + float(legacy_profile.get("controlMargin", 2)) * 2
+                    + float(legacy_profile.get("labelGap", 12)),
+                )
+            )
         height = max(height or 0.0, checkbox_min_height)
         width = max(width or 0.0, checkbox_min_width)
     return width, height
@@ -1853,7 +1869,10 @@ def validate_layout(
                             f"Button chars={chars} exceeds box/font capacity {capacity}",
                         )
                     )
-            minimum = max(32.0, font_size + 16.0)
+            minimum = max(
+                BUTTON_INTRINSIC_HEIGHT_MINIMUM,
+                font_size + BUTTON_INTRINSIC_HEIGHT_RESERVE,
+            )
             if height is not None and height < minimum:
                 issues.append(
                     ValidationIssue(
@@ -2738,11 +2757,17 @@ def text_font_candidates(role: str, content: str, density: str) -> list[int]:
         minimum = int(
             config.get(
                 "minSize",
-                max(FONT_ADAPTATION_DEFAULT_MIN_SIZE, preferred - 4),
+                max(
+                    FONT_ADAPTATION_DEFAULT_MIN_SIZE,
+                    preferred - FONT_ADAPTATION_DEFAULT_MIN_SIZE_OFFSET,
+                ),
             )
         )
     except (TypeError, ValueError):
-        minimum = max(FONT_ADAPTATION_DEFAULT_MIN_SIZE, preferred - 4)
+        minimum = max(
+            FONT_ADAPTATION_DEFAULT_MIN_SIZE,
+            preferred - FONT_ADAPTATION_DEFAULT_MIN_SIZE_OFFSET,
+        )
     try:
         step = max(1, int(config.get("step", FONT_ADAPTATION_DEFAULT_STEP)))
     except (TypeError, ValueError):

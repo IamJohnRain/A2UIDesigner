@@ -529,21 +529,29 @@ def read_pointer(root: Any, pointer: str) -> Any:
 
 
 def equivalent_text_units(value: str) -> float:
+    unit_weights = TUNING.get("text", {}).get("unitWeights", {})
+    if not isinstance(unit_weights, dict):
+        unit_weights = {}
     units = 0.0
     for character in value:
         if character.isspace():
-            units += 0.35
+            units += float(unit_weights.get("space", 0.35))
         elif unicodedata.east_asian_width(character) in {"W", "F"}:
-            units += 1.0
+            units += float(unit_weights.get("cjk", 1.0))
         elif character.isupper():
-            units += 0.68
+            units += float(unit_weights.get("upper", 0.68))
         elif character.islower():
-            units += 0.56
+            units += float(unit_weights.get("lower", 0.56))
         elif character.isdigit():
-            units += 0.62
+            units += float(unit_weights.get("digit", 0.62))
         else:
-            units += 0.45
-    return round(units, 1)
+            units += float(unit_weights.get("other", 0.45))
+    round_digits = 1
+    if isinstance(TUNING, dict):
+        text_config = TUNING.get("text", {})
+        if isinstance(text_config, dict) and isinstance(text_config.get("unitRoundDigits"), int):
+            round_digits = text_config["unitRoundDigits"]
+    return round(units, round_digits)
 
 
 def schema_field_summaries(schema: Any, pointer: str = "") -> list[dict[str, Any]]:

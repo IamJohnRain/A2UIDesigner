@@ -78,7 +78,7 @@
       <div class="stage-toolbar">
         <div><h2>画布</h2><p>拖拽排序，拖动边框改变大小</p></div>
         <div class="stage-toolbar-actions">
-          <button id="llmSettingsBtn" class="icon-btn" title="大模型设置（BYOK，Key 加密存储）">⚙</button>
+          <button id="llmSettingsBtn" class="icon-btn" title="????????????">⚙</button>
           <div class="zoom"><button id="zoomOut">−</button><span id="zoomLabel">200%</span><button id="zoomIn">＋</button></div>
         </div>
       </div>
@@ -130,44 +130,61 @@
       <footer><button id="cancelAssetDialog" class="secondary" type="button">取消</button><button id="insertAssetBtn" class="primary" type="button" disabled>插入图片</button></footer>
     </section>
   </div>
-  <div id="llmSettingsDialog" class="modal-backdrop" hidden>
-    <section class="llm-dialog" role="dialog" aria-modal="true" aria-labelledby="llmSettingsTitle">
+  <div id="settingsDialog" class="modal-backdrop" hidden>
+    <section class="llm-dialog settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
       <header>
-        <div><h2 id="llmSettingsTitle">大模型设置</h2><p>BaseURL / 模型 / API Key 自行配置（BYOK），Key 使用 WebCrypto 加密后仅存浏览器本地。</p></div>
-        <button id="llmCloseSettings" class="icon-btn" type="button" aria-label="关闭">×</button>
+        <div><h2 id="settingsTitle">??</h2><p>???????????????????????????????????</p></div>
+        <button id="settingsClose" class="icon-btn" type="button" aria-label="??">?</button>
       </header>
-      <div class="llm-body">
-        <label class="llm-field"><span>厂商预设</span>
-          <select id="llmVendorPreset"><option value="">自定义（默认）</option></select>
-        </label>
-        <label class="llm-field"><span>BaseURL</span>
-          <input id="llmBaseURL" type="text" placeholder="https://api.deepseek.com/v1" spellcheck="false">
-          <small>请求将发往 ${baseURL}/chat/completions；若已填写完整地址会自动去重。</small>
-        </label>
-        <label class="llm-field"><span>模型名</span>
-          <input id="llmModel" type="text" placeholder="deepseek-chat" spellcheck="false">
-        </label>
-        <label class="llm-field"><span>API Key</span>
-          <input id="llmApiKey" type="password" autocomplete="off" placeholder="sk-...">
-        </label>
-        <label class="llm-field"><span>主口令（用于派生加密密钥）</span>
-          <input id="llmMasterPassword" type="password" autocomplete="new-password">
-        </label>
-        <label class="llm-field"><span>确认主口令</span>
-          <input id="llmMasterPasswordConfirm" type="password" autocomplete="new-password">
-        </label>
-        <p class="llm-tip">口令不会落盘：保存时用 PBKDF2 派生 AES-GCM 密钥加密 API Key，密文存 localStorage。每次会话首次生成时会要求输入口令解锁，解密后的 Key 只留在内存。口令丢失后密文无法恢复，只能清除配置重新设置。</p>
-        <div id="llmSettingsStatus" class="llm-status" hidden></div>
+      <div class="settings-tabs" role="tablist" aria-label="????">
+        <button id="settingsTabLlm" class="settings-tab active" role="tab" aria-selected="true" type="button">?????</button>
+        <button id="settingsTabTuning" class="settings-tab" role="tab" aria-selected="false" type="button">????</button>
+      </div>
+      <div id="settingsPanelLlm" class="settings-panel" role="tabpanel">
+        <div class="llm-body">
+          <label class="llm-field"><span>????</span>
+            <select id="llmVendorPreset"><option value="">???????</option></select>
+          </label>
+          <label class="llm-field"><span>BaseURL</span>
+            <input id="llmBaseURL" type="text" placeholder="https://api.deepseek.com/v1" spellcheck="false">
+            <small>????? ${baseURL}/chat/completions???????????????</small>
+          </label>
+          <label class="llm-field"><span>???</span>
+            <input id="llmModel" type="text" placeholder="deepseek-chat" spellcheck="false">
+          </label>
+          <label class="llm-field"><span>API Key</span>
+            <input id="llmApiKey" type="password" autocomplete="off" placeholder="sk-...">
+          </label>
+          <label class="llm-field"><span>?????????????</span>
+            <input id="llmMasterPassword" type="password" autocomplete="new-password">
+          </label>
+          <label class="llm-field"><span>?????</span>
+            <input id="llmMasterPasswordConfirm" type="password" autocomplete="new-password">
+          </label>
+          <p class="llm-tip">??????????? PBKDF2 ?? AES-GCM ???? API Key???? localStorage???????????????????????? Key ?????????????????????????????</p>
+          <div id="llmSettingsStatus" class="llm-status" hidden></div>
+        </div>
+      </div>
+      <div id="settingsPanelTuning" class="settings-panel" role="tabpanel" hidden>
+        <div class="tuning-head">
+          <span id="tuningMode" class="tuning-mode">??????</span>
+          <span class="tuning-head-note">????????????????????????????????????</span>
+        </div>
+        <div id="tuningForm" class="tuning-form"></div>
+        <div id="tuningStatus" class="llm-status" hidden></div>
       </div>
       <footer>
-        <button id="llmClearConfig" class="secondary" type="button">清除配置</button>
+        <button id="llmClearConfig" class="secondary" type="button">????</button>
+        <button id="tuningReset" class="secondary" type="button" hidden>???????</button>
         <span class="llm-footer-grow"></span>
-        <button id="llmCancelSettings" class="secondary" type="button">取消</button>
-        <button id="llmSaveConfig" class="primary" type="button">保存</button>
+        <button id="llmCancelSettings" class="secondary" type="button">??</button>
+        <button id="llmSaveConfig" class="primary" type="button">??</button>
+        <button id="tuningSave" class="primary" type="button" hidden>??</button>
       </footer>
     </section>
   </div>
-  <div id="llmUnlockDialog" class="modal-backdrop" hidden>
+
+<div id="llmUnlockDialog" class="modal-backdrop" hidden>
     <section class="llm-dialog llm-unlock-dialog" role="dialog" aria-modal="true" aria-labelledby="llmUnlockTitle">
       <header>
         <div><h2 id="llmUnlockTitle">输入主口令</h2><p>解密 API Key 用于本次会话，明文 Key 仅保存在内存。</p></div>
